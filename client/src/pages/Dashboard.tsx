@@ -112,7 +112,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 
 export default function Dashboard() {
   const { socket, onlineUsers } = useSocket();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const conversationsRef = useRef(conversations);
@@ -167,7 +167,7 @@ export default function Dashboard() {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: 'Bearer ' + localStorage.getItem('token'),
+              Authorization: 'Bearer ' + localStorage.getItem('echoza-token'),
             },
             body: JSON.stringify(sub.toJSON()),
           });
@@ -413,8 +413,7 @@ export default function Dashboard() {
 
   const handleProfileUpdate = (newUsername: string, newAvatar: string) => {
     if (user) {
-      user.username = newUsername;
-      user.avatar = newAvatar;
+      updateUser({ username: newUsername, avatar: newAvatar });
     }
   };
 
