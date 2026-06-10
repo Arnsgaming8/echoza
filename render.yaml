@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: echoza
+    runtime: node
+    repo: https://github.com/YOUR_USERNAME/echoza
+    plan: free
+    buildCommand: npm install --prefix client && npm run build --prefix client && npm run build --prefix server
+    startCommand: node server/dist/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        generateValue: true

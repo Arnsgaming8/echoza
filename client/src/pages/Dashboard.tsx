@@ -1,0 +1,430 @@
+import { useState, useEffect, useRef, useCallback } from 'react';
+import styled from 'styled-components';
+import Sidebar from '../components/chat/Sidebar/Sidebar';
+import TopBar from '../components/chat/TopBar/TopBar';
+import MessageBubble from '../components/chat/MessageBubble/MessageBubble';
+import ChatInput from '../components/chat/ChatInput/ChatInput';
+import TypingIndicator from '../components/chat/TypingIndicator/TypingIndicator';
+import AudioCallUI from '../components/call/AudioCallUI/AudioCallUI';
+import VideoCallUI from '../components/call/VideoCallUI/VideoCallUI';
+import ConversationModal from '../components/chat/ConversationModal';
+import ProfileEditModal from '../components/chat/ProfileEditModal';
+import { useSocket } from '../contexts/SocketContext';
+import { useAuth } from '../contexts/AuthContext';
+import { FiMessageSquare } from 'react-icons/fi';
+
+interface Attachment {
+  name: string;
+  type: 'image' | 'video' | 'file';
+  mime: string;
+  size: number;
+  data?: string;
+}
+
+interface Contact {
+  id: string;
+  username: string;
+  avatar: string;
+  online: boolean;
+}
+
+interface Conversation {
+  id: string;
+  isGroup?: boolean;
+  contact?: Contact;
+  groupName?: string;
+  members?: Contact[];
+  lastMessage: string;
+  lastTime: string;
+  unread: number;
+}
+
+interface Message {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  senderUsername?: string;
+  content: string;
+  attachments?: Attachment[];
+  read: boolean;
+  createdAt: string;
+  isGroup?: boolean;
+}
+
+const Wrapper = styled.div`
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+`;
+
+const Main = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+`;
+
+const ChatArea = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+`;
+
+const MessagesContainer = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: ${({ theme }) => theme.spacing.md};
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+`;
+
+const EmptyChat = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  gap: ${({ theme }) => theme.spacing.md};
+  animation: fadeIn 0.4s ease;
+`;
+
+const MessagesEnd = styled.div`
+  height: 1px;
+`;
+
+export default function Dashboard() {
+  const { socket, onlineUsers } = useSocket();
+  const { user } = useAuth();
+
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeChat, setActiveChat] = useState<string | null>(null);
+  const [activeConv, setActiveConv] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [showAudioCall, setShowAudioCall] = useState(false);
+  const [showVideoCall, setShowVideoCall] = useState(false);
+  const [showNewChat, setShowNewChat] = useState(false);
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = useCallback(() => {
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 50);
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.emit('conversations:list');
+
+    socket.on('conversations:list', (data: Conversation[]) => {
+      setConversations(data);
+    });
+
+    socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
+      socket.emit('conversations:list');
+    });
+
+    socket.on('message:new', (message: Message) => {
+      if (message.conversationId === activeChat) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) return prev;
+          return [...prev, message];
+        });
+        setTimeout(() => {
+          socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
+        }, 500);
+      }
+      socket.emit('conversations:list');
+    });
+
+    socket.on('message:readReceipt', ({ messageId }: { messageId: string }) => {
+      setMessages(prev =>
+        prev.map(m => (m.id === messageId ? { ...m, read: true } : m))
+      );
+    });
+
+    socket.on('typing:start', ({ userId: typingUserId, conversationId }: { userId: string; conversationId: string }) => {
+      if (conversationId === activeChat) {
+        setTypingUsers(prev => new Set(prev).add(typingUserId));
+      }
+    });
+
+    socket.on('typing:stop', ({ userId: typingUserId, conversationId }: { userId: string; conversationId: string }) => {
+      if (conversationId === activeChat) {
+        setTypingUsers(prev => {
+          const next = new Set(prev);
+          next.delete(typingUserId);
+          return next;
+        });
+      }
+    });
+
+    return () => {
+      socket.off('conversations:list');
+      socket.off('conversation:update');
+      socket.off('message:new');
+      socket.off('message:readReceipt');
+      socket.off('typing:start');
+      socket.off('typing:stop');
+    };
+  }, [socket, activeChat]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  const handleSelectChat = (conversationId: string, conv: Conversation) => {
+    setActiveChat(conversationId);
+    setActiveConv(conv);
+    setMessages([]);
+    setTypingUsers(new Set());
+
+    if (socket) {
+      socket.emit('messages:get', { conversationId });
+    }
+  };
+
+  useEffect(() => {
+    if (!socket || !activeChat) return;
+
+    const handler = (data: Message[]) => {
+      setMessages(data);
+      scrollToBottom();
+
+      data.forEach(m => {
+        if (m.senderId !== user?.id && !m.read) {
+          socket.emit('message:read', { messageId: m.id, conversationId: activeChat });
+        }
+      });
+    };
+
+    socket.on('messages:list', handler);
+    return () => { socket.off('messages:list', handler); };
+  }, [socket, activeChat, scrollToBottom, user?.id]);
+
+  const handleSend = (content: string, attachments?: { file: File; preview?: string; type: string }[]) => {
+    if (!socket || !activeConv) return;
+
+    const processAttachments = async () => {
+      if (!attachments || attachments.length === 0) return undefined;
+
+      const processed: Attachment[] = [];
+      for (const att of attachments) {
+        const base: Attachment = {
+          name: att.file.name,
+          type: att.type as any,
+          mime: att.file.type,
+          size: att.file.size,
+        };
+        if (att.type === 'image') {
+          base.data = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(att.file);
+          });
+        }
+        processed.push(base);
+      }
+      return processed;
+    };
+
+    processAttachments().then(processedAttachments => {
+      const payload: any = { content };
+      if (processedAttachments) payload.attachments = processedAttachments;
+
+      if (activeConv.isGroup) {
+        payload.groupId = activeConv.id;
+      } else if (activeConv.contact) {
+        payload.receiverId = activeConv.contact.id;
+      }
+
+      socket.emit('message:send', payload);
+    });
+
+    const preview = attachments?.length
+      ? `📎 ${attachments.length} file(s)`
+      : content;
+
+    setConversations(prev => prev.map(c =>
+      c.id === activeChat
+        ? { ...c, lastMessage: preview, lastTime: new Date().toISOString() }
+        : c
+    ));
+  };
+
+  const handleTypingStart = () => {
+    if (!socket || !activeConv || !activeChat) return;
+    if (activeConv.isGroup) {
+      socket.emit('typing:start', { groupId: activeConv.id });
+    } else if (activeConv.contact) {
+      socket.emit('typing:start', { receiverId: activeConv.contact.id, conversationId: activeChat });
+    }
+  };
+
+  const handleTypingStop = () => {
+    if (!socket || !activeConv || !activeChat) return;
+    if (activeConv.isGroup) {
+      socket.emit('typing:stop', { groupId: activeConv.id });
+    } else if (activeConv.contact) {
+      socket.emit('typing:stop', { receiverId: activeConv.contact.id, conversationId: activeChat });
+    }
+  };
+
+  const handleSearch = (query: string) => {
+    if (!socket) return;
+    if (!query.trim()) {
+      socket.emit('conversations:list');
+      return;
+    }
+    socket.emit('conversations:list');
+    setConversations(prev =>
+      prev.filter(c => {
+        const name = c.isGroup ? c.groupName : c.contact?.username;
+        return name?.toLowerCase().includes(query.toLowerCase());
+      })
+    );
+  };
+
+  const handleStartDirect = (receiverId: string) => {
+    if (!socket) return;
+    socket.emit('direct:start', { receiverId });
+
+    socket.on('direct:started', ({ conversationId }: { conversationId: string }) => {
+      socket.off('direct:started');
+      socket.emit('conversations:list');
+      setTimeout(() => {
+        const conv = conversations.find(c => c.id === conversationId);
+        if (conv) handleSelectChat(conversationId, conv);
+      }, 300);
+    });
+  };
+
+  const handleGroupCreated = (conversationId: string) => {
+    socket?.emit('conversations:list');
+  };
+
+  const handleProfileUpdate = (newUsername: string) => {
+    if (user) {
+      user.username = newUsername;
+    }
+  };
+
+  const handleAudioCall = () => {
+    if (!activeConv || activeConv.isGroup) return;
+    setShowAudioCall(true);
+  };
+
+  const handleVideoCall = () => {
+    if (!activeConv || activeConv.isGroup) return;
+    setShowVideoCall(true);
+  };
+
+  const typingUsername = activeConv?.isGroup
+    ? 'Someone'
+    : activeConv?.contact?.username || '';
+
+  const showTyping = Array.from(typingUsers).filter(id => {
+    if (activeConv?.isGroup) return id !== user?.id;
+    return true;
+  });
+
+  return (
+    <Wrapper>
+      <Sidebar
+        conversations={conversations}
+        activeChat={activeChat}
+        onSelectChat={handleSelectChat}
+        onSearch={handleSearch}
+        onAddChat={() => setShowNewChat(true)}
+        onEditProfile={() => setShowProfileEdit(true)}
+      />
+      <Main>
+        <TopBar
+          conversation={activeConv}
+          onAudioCall={handleAudioCall}
+          onVideoCall={handleVideoCall}
+        />
+        <ChatArea>
+          {activeChat && activeConv ? (
+            <>
+              <MessagesContainer>
+                {messages.length === 0 && (
+                  <EmptyChat>
+                    <FiMessageSquare size={40} />
+                    <p>No messages yet. Say hello!</p>
+                  </EmptyChat>
+                )}
+                {messages.map(msg => (
+                  <MessageBubble
+                    key={msg.id}
+                    message={msg}
+                    showSenderName={!!activeConv.isGroup}
+                  />
+                ))}
+                {showTyping.map(uid => (
+                  <TypingIndicator key={uid} username={
+                    activeConv.isGroup
+                      ? (messages.find(m => m.senderId === uid)?.senderUsername || 'Someone')
+                      : typingUsername
+                  } />
+                ))}
+                <MessagesEnd ref={messagesEndRef} />
+              </MessagesContainer>
+              <ChatInput
+                onSend={handleSend}
+                onTypingStart={handleTypingStart}
+                onTypingStop={handleTypingStop}
+              />
+            </>
+          ) : (
+            <EmptyChat>
+              <FiMessageSquare size={60} />
+              <h3>Welcome to Echoza</h3>
+              <p>Select a conversation or click + to start</p>
+            </EmptyChat>
+          )}
+        </ChatArea>
+      </Main>
+
+      {showAudioCall && activeConv?.contact && (
+        <AudioCallUI
+          contact={activeConv.contact}
+          onEnd={() => setShowAudioCall(false)}
+          socket={socket}
+        />
+      )}
+
+      {showVideoCall && activeConv?.contact && (
+        <VideoCallUI
+          contact={activeConv.contact}
+          onEnd={() => setShowVideoCall(false)}
+          socket={socket}
+        />
+      )}
+
+      {showNewChat && socket && (
+        <ConversationModal
+          socket={socket}
+          onClose={() => setShowNewChat(false)}
+          onStartDirect={handleStartDirect}
+          onGroupCreated={handleGroupCreated}
+        />
+      )}
+
+      {showProfileEdit && socket && user && (
+        <ProfileEditModal
+          currentUsername={user.username}
+          socket={socket}
+          onClose={() => setShowProfileEdit(false)}
+          onUpdate={handleProfileUpdate}
+        />
+      )}
+    </Wrapper>
+  );
+}

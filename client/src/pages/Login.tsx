@@ -1,0 +1,172 @@
+import { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import styled from 'styled-components';
+import { Button, Input } from '../components/common';
+import { useAuth } from '../contexts/AuthContext';
+import { FiEye, FiEyeOff } from 'react-icons/fi';
+
+const Wrapper = styled.div`
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: ${({ theme }) => theme.spacing.xl};
+  background: ${({ theme }) => theme.colors.bg.main};
+`;
+
+const Card = styled.div`
+  width: 100%;
+  max-width: 420px;
+  padding: ${({ theme }) => theme.spacing.xl};
+  border-radius: ${({ theme }) => theme.radius.lg};
+  background: ${({ theme }) => theme.colors.bg.card};
+  box-shadow: ${({ theme }) => theme.shadow.md};
+  animation: fadeIn 0.4s ease;
+  backdrop-filter: blur(12px);
+  border: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const Title = styled.h2`
+  font-size: ${({ theme }) => theme.font.size.xxl};
+  font-weight: ${({ theme }) => theme.font.weight.bold};
+  color: ${({ theme }) => theme.colors.text.primary};
+  text-align: center;
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+`;
+
+const Subtitle = styled.p`
+  text-align: center;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  margin-bottom: ${({ theme }) => theme.spacing.xl};
+`;
+
+const Form = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+const StyledLink = styled(Link)`
+  display: block;
+  text-align: center;
+  margin-top: ${({ theme }) => theme.spacing.md};
+  font-size: ${({ theme }) => theme.font.size.sm};
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-weight: ${({ theme }) => theme.font.weight.medium};
+
+  &:hover {
+    text-decoration: underline;
+  }
+`;
+
+const PasswordWrapper = styled.div`
+  position: relative;
+  width: 100%;
+`;
+
+const EyeBtn = styled.button`
+  position: absolute;
+  right: 12px;
+  top: 34px;
+  background: none;
+  border: none;
+  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  font-size: 18px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color ${({ theme }) => theme.transition};
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.text.primary};
+  }
+`;
+
+const ErrorMsg = styled.div`
+  background: ${({ theme }) => theme.colors.danger}15;
+  color: ${({ theme }) => theme.colors.danger};
+  padding: 10px 14px;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-size: ${({ theme }) => theme.font.size.sm};
+  text-align: center;
+`;
+
+export default function Login() {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setServerError('');
+
+    if (!username || !password) {
+      setServerError('Please fill in all fields');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setServerError(data.error || 'Login failed');
+        return;
+      }
+
+      login(data.token, data.user);
+      navigate('/dashboard');
+    } catch {
+      setServerError('Connection error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Wrapper>
+      <Card>
+        <Title>Welcome Back</Title>
+        <Subtitle>Enter Echoza and continue chatting</Subtitle>
+        <Form onSubmit={handleSubmit}>
+          {serverError && <ErrorMsg>{serverError}</ErrorMsg>}
+          <Input
+            label="Username"
+            placeholder="Enter your username"
+            value={username}
+            onChange={setUsername}
+            disabled={loading}
+          />
+          <PasswordWrapper>
+            <Input
+              label="Password"
+              type={showPassword ? 'text' : 'password'}
+              placeholder="Enter your password"
+              value={password}
+              onChange={setPassword}
+              disabled={loading}
+            />
+            <EyeBtn type="button" onClick={() => setShowPassword(!showPassword)}>
+              {showPassword ? <FiEyeOff /> : <FiEye />}
+            </EyeBtn>
+          </PasswordWrapper>
+          <Button type="submit" fullWidth disabled={loading}>
+            {loading ? 'Signing In...' : 'Enter Echoza'}
+          </Button>
+        </Form>
+        <StyledLink to="/signup">Don't have an account? Sign up</StyledLink>
+      </Card>
+    </Wrapper>
+  );
+}

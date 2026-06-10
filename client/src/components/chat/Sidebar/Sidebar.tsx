@@ -1,0 +1,341 @@
+import { useState } from 'react';
+import styled from 'styled-components';
+import { Avatar, Badge, StatusDot } from '../../common';
+import { useAuth } from '../../../contexts/AuthContext';
+import { useSocket } from '../../../contexts/SocketContext';
+import { FiLogOut, FiSearch, FiMessageSquare, FiEdit3, FiPlus, FiUsers } from 'react-icons/fi';
+
+interface Contact {
+  id: string;
+  username: string;
+  avatar: string;
+  online: boolean;
+}
+
+interface Conversation {
+  id: string;
+  isGroup?: boolean;
+  contact?: Contact;
+  groupName?: string;
+  members?: { id: string; username: string; avatar: string; online: boolean }[];
+  lastMessage: string;
+  lastTime: string;
+  unread: number;
+}
+
+interface SidebarProps {
+  conversations: Conversation[];
+  activeChat: string | null;
+  onSelectChat: (conversationId: string, conv: Conversation) => void;
+  onSearch: (query: string) => void;
+  onAddChat: () => void;
+  onEditProfile: () => void;
+}
+
+const Wrapper = styled.aside`
+  width: 320px;
+  min-width: 320px;
+  height: 100vh;
+  background: ${({ theme }) => theme.colors.bg.sidebar};
+  border-right: 1px solid ${({ theme }) => theme.colors.border};
+  display: flex;
+  flex-direction: column;
+  animation: slideInLeft 0.3s ease;
+`;
+
+const ProfileSection = styled.div`
+  padding: ${({ theme }) => theme.spacing.lg};
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.md};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const UserInfo = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const Username = styled.h3`
+  font-size: ${({ theme }) => theme.font.size.md};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.text.primary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const StatusRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+`;
+
+const StatusText = styled.span`
+  font-size: ${({ theme }) => theme.font.size.xs};
+  color: ${({ theme }) => theme.colors.text.secondary};
+`;
+
+const ActionBtns = styled.div`
+  display: flex;
+  gap: 4px;
+`;
+
+const IconBtn = styled.button<{ $color?: string }>`
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: ${({ $color }) => $color || 'transparent'};
+  color: ${({ $color, theme }) => $color ? 'white' : theme.colors.text.secondary};
+  font-size: 16px;
+  transition: all ${({ theme }) => theme.transition};
+
+  &:hover {
+    background: ${({ $color, theme }) => $color || theme.colors.bg.hover};
+    opacity: 0.9;
+  }
+`;
+
+const SearchBar = styled.div`
+  padding: ${({ theme }) => theme.spacing.md};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  display: flex;
+  gap: 8px;
+  align-items: center;
+`;
+
+const SearchInput = styled.input`
+  flex: 1;
+  padding: 10px 14px 10px 36px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  background: ${({ theme }) => theme.colors.bg.input};
+  color: ${({ theme }) => theme.colors.text.primary};
+  font-size: ${({ theme }) => theme.font.size.sm};
+
+  &::placeholder {
+    color: ${({ theme }) => theme.colors.secondary.warmGray};
+  }
+`;
+
+const SearchIcon = styled(FiSearch)`
+  position: absolute;
+  left: 28px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  font-size: 14px;
+`;
+
+const SearchWrapper = styled.div`
+  position: relative;
+  flex: 1;
+`;
+
+const ChatList = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: ${({ theme }) => theme.spacing.sm};
+`;
+
+const ChatItem = styled.div<{ $active: boolean }>`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.md};
+  border-radius: ${({ theme }) => theme.radius.md};
+  cursor: pointer;
+  transition: all ${({ theme }) => theme.transition};
+  background: ${({ $active, theme }) =>
+    $active ? theme.colors.bg.hover : 'transparent'};
+  border-left: 3px solid ${({ $active, theme }) =>
+    $active ? theme.colors.primary.echoBlue : 'transparent'};
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.hover};
+  }
+`;
+
+const ChatInfo = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const ChatName = styled.h4`
+  font-size: ${({ theme }) => theme.font.size.sm};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.text.primary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+`;
+
+const GroupLabel = styled.span`
+  font-size: 10px;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-weight: ${({ theme }) => theme.font.weight.medium};
+  margin-left: 6px;
+`;
+
+const LastMessage = styled.p`
+  font-size: ${({ theme }) => theme.font.size.xs};
+  color: ${({ theme }) => theme.colors.text.secondary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+`;
+
+const TimeBadge = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+`;
+
+const Time = styled.span`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  white-space: nowrap;
+`;
+
+const GroupIcon = styled.div`
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.bg.hover};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-size: 18px;
+  flex-shrink: 0;
+`;
+
+const EmptyState = styled.div`
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.xl};
+  text-align: center;
+`;
+
+export default function Sidebar({
+  conversations,
+  activeChat,
+  onSelectChat,
+  onSearch,
+  onAddChat,
+  onEditProfile,
+}: SidebarProps) {
+  const { user, logout } = useAuth();
+  const { onlineUsers } = useSocket();
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const isOnline = user ? onlineUsers.includes(user.id) : false;
+
+  const handleSearch = (val: string) => {
+    setSearchQuery(val);
+    onSearch(val);
+  };
+
+  const formatTime = (timeStr: string) => {
+    if (!timeStr) return '';
+    const date = new Date(timeStr);
+    const now = new Date();
+    const isToday = date.toDateString() === now.toDateString();
+    if (isToday) {
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <Wrapper>
+      <ProfileSection>
+        <Avatar
+          username={user?.username}
+          size={44}
+          online={isOnline}
+        />
+        <UserInfo>
+          <Username>{user?.username || 'User'}</Username>
+          <StatusRow>
+            <StatusDot online={isOnline} />
+            <StatusText>{isOnline ? 'Online' : 'Offline'}</StatusText>
+          </StatusRow>
+        </UserInfo>
+        <ActionBtns>
+          <IconBtn onClick={onEditProfile} title="Edit profile">
+            <FiEdit3 />
+          </IconBtn>
+          <IconBtn onClick={logout} title="Log out">
+            <FiLogOut />
+          </IconBtn>
+        </ActionBtns>
+      </ProfileSection>
+
+      <SearchBar>
+        <SearchWrapper>
+          <SearchIcon />
+          <SearchInput
+            placeholder="Search chats..."
+            value={searchQuery}
+            onChange={e => handleSearch(e.target.value)}
+          />
+        </SearchWrapper>
+        <IconBtn $color="#3A7BFF" onClick={onAddChat} title="New conversation">
+          <FiPlus />
+        </IconBtn>
+      </SearchBar>
+
+      <ChatList>
+        {conversations.length === 0 ? (
+          <EmptyState>
+            <FiMessageSquare size={40} />
+            <p>No conversations yet</p>
+            <p style={{ fontSize: '12px' }}>Click + to start chatting</p>
+          </EmptyState>
+        ) : (
+          conversations.map(conv => (
+            <ChatItem
+              key={conv.id}
+              $active={activeChat === conv.id}
+              onClick={() => onSelectChat(conv.id, conv)}
+            >
+              {conv.isGroup ? (
+                <GroupIcon>
+                  <FiUsers />
+                </GroupIcon>
+              ) : (
+                <Avatar
+                  username={conv.contact?.username}
+                  size={40}
+                  online={conv.contact?.online}
+                />
+              )}
+              <ChatInfo>
+                <ChatName>
+                  {conv.isGroup ? conv.groupName : conv.contact?.username}
+                  {conv.isGroup && <GroupLabel>group</GroupLabel>}
+                </ChatName>
+                <LastMessage>{conv.lastMessage || 'No messages yet'}</LastMessage>
+              </ChatInfo>
+              <TimeBadge>
+                <Time>{formatTime(conv.lastTime)}</Time>
+                <Badge count={conv.unread} />
+              </TimeBadge>
+            </ChatItem>
+          ))
+        )}
+      </ChatList>
+    </Wrapper>
+  );
+}
