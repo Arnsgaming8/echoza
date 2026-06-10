@@ -54,7 +54,7 @@ interface Message {
 
 const Wrapper = styled.div`
   display: flex;
-  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 `;
 
@@ -63,6 +63,9 @@ const Main = styled.div`
   display: flex;
   flex-direction: column;
   min-width: 0;
+  @media (max-width: 768px) {
+    width: 100%;
+  }
 `;
 
 const ChatArea = styled.div`
@@ -114,6 +117,7 @@ export default function Dashboard() {
   } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +207,7 @@ export default function Dashboard() {
     setActiveConv(conv);
     setMessages([]);
     setTypingUsers(new Set());
+    setShowSidebar(false);
 
     if (socket) {
       socket.emit('messages:get', { conversationId });
@@ -377,12 +382,15 @@ export default function Dashboard() {
         onSearch={handleSearch}
         onAddChat={() => setShowNewChat(true)}
         onEditProfile={() => setShowProfileEdit(true)}
+        showSidebar={showSidebar}
+        onToggleSidebar={() => setShowSidebar(false)}
       />
       <Main>
         <TopBar
           conversation={activeConv}
           onAudioCall={handleAudioCall}
           onVideoCall={handleVideoCall}
+          onToggleSidebar={() => setShowSidebar(s => !s)}
         />
         <ChatArea>
           {activeChat && activeConv ? (

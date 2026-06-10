@@ -30,6 +30,7 @@ const Overlay = styled.div`
 
 const Modal = styled.div`
   width: 440px;
+  max-width: 92vw;
   max-height: 80vh;
   background: ${({ theme }) => theme.colors.bg.card};
   border-radius: ${({ theme }) => theme.radius.lg};

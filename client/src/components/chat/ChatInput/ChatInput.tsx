@@ -83,6 +83,10 @@ const InputRow = styled.div`
   align-items: flex-end;
   gap: ${({ theme }) => theme.spacing.sm};
   padding: ${({ theme }) => theme.spacing.md};
+
+  @media (max-width: 768px) {
+    padding: 8px;
+  }
 `;
 
 const InputWrapper = styled.div`

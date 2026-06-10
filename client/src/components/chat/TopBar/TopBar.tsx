@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { Avatar, StatusDot } from '../../common';
-import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers } from 'react-icons/fi';
+import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu } from 'react-icons/fi';
 import { useTheme } from '../../../contexts/ThemeContext';
 
 interface Contact {
@@ -22,6 +22,7 @@ interface TopBarProps {
   conversation: Conversation | null;
   onAudioCall: () => void;
   onVideoCall: () => void;
+  onToggleSidebar?: () => void;
 }
 
 const Wrapper = styled.header`
@@ -33,12 +34,40 @@ const Wrapper = styled.header`
   padding: 0 ${({ theme }) => theme.spacing.lg};
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
   background: ${({ theme }) => theme.colors.bg.sidebar};
+
+  @media (max-width: 768px) {
+    padding: 0 ${({ theme }) => theme.spacing.sm};
+  }
 `;
 
 const Left = styled.div`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.md};
+  min-width: 0;
+`;
+
+const Hamburger = styled.button`
+  display: none;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: transparent;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  font-size: 20px;
+  transition: all ${({ theme }) => theme.transition};
+  flex-shrink: 0;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.hover};
+    color: ${({ theme }) => theme.colors.text.primary};
+  }
+
+  @media (max-width: 768px) {
+    display: flex;
+  }
 `;
 
 const Logo = styled.span`
@@ -46,6 +75,10 @@ const Logo = styled.span`
   font-weight: ${({ theme }) => theme.font.weight.bold};
   color: ${({ theme }) => theme.colors.primary.echoBlue};
   letter-spacing: -0.5px;
+
+  @media (max-width: 768px) {
+    display: none;
+  }
 `;
 
 const ContactInfo = styled.div`
@@ -54,6 +87,11 @@ const ContactInfo = styled.div`
   gap: ${({ theme }) => theme.spacing.md};
   padding-left: ${({ theme }) => theme.spacing.md};
   border-left: 1px solid ${({ theme }) => theme.colors.border};
+
+  @media (max-width: 768px) {
+    border-left: none;
+    padding-left: 0;
+  }
 `;
 
 const GroupIconBig = styled.div`
@@ -109,7 +147,7 @@ const IconBtn = styled.button`
   }
 `;
 
-export default function TopBar({ conversation, onAudioCall, onVideoCall }: TopBarProps) {
+export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
 
   const showCallButtons = conversation && !conversation.isGroup;
@@ -117,6 +155,9 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall }: TopBa
   return (
     <Wrapper>
       <Left>
+        <Hamburger onClick={onToggleSidebar} title="Toggle sidebar">
+          <FiMenu />
+        </Hamburger>
         <Logo>Echoza</Logo>
         {conversation && (
           <ContactInfo>

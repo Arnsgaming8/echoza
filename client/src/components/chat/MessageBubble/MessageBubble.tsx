@@ -39,6 +39,10 @@ const BubbleWrapper = styled.div<{ $isSent: boolean }>`
   display: flex;
   flex-direction: column;
   align-items: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
+
+  @media (max-width: 768px) {
+    max-width: 85%;
+  }
 `;
 
 const SenderName = styled.span`

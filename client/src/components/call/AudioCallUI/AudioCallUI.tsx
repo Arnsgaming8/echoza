@@ -39,6 +39,11 @@ const Content = styled.div`
   flex-direction: column;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.xl};
+  padding: ${({ theme }) => theme.spacing.md};
+
+  @media (max-width: 768px) {
+    gap: ${({ theme }) => theme.spacing.lg};
+  }
 `;
 
 const Timer = styled.div`
@@ -75,6 +80,12 @@ const ControlBtn = styled.button<{ $danger?: boolean; $active?: boolean }>`
 
   &:hover {
     transform: scale(1.05);
+  }
+
+  @media (max-width: 768px) {
+    width: 48px;
+    height: 48px;
+    font-size: 18px;
   }
 `;
 

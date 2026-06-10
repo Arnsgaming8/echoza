@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { Avatar, Badge, StatusDot } from '../../common';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSocket } from '../../../contexts/SocketContext';
-import { FiLogOut, FiSearch, FiMessageSquare, FiEdit3, FiPlus, FiUsers } from 'react-icons/fi';
+import { FiLogOut, FiSearch, FiMessageSquare, FiEdit3, FiPlus, FiUsers, FiX } from 'react-icons/fi';
 
 interface Contact {
   id: string;
@@ -30,17 +30,66 @@ interface SidebarProps {
   onSearch: (query: string) => void;
   onAddChat: () => void;
   onEditProfile: () => void;
+  showSidebar?: boolean;
+  onToggleSidebar?: () => void;
 }
 
-const Wrapper = styled.aside`
+const Backdrop = styled.div<{ $show: boolean }>`
+  display: none;
+
+  @media (max-width: 768px) {
+    display: ${({ $show }) => ($show ? 'block' : 'none')};
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 99;
+  }
+`;
+
+const Wrapper = styled.aside<{ $show: boolean }>`
   width: 320px;
   min-width: 320px;
-  height: 100vh;
+  height: 100dvh;
   background: ${({ theme }) => theme.colors.bg.sidebar};
   border-right: 1px solid ${({ theme }) => theme.colors.border};
   display: flex;
   flex-direction: column;
   animation: slideInLeft 0.3s ease;
+  position: relative;
+  z-index: 100;
+
+  @media (max-width: 768px) {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    min-width: 0;
+    transform: translateX(${({ $show }) => ($show ? '0' : '-100%')});
+    transition: transform 0.3s ease;
+    animation: none;
+  }
+`;
+
+const CloseBtn = styled.button`
+  display: none;
+
+  @media (max-width: 768px) {
+    display: flex;
+    width: 34px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    border-radius: ${({ theme }) => theme.radius.sm};
+    background: transparent;
+    color: ${({ theme }) => theme.colors.text.secondary};
+    font-size: 20px;
+    transition: all ${({ theme }) => theme.transition};
+    flex-shrink: 0;
+
+    &:hover {
+      background: ${({ theme }) => theme.colors.bg.hover};
+      color: ${({ theme }) => theme.colors.text.primary};
+    }
+  }
 `;
 
 const ProfileSection = styled.div`
@@ -234,6 +283,8 @@ export default function Sidebar({
   onSearch,
   onAddChat,
   onEditProfile,
+  showSidebar,
+  onToggleSidebar,
 }: SidebarProps) {
   const { user, logout } = useAuth();
   const { onlineUsers } = useSocket();
@@ -258,84 +309,90 @@ export default function Sidebar({
   };
 
   return (
-    <Wrapper>
-      <ProfileSection>
-        <Avatar
-          username={user?.username}
-          size={44}
-          online={isOnline}
-        />
-        <UserInfo>
-          <Username>{user?.username || 'User'}</Username>
-          <StatusRow>
-            <StatusDot online={isOnline} />
-            <StatusText>{isOnline ? 'Online' : 'Offline'}</StatusText>
-          </StatusRow>
-        </UserInfo>
-        <ActionBtns>
-          <IconBtn onClick={onEditProfile} title="Edit profile">
-            <FiEdit3 />
-          </IconBtn>
-          <IconBtn onClick={logout} title="Log out">
-            <FiLogOut />
-          </IconBtn>
-        </ActionBtns>
-      </ProfileSection>
-
-      <SearchBar>
-        <SearchWrapper>
-          <SearchIcon />
-          <SearchInput
-            placeholder="Search chats..."
-            value={searchQuery}
-            onChange={e => handleSearch(e.target.value)}
+    <>
+      <Backdrop $show={!!showSidebar} onClick={onToggleSidebar} />
+      <Wrapper $show={!!showSidebar}>
+        <ProfileSection>
+          <Avatar
+            username={user?.username}
+            size={44}
+            online={isOnline}
           />
-        </SearchWrapper>
-        <IconBtn $color="#3A7BFF" onClick={onAddChat} title="New conversation">
-          <FiPlus />
-        </IconBtn>
-      </SearchBar>
+          <UserInfo>
+            <Username>{user?.username || 'User'}</Username>
+            <StatusRow>
+              <StatusDot online={isOnline} />
+              <StatusText>{isOnline ? 'Online' : 'Offline'}</StatusText>
+            </StatusRow>
+          </UserInfo>
+          <ActionBtns>
+            <CloseBtn onClick={onToggleSidebar}>
+              <FiX />
+            </CloseBtn>
+            <IconBtn onClick={onEditProfile} title="Edit profile">
+              <FiEdit3 />
+            </IconBtn>
+            <IconBtn onClick={logout} title="Log out">
+              <FiLogOut />
+            </IconBtn>
+          </ActionBtns>
+        </ProfileSection>
 
-      <ChatList>
-        {conversations.length === 0 ? (
-          <EmptyState>
-            <FiMessageSquare size={40} />
-            <p>No conversations yet</p>
-            <p style={{ fontSize: '12px' }}>Click + to start chatting</p>
-          </EmptyState>
-        ) : (
-          conversations.map(conv => (
-            <ChatItem
-              key={conv.id}
-              $active={activeChat === conv.id}
-              onClick={() => onSelectChat(conv.id, conv)}
-            >
-              {conv.isGroup ? (
-                <GroupIcon>
-                  <FiUsers />
-                </GroupIcon>
-              ) : (
-                <Avatar
-                  username={conv.contact?.username}
-                  size={40}
-                  online={conv.contact?.online}
-                />
-              )}
-              <ChatInfo>
-                <ChatName>
-                  {conv.isGroup ? conv.groupName : conv.contact?.username}
-                  {conv.isGroup && <GroupLabel>group</GroupLabel>}
-                </ChatName>
-                <LastMessage>{conv.lastMessage || 'No messages yet'}</LastMessage>
-              </ChatInfo>
-              <TimeBadge>
-                <Time>{formatTime(conv.lastTime)}</Time>
-                <Badge count={conv.unread} />
-              </TimeBadge>
-            </ChatItem>
-          ))
-        )}
-      </ChatList>
-    </Wrapper>
+        <SearchBar>
+          <SearchWrapper>
+            <SearchIcon />
+            <SearchInput
+              placeholder="Search chats..."
+              value={searchQuery}
+              onChange={e => handleSearch(e.target.value)}
+            />
+          </SearchWrapper>
+          <IconBtn $color="#3A7BFF" onClick={onAddChat} title="New conversation">
+            <FiPlus />
+          </IconBtn>
+        </SearchBar>
+
+        <ChatList>
+          {conversations.length === 0 ? (
+            <EmptyState>
+              <FiMessageSquare size={40} />
+              <p>No conversations yet</p>
+              <p style={{ fontSize: '12px' }}>Click + to start chatting</p>
+            </EmptyState>
+          ) : (
+            conversations.map(conv => (
+              <ChatItem
+                key={conv.id}
+                $active={activeChat === conv.id}
+                onClick={() => onSelectChat(conv.id, conv)}
+              >
+                {conv.isGroup ? (
+                  <GroupIcon>
+                    <FiUsers />
+                  </GroupIcon>
+                ) : (
+                  <Avatar
+                    username={conv.contact?.username}
+                    size={40}
+                    online={conv.contact?.online}
+                  />
+                )}
+                <ChatInfo>
+                  <ChatName>
+                    {conv.isGroup ? conv.groupName : conv.contact?.username}
+                    {conv.isGroup && <GroupLabel>group</GroupLabel>}
+                  </ChatName>
+                  <LastMessage>{conv.lastMessage || 'No messages yet'}</LastMessage>
+                </ChatInfo>
+                <TimeBadge>
+                  <Time>{formatTime(conv.lastTime)}</Time>
+                  <Badge count={conv.unread} />
+                </TimeBadge>
+              </ChatItem>
+            ))
+          )}
+        </ChatList>
+      </Wrapper>
+    </>
   );
 }
