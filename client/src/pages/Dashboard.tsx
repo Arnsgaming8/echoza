@@ -104,6 +104,8 @@ export default function Dashboard() {
   const { user } = useAuth();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -120,6 +122,12 @@ export default function Dashboard() {
   const [showSidebar, setShowSidebar] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -149,6 +157,17 @@ export default function Dashboard() {
         setTimeout(() => {
           socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
         }, 500);
+      } else if (message.senderId !== user?.id && 'Notification' in window && Notification.permission === 'granted') {
+        const senderName = message.senderUsername || message.senderId.slice(0, 6);
+        const notif = new Notification('Echoza', {
+          body: senderName + ': ' + (message.content || 'Sent an attachment'),
+          icon: '/vite.svg',
+        });
+        notif.onclick = () => {
+          window.focus();
+          const conv = conversationsRef.current.find(c => c.id === message.conversationId);
+          if (conv) handleSelectChatRef.current(message.conversationId, conv);
+        };
       }
       socket.emit('conversations:list');
     });
@@ -213,6 +232,8 @@ export default function Dashboard() {
       socket.emit('messages:get', { conversationId });
     }
   };
+  const handleSelectChatRef = useRef(handleSelectChat);
+  handleSelectChatRef.current = handleSelectChat;
 
   useEffect(() => {
     if (!socket || !activeChat) return;
