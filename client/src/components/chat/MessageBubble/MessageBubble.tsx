@@ -4,7 +4,7 @@ import { FiCheck, FiCheckCircle, FiFile, FiImage, FiVideo, FiDownload } from 're
 
 interface Attachment {
   name: string;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'audio' | 'file';
   mime: string;
   size: number;
   data?: string;
@@ -39,13 +39,6 @@ const BubbleWrapper = styled.div<{ $isSent: boolean }>`
   display: flex;
   flex-direction: column;
   align-items: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
-`;
-
-const BubbleRow = styled.div<{ $isSent: boolean }>`
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  flex-direction: ${({ $isSent }) => ($isSent ? 'row' : 'row')};
 `;
 
 const SenderName = styled.span`
@@ -126,18 +119,19 @@ const FileSize = styled.div`
 
 const BubbleText = styled.div``;
 
-const BubbleFooter = styled.div`
+const MetaRow = styled.div<{ $isSent: boolean }>`
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
+  gap: 6px;
   margin-top: 4px;
+  justify-content: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
+  padding: 0 4px;
 `;
 
 const Time = styled.span<{ $isSent: boolean }>`
   font-size: 11px;
   color: ${({ $isSent, theme }) =>
-    $isSent ? 'rgba(255,255,255,0.65)' : theme.colors.secondary.warmGray};
+    $isSent ? theme.colors.secondary.warmGray : theme.colors.secondary.warmGray};
 `;
 
 const ReadIcon = styled.span<{ $read: boolean }>`
@@ -145,6 +139,11 @@ const ReadIcon = styled.span<{ $read: boolean }>`
   color: ${({ $read, theme }) =>
     $read ? theme.colors.primary.echoBlue : theme.colors.secondary.warmGray};
   display: flex;
+`;
+
+const AudioPlayer = styled.audio`
+  max-width: 100%;
+  height: 40px;
 `;
 
 function formatFileSize(bytes: number): string {
@@ -176,41 +175,43 @@ export default function MessageBubble({ message, showSenderName }: MessageBubble
         {showSenderName && !isSent && message.senderUsername && (
           <SenderName>{message.senderUsername}</SenderName>
         )}
-        <BubbleRow $isSent={isSent}>
-          <Bubble $isSent={isSent}>
-            {message.attachments && message.attachments.length > 0 && (
-              <AttachmentGrid>
-                {message.attachments.map((att, i) => (
-                  att.type === 'image' && att.data ? (
-                    <ImageAtt key={i} src={att.data} alt={att.name} />
-                  ) : att.type === 'video' && att.data ? (
-                    <video controls style={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px' }}>
-                      <source src={att.data} type={att.mime} />
-                    </video>
-                  ) : (
-                    <FileAtt key={i} href={att.data || '#'} download={att.name} $isSent={isSent}>
-                      <FileIconWrap>{attIcon(att.type)}</FileIconWrap>
-                      <FileInfo>
-                        <FileName>{att.name}</FileName>
-                        <FileSize>{formatFileSize(att.size)}</FileSize>
-                      </FileInfo>
-                      <FiDownload style={{ marginLeft: 'auto', opacity: 0.6 }} />
-                    </FileAtt>
-                  )
-                ))}
-              </AttachmentGrid>
-            )}
-            {message.content && <BubbleText>{message.content}</BubbleText>}
-            <BubbleFooter>
-              <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
-            </BubbleFooter>
-          </Bubble>
+        <Bubble $isSent={isSent}>
+          {message.attachments && message.attachments.length > 0 && (
+            <AttachmentGrid>
+              {message.attachments.map((att, i) => (
+                att.type === 'image' && att.data ? (
+                  <ImageAtt key={i} src={att.data} alt={att.name} />
+                ) : att.type === 'video' && att.data ? (
+                  <video controls style={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px' }}>
+                    <source src={att.data} type={att.mime} />
+                  </video>
+                ) : att.type === 'audio' && att.data ? (
+                  <AudioPlayer controls src={att.data}>
+                    <source src={att.data} type={att.mime} />
+                  </AudioPlayer>
+                ) : (
+                  <FileAtt key={i} href={att.data || '#'} download={att.name} $isSent={isSent}>
+                    <FileIconWrap>{attIcon(att.type)}</FileIconWrap>
+                    <FileInfo>
+                      <FileName>{att.name}</FileName>
+                      <FileSize>{formatFileSize(att.size)}</FileSize>
+                    </FileInfo>
+                    <FiDownload style={{ marginLeft: 'auto', opacity: 0.6 }} />
+                  </FileAtt>
+                )
+              ))}
+            </AttachmentGrid>
+          )}
+          {message.content && <BubbleText>{message.content}</BubbleText>}
+        </Bubble>
+        <MetaRow $isSent={isSent}>
+          <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
           {isSent && (
             <ReadIcon $read={message.read}>
               {message.read ? <FiCheckCircle /> : <FiCheck />}
             </ReadIcon>
           )}
-        </BubbleRow>
+        </MetaRow>
       </BubbleWrapper>
     </Wrapper>
   );

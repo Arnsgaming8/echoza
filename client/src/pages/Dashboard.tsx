@@ -16,7 +16,7 @@ import { FiMessageSquare } from 'react-icons/fi';
 
 interface Attachment {
   name: string;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'audio' | 'file';
   mime: string;
   size: number;
   data?: string;
@@ -241,13 +241,11 @@ export default function Dashboard() {
           mime: att.file.type,
           size: att.file.size,
         };
-        if (att.type === 'image') {
-          base.data = await new Promise<string>((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result as string);
-            reader.readAsDataURL(att.file);
-          });
-        }
+        base.data = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(att.file);
+        });
         processed.push(base);
       }
       return processed;

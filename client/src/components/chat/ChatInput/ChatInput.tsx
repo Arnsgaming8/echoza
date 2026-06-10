@@ -5,7 +5,7 @@ import { FiSend, FiPaperclip, FiX, FiFile, FiImage, FiVideo } from 'react-icons/
 interface Attachment {
   file: File;
   preview?: string;
-  type: 'image' | 'video' | 'file';
+  type: 'image' | 'video' | 'audio' | 'file';
 }
 
 interface ChatInputProps {
@@ -193,10 +193,11 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const newAttachments: Attachment[] = files.map(file => {
-      const type = file.type.startsWith('image/') ? 'image' as const
-        : file.type.startsWith('video/') ? 'video' as const
-        : 'file' as const;
-      const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
+const type = file.type.startsWith('image/') ? 'image' as const
+  : file.type.startsWith('video/') ? 'video' as const
+  : file.type.startsWith('audio/') ? 'audio' as const
+  : 'file' as const;
+const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
       return { file, preview, type };
     });
     setAttachments(prev => [...prev, ...newAttachments]);
@@ -233,6 +234,7 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
     switch (type) {
       case 'image': return <FiImage />;
       case 'video': return <FiVideo />;
+      case 'audio': return <FiFile />;
       default: return <FiFile />;
     }
   };
@@ -283,7 +285,7 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,video/*,.pdf,.doc,.docx,.txt,.zip"
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
           onChange={handleFileSelect}
         />
       </InputRow>
