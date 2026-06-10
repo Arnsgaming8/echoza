@@ -2,10 +2,10 @@ services:
   - type: web
     name: echoza
     runtime: node
-    repo: https://github.com/YOUR_USERNAME/echoza
+    repo: https://github.com/Arnsgaming8/echoza
     plan: free
-    buildCommand: npm install --prefix client && npm install --prefix server && npm run build --prefix client && npm run build --prefix server
-    startCommand: node server/dist/index.js
+    buildCommand: npm install --prefix client && npm run build --prefix client && npm install --prefix server
+    startCommand: npm start --prefix server
     healthCheckPath: /api/health
     envVars:
       - key: NODE_VERSION
