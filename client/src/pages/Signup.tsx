@@ -24,6 +24,10 @@ const Card = styled.div`
   animation: fadeIn 0.4s ease;
   backdrop-filter: blur(12px);
   border: 1px solid ${({ theme }) => theme.colors.border};
+
+  @media (max-width: 480px) {
+    padding: ${({ theme }) => theme.spacing.lg} ${({ theme }) => theme.spacing.md};
+  }
 `;
 
 const Title = styled.h2`
@@ -32,6 +36,10 @@ const Title = styled.h2`
   color: ${({ theme }) => theme.colors.text.primary};
   text-align: center;
   margin-bottom: ${({ theme }) => theme.spacing.xs};
+
+  @media (max-width: 480px) {
+    font-size: ${({ theme }) => theme.font.size.xl};
+  }
 `;
 
 const Subtitle = styled.p`

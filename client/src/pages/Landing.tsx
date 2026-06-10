@@ -67,6 +67,14 @@ const Title = styled.h1`
   body.dark-mode & {
     color: ${({ theme }) => theme.colors.text.white};
   }
+
+  @media (max-width: 768px) {
+    font-size: 36px;
+  }
+
+  @media (max-width: 480px) {
+    font-size: 28px;
+  }
 `;
 
 const Subtitle = styled.p`
@@ -74,6 +82,10 @@ const Subtitle = styled.p`
   color: ${({ theme }) => theme.colors.text.secondary};
   margin-bottom: ${({ theme }) => theme.spacing.xl};
   line-height: 1.5;
+
+  @media (max-width: 768px) {
+    font-size: ${({ theme }) => theme.font.size.lg};
+  }
 `;
 
 const ButtonGroup = styled.div`
