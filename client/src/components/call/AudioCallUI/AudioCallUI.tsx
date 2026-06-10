@@ -3,6 +3,7 @@ import styled, { keyframes } from 'styled-components';
 import { Avatar } from '../../common';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiVolume2, FiX } from 'react-icons/fi';
+import { getIceServers } from '../../../utils/iceConfig';
 
 const bgAnim = keyframes`
   0% { background-position: 0% 50%; }
@@ -89,8 +90,6 @@ const ControlBtn = styled.button<{ $danger?: boolean; $active?: boolean }>`
   }
 `;
 
-const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
 interface AudioCallUIProps {
   contact: { id: string; username: string; avatar: string };
   onEnd: () => void;
@@ -126,7 +125,8 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         localStreamRef.current = stream;
 
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        const iceServers = await getIceServers();
+        const pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
         stream.getTracks().forEach(track => pc.addTrack(track, stream));

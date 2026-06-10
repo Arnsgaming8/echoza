@@ -34,6 +34,26 @@ async function main() {
     res.json({ status: 'ok' });
   });
 
+  app.get('/api/ice-config', (_req, res) => {
+    const turnUrl = process.env.TURN_URL;
+    const turnUsername = process.env.TURN_USERNAME;
+    const turnCredential = process.env.TURN_CREDENTIAL;
+
+    const iceServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+    ];
+
+    if (turnUrl && turnUsername && turnCredential) {
+      iceServers.push({
+        urls: turnUrl.split(',').map(s => s.trim()),
+        username: turnUsername,
+        credential: turnCredential,
+      });
+    }
+
+    res.json({ iceServers });
+  });
+
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
     app.use(express.static(clientDist));

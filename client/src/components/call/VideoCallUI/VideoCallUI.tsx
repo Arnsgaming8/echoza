@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX } from 'react-icons/fi';
+import { getIceServers } from '../../../utils/iceConfig';
 
 const Overlay = styled.div`
   position: fixed;
@@ -84,8 +85,6 @@ const ContactLabel = styled.div`
   text-shadow: 0 2px 8px rgba(0,0,0,0.5);
 `;
 
-const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-
 interface VideoCallUIProps {
   contact: { id: string; username: string; avatar: string };
   onEnd: () => void;
@@ -115,7 +114,8 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
           localVideoRef.current.srcObject = stream;
         }
 
-        const pc = new RTCPeerConnection(ICE_SERVERS);
+        const iceServers = await getIceServers();
+        const pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
         stream.getTracks().forEach(track => pc.addTrack(track, stream));
