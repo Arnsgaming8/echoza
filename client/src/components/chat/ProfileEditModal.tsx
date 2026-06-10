@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import styled from 'styled-components';
 import { Avatar, Button, Input } from '../common';
-import { FiX } from 'react-icons/fi';
+import { FiX, FiCamera } from 'react-icons/fi';
 
 interface ProfileEditModalProps {
   currentUsername: string;
+  currentAvatar: string;
   socket: any;
   onClose: () => void;
-  onUpdate: (newUsername: string) => void;
+  onUpdate: (newUsername: string, newAvatar: string) => void;
 }
 
 const Overlay = styled.div`
@@ -65,6 +66,33 @@ const AvatarSection = styled.div`
   flex-direction: column;
   align-items: center;
   margin-bottom: ${({ theme }) => theme.spacing.lg};
+  position: relative;
+`;
+
+const ChangePhotoBtn = styled.button`
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(50%);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: ${({ theme }) => theme.colors.primary.echoBlue};
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  box-shadow: ${({ theme }) => theme.shadow.md};
+  transition: transform 0.2s;
+
+  &:hover {
+    transform: translateX(-50%) translateY(50%) scale(1.1);
+  }
+`;
+
+const HiddenInput = styled.input`
+  display: none;
 `;
 
 const Form = styled.div`
@@ -91,14 +119,17 @@ const SuccessMsg = styled.div`
 
 export default function ProfileEditModal({
   currentUsername,
+  currentAvatar,
   socket,
   onClose,
   onUpdate,
 }: ProfileEditModalProps) {
   const [username, setUsername] = useState(currentUsername);
+  const [avatar, setAvatar] = useState(currentAvatar);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validate = (val: string) => {
     setUsername(val);
@@ -109,11 +140,21 @@ export default function ProfileEditModal({
     }
   };
 
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAvatar(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSave = () => {
     if (!socket || error || !username) return;
     setSaving(true);
 
-    socket.emit('profile:update', { username });
+    socket.emit('profile:update', { username, avatar });
 
     socket.on('profile:updateResult', (result: { success?: boolean; error?: string; username?: string }) => {
       socket.off('profile:updateResult');
@@ -125,7 +166,7 @@ export default function ProfileEditModal({
       }
 
       setSuccess(true);
-      onUpdate(result.username || username);
+      onUpdate(result.username || username, avatar);
       setTimeout(onClose, 1000);
     });
   };
@@ -141,8 +182,13 @@ export default function ProfileEditModal({
         </Header>
 
         <AvatarSection>
-          <Avatar username={currentUsername} size={72} />
+          <Avatar username={username} src={avatar} size={72} />
+          <ChangePhotoBtn onClick={() => fileInputRef.current?.click()}>
+            <FiCamera />
+          </ChangePhotoBtn>
         </AvatarSection>
+
+        <HiddenInput ref={fileInputRef} type="file" accept="image/*" onChange={handlePhotoChange} />
 
         <Form>
           {success && <SuccessMsg>Profile updated!</SuccessMsg>}

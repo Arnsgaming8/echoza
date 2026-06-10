@@ -340,7 +340,7 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
     });
 
-    socket.on('profile:update', async ({ username: newUsername }: { username: string }) => {
+    socket.on('profile:update', async ({ username: newUsername, avatar }: { username: string; avatar?: string }) => {
       if (!newUsername || !/^[A-Za-z]{5,8}$/.test(newUsername)) {
         socket.emit('profile:updateResult', { error: 'Username must be 5-8 letters' });
         return;
@@ -353,6 +353,9 @@ export function setupSocket(io: SocketServer): void {
       }
 
       await mutate(`UPDATE users SET username = ? WHERE id = ?`, [newUsername, userId]);
+      if (avatar) {
+        await mutate(`UPDATE users SET avatar = ? WHERE id = ?`, [avatar, userId]);
+      }
       socket.emit('profile:updateResult', { success: true, username: newUsername });
     });
 
@@ -370,6 +373,22 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('call:end', ({ receiverId }: { receiverId: string }) => {
       emitToUser(io, receiverId, 'call:end', { from: userId });
+    });
+
+    socket.on('call:group-offer', async ({ groupId, type, offer }: { groupId: string; type?: string; offer: any }) => {
+      const members = await query(
+        `SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?`,
+        [groupId, userId]
+      );
+      for (const row of (members[0]?.values || [])) {
+        const memberId = row[0] as string;
+        emitToUser(io, memberId, 'call:offer', {
+          from: userId,
+          username,
+          type: type || 'audio',
+          offer,
+        });
+      }
     });
 
     socket.on('disconnect', () => {

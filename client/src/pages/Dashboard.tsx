@@ -135,6 +135,14 @@ export default function Dashboard() {
   const [showSidebar, setShowSidebar] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeConvRef = useRef(activeConv);
+  activeConvRef.current = activeConv;
+  const showAudioCallRef = useRef(showAudioCall);
+  showAudioCallRef.current = showAudioCall;
+  const showVideoCallRef = useRef(showVideoCall);
+  showVideoCallRef.current = showVideoCall;
+  const callContactRef = useRef(callContact);
+  callContactRef.current = callContact;
 
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
@@ -149,19 +157,22 @@ export default function Dashboard() {
     const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
 
     navigator.serviceWorker.ready.then(reg => {
-      reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
-      }).then(sub => {
-        fetch('/api/push/subscribe', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + localStorage.getItem('token'),
-          },
-          body: JSON.stringify(sub.toJSON()),
-        }).catch(() => {});
-      }).catch(() => {});
+      reg.pushManager.getSubscription().then(existingSub => {
+        if (existingSub) return;
+        reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
+        }).then(sub => {
+          fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + localStorage.getItem('token'),
+            },
+            body: JSON.stringify(sub.toJSON()),
+          });
+        }).catch(err => console.warn('Push subscribe failed:', err));
+      });
     });
   }, [user]);
 
@@ -241,7 +252,14 @@ export default function Dashboard() {
     });
 
     socket.on('call:end', ({ from }: { from: string }) => {
-      if (!showAudioCall && !showVideoCall) {
+      if (showAudioCallRef.current || showVideoCallRef.current) {
+        if (callContactRef.current?.id === from || activeConvRef.current?.contact?.id === from) {
+          setShowAudioCall(false);
+          setShowVideoCall(false);
+          setCallContact(null);
+          setReceivedOffer(null);
+        }
+      } else {
         setIncomingCall(prev => prev?.caller.id === from ? null : prev);
       }
     });
@@ -393,21 +411,28 @@ export default function Dashboard() {
     socket?.emit('conversations:list');
   };
 
-  const handleProfileUpdate = (newUsername: string) => {
+  const handleProfileUpdate = (newUsername: string, newAvatar: string) => {
     if (user) {
       user.username = newUsername;
+      user.avatar = newAvatar;
     }
   };
 
   const handleAudioCall = () => {
-    if (!activeConv || activeConv.isGroup) return;
+    if (!activeConv) return;
     setReceivedOffer(null);
+    if (activeConv.isGroup && socket) {
+      socket.emit('call:group-offer', { groupId: activeConv.id, type: 'audio', offer: {} });
+    }
     setShowAudioCall(true);
   };
 
   const handleVideoCall = () => {
-    if (!activeConv || activeConv.isGroup) return;
+    if (!activeConv) return;
     setReceivedOffer(null);
+    if (activeConv.isGroup && socket) {
+      socket.emit('call:group-offer', { groupId: activeConv.id, type: 'video', offer: {} });
+    }
     setShowVideoCall(true);
   };
 
@@ -542,6 +567,7 @@ export default function Dashboard() {
       {showProfileEdit && socket && user && (
         <ProfileEditModal
           currentUsername={user.username}
+          currentAvatar={user.avatar}
           socket={socket}
           onClose={() => setShowProfileEdit(false)}
           onUpdate={handleProfileUpdate}
