@@ -302,7 +302,7 @@ export default function ConversationModal({
                 key={u.id}
                 onClick={() => tab === 'direct' ? handleDirectStart(u.id) : toggleMember(u.id)}
               >
-                <Avatar username={u.username} size={36} online={u.online} />
+                  <Avatar username={u.username} src={u.avatar} size={36} online={u.online} />
                 <UserInfo>
                   <UserName>{u.username}</UserName>
                   <UserStatus>{u.online ? 'Online' : 'Offline'}</UserStatus>

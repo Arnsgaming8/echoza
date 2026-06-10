@@ -315,6 +315,7 @@ export default function Sidebar({
         <ProfileSection>
           <Avatar
             username={user?.username}
+            src={user?.avatar}
             size={44}
             online={isOnline}
           />
@@ -373,6 +374,7 @@ export default function Sidebar({
                 ) : (
                   <Avatar
                     username={conv.contact?.username}
+                    src={conv.contact?.avatar}
                     size={40}
                     online={conv.contact?.online}
                   />

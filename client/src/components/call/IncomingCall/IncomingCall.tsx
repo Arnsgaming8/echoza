@@ -120,7 +120,7 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
     <Overlay>
       <Card>
         <AvatarWrapper>
-          <Avatar username={caller.username} size={80} />
+          <Avatar username={caller.username} src={caller.avatar} size={80} />
         </AvatarWrapper>
         <RingIcon>
           {type === 'audio' ? <FiPhone /> : <FiPhone />}

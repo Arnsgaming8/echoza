@@ -222,7 +222,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
       <GradientBg />
       <audio ref={remoteAudioRef} autoPlay />
       <Content>
-        <Avatar username={contact.username} size={100} />
+        <Avatar username={contact.username} src={contact.avatar} size={100} />
         <CallingText>{connected ? contact.username : `Calling ${contact.username}...`}</CallingText>
         <Timer>{formatTime(seconds)}</Timer>
         <Controls>

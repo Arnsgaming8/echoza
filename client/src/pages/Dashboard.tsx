@@ -243,9 +243,9 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('call:offer', ({ from, username: callerUsername, type, offer }: { from: string; username: string; type: 'audio' | 'video'; offer: any }) => {
+    socket.on('call:offer', ({ from, username: callerUsername, avatar: callerAvatar, type, offer }: { from: string; username: string; avatar: string; type: 'audio' | 'video'; offer: any }) => {
       setIncomingCall({
-        caller: { id: from, username: callerUsername, avatar: '' },
+        caller: { id: from, username: callerUsername, avatar: callerAvatar },
         type: type || 'audio',
         offer,
       });

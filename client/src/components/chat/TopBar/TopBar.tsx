@@ -150,7 +150,7 @@ const IconBtn = styled.button`
 export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
 
-  const showCallButtons = conversation && !conversation.isGroup;
+  const showCallButtons = !!conversation;
 
   return (
     <Wrapper>
@@ -168,6 +168,7 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
             ) : (
               <Avatar
                 username={conversation.contact?.username}
+                src={conversation.contact?.avatar}
                 size={36}
                 online={conversation.contact?.online}
               />

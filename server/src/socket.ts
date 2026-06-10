@@ -9,7 +9,7 @@ interface AuthSocket extends Socket {
   username?: string;
 }
 
-const onlineUsers = new Map<string, { socketId: string; username: string }>();
+const onlineUsers = new Map<string, { socketId: string; username: string; avatar: string }>();
 
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
   const user = onlineUsers.get(userId);
@@ -60,11 +60,14 @@ export function setupSocket(io: SocketServer): void {
     next();
   });
 
-  io.on('connection', (socket: AuthSocket) => {
+  io.on('connection', async (socket: AuthSocket) => {
     const userId = socket.userId!;
     const username = socket.username!;
 
-    onlineUsers.set(userId, { socketId: socket.id, username });
+    const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
+    const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
+
+    onlineUsers.set(userId, { socketId: socket.id, username, avatar });
     mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
 
     io.emit('user:online', { userId, username });
@@ -360,7 +363,10 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('call:offer', ({ receiverId, type, offer }: { receiverId: string; type?: string; offer: any }) => {
-      emitToUser(io, receiverId, 'call:offer', { from: userId, username, type: type || 'audio', offer });
+      emitToUser(io, receiverId, 'call:offer', {
+        from: userId, username, avatar: onlineUsers.get(userId)?.avatar || '',
+        type: type || 'audio', offer,
+      });
     });
 
     socket.on('call:answer', ({ receiverId, answer }: { receiverId: string; answer: any }) => {
