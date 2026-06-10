@@ -18,20 +18,42 @@ self.addEventListener('push', (event) => {
       badge: '/vite.svg',
       data: { url: data.url || '/' },
     };
-
     event.waitUntil(self.registration.showNotification(title, options));
   } catch {
-    const title = 'Echoza';
-    const options = {
+    event.waitUntil(self.registration.showNotification('Echoza', {
       body: event.data.text(),
       icon: '/vite.svg',
-    };
-    event.waitUntil(self.registration.showNotification(title, options));
+    }));
   }
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = event.notification.data?.url || '/';
-  event.waitUntil(clients.openWindow(url));
+  const urlToOpen = event.notification.data?.url || '/';
+  const conversationId = event.notification.data?.conversationId;
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      if (windowClients.length > 0) {
+        const client = windowClients[0];
+        client.focus();
+        if (conversationId) {
+          client.postMessage({ type: 'navigate-conversation', conversationId });
+        }
+        return;
+      }
+      clients.openWindow(urlToOpen);
+    })
+  );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'show-notification') {
+    self.registration.showNotification(event.data.title, {
+      body: event.data.body,
+      icon: event.data.icon || '/vite.svg',
+      tag: event.data.tag,
+      data: event.data.data || {},
+    });
+  }
 });

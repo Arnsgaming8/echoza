@@ -148,6 +148,17 @@ export default function Dashboard() {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
+
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'navigate-conversation') {
+        const convId = event.data.conversationId;
+        const conv = conversationsRef.current.find(c => c.id === convId);
+        if (conv) handleSelectChatRef.current(convId, conv);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
   }, []);
 
   useEffect(() => {
@@ -203,20 +214,26 @@ export default function Dashboard() {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
         });
-        setTimeout(() => {
-          socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
-        }, 500);
-      } else if (message.senderId !== user?.id && 'Notification' in window && Notification.permission === 'granted') {
+        if (document.visibilityState === 'visible') {
+          setTimeout(() => {
+            socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
+          }, 500);
+        }
+      } else if (message.senderId !== user?.id && 'Notification' in window) {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
-        const notif = new Notification('Echoza', {
-          body: senderName + ': ' + (message.content || 'Sent an attachment'),
-          icon: '/vite.svg',
-        });
-        notif.onclick = () => {
-          window.focus();
-          const conv = conversationsRef.current.find(c => c.id === message.conversationId);
-          if (conv) handleSelectChatRef.current(message.conversationId, conv);
-        };
+        const body = senderName + ': ' + (message.content || 'Sent an attachment');
+        if (Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+          navigator.serviceWorker.ready.then(reg => {
+            reg.showNotification('Echoza', {
+              body,
+              icon: '/vite.svg',
+              tag: message.conversationId,
+              data: { conversationId: message.conversationId, url: '/' },
+            });
+          }).catch(() => {
+            new Notification('Echoza', { body, icon: '/vite.svg' });
+          });
+        }
       }
       socket.emit('conversations:list');
     });
