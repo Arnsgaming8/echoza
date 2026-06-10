@@ -7,6 +7,7 @@ import ChatInput from '../components/chat/ChatInput/ChatInput';
 import TypingIndicator from '../components/chat/TypingIndicator/TypingIndicator';
 import AudioCallUI from '../components/call/AudioCallUI/AudioCallUI';
 import VideoCallUI from '../components/call/VideoCallUI/VideoCallUI';
+import IncomingCall from '../components/call/IncomingCall/IncomingCall';
 import ConversationModal from '../components/chat/ConversationModal';
 import ProfileEditModal from '../components/chat/ProfileEditModal';
 import { useSocket } from '../contexts/SocketContext';
@@ -25,7 +26,7 @@ interface Contact {
   id: string;
   username: string;
   avatar: string;
-  online: boolean;
+  online?: boolean;
 }
 
 interface Conversation {
@@ -104,8 +105,13 @@ export default function Dashboard() {
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [callContact, setCallContact] = useState<Contact | null>(null);
   const [showAudioCall, setShowAudioCall] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
+  const [incomingCall, setIncomingCall] = useState<{
+    caller: { id: string; username: string; avatar: string };
+    type: 'audio' | 'video';
+  } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
 
@@ -165,6 +171,17 @@ export default function Dashboard() {
       }
     });
 
+    socket.on('call:offer', ({ from, username: callerUsername, type }: { from: string; username: string; type: 'audio' | 'video' }) => {
+      setIncomingCall({
+        caller: { id: from, username: callerUsername, avatar: '' },
+        type: type || 'audio',
+      });
+    });
+
+    socket.on('call:end', ({ from }: { from: string }) => {
+      setIncomingCall(prev => prev?.caller.id === from ? null : prev);
+    });
+
     return () => {
       socket.off('conversations:list');
       socket.off('conversation:update');
@@ -172,6 +189,8 @@ export default function Dashboard() {
       socket.off('message:readReceipt');
       socket.off('typing:start');
       socket.off('typing:stop');
+      socket.off('call:offer');
+      socket.off('call:end');
     };
   }, [socket, activeChat]);
 
@@ -325,6 +344,23 @@ export default function Dashboard() {
     setShowVideoCall(true);
   };
 
+  const handleAcceptCall = () => {
+    if (!incomingCall) return;
+    setCallContact(incomingCall.caller);
+    if (incomingCall.type === 'audio') {
+      setShowAudioCall(true);
+    } else {
+      setShowVideoCall(true);
+    }
+    setIncomingCall(null);
+  };
+
+  const handleDeclineCall = () => {
+    if (!socket || !incomingCall) return;
+    socket.emit('call:end', { receiverId: incomingCall.caller.id });
+    setIncomingCall(null);
+  };
+
   const typingUsername = activeConv?.isGroup
     ? 'Someone'
     : activeConv?.contact?.username || '';
@@ -392,19 +428,28 @@ export default function Dashboard() {
         </ChatArea>
       </Main>
 
-      {showAudioCall && activeConv?.contact && (
+      {showAudioCall && (activeConv?.contact || callContact) && (
         <AudioCallUI
-          contact={activeConv.contact}
-          onEnd={() => setShowAudioCall(false)}
+          contact={callContact || activeConv!.contact!}
+          onEnd={() => { setShowAudioCall(false); setCallContact(null); }}
           socket={socket}
         />
       )}
 
-      {showVideoCall && activeConv?.contact && (
+      {showVideoCall && (activeConv?.contact || callContact) && (
         <VideoCallUI
-          contact={activeConv.contact}
-          onEnd={() => setShowVideoCall(false)}
+          contact={callContact || activeConv!.contact!}
+          onEnd={() => { setShowVideoCall(false); setCallContact(null); }}
           socket={socket}
+        />
+      )}
+
+      {incomingCall && (
+        <IncomingCall
+          caller={incomingCall.caller}
+          type={incomingCall.type}
+          onAccept={handleAcceptCall}
+          onDecline={handleDeclineCall}
         />
       )}
 

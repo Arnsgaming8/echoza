@@ -17,8 +17,8 @@ function emitToUser(io: SocketServer, userId: string, event: string, data: any) 
   }
 }
 
-function emitToGroupMembers(io: SocketServer, groupId: string, event: string, data: any, excludeUserId?: string) {
-  const members = query(
+async function emitToGroupMembers(io: SocketServer, groupId: string, event: string, data: any, excludeUserId?: string) {
+  const members = await query(
     `SELECT user_id FROM group_members WHERE group_id = ?`,
     [groupId]
   );
@@ -31,7 +31,7 @@ function emitToGroupMembers(io: SocketServer, groupId: string, event: string, da
 }
 
 export function setupSocket(io: SocketServer): void {
-  io.use((socket: AuthSocket, next) => {
+  io.use(async (socket: AuthSocket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
       next(new Error('Authentication required'));
@@ -44,7 +44,7 @@ export function setupSocket(io: SocketServer): void {
       return;
     }
 
-    const result = query(
+    const result = await query(
       `SELECT username FROM users WHERE id = ?`,
       [decoded.userId]
     );
@@ -75,12 +75,12 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('user:onlineList', online);
     });
 
-    socket.on('users:search', ({ query: q }: { query: string }) => {
+    socket.on('users:search', async ({ query: q }: { query: string }) => {
       if (!q.trim()) {
         socket.emit('users:search', []);
         return;
       }
-      const result = query(
+      const result = await query(
         `SELECT id, username, avatar, online FROM users WHERE username LIKE ? AND id != ? LIMIT 20`,
         [`%${q}%`, userId]
       );
@@ -90,8 +90,8 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('users:search', users);
     });
 
-    socket.on('conversations:list', () => {
-      const directResult = query(`
+    socket.on('conversations:list', async () => {
+      const directResult = await query(`
         SELECT c.id, c.user1_id, c.user2_id, c.is_group, c.group_name, c.group_avatar,
                c.last_message, c.last_time,
                u1.username as u1name, u1.avatar as u1avatar, u1.online as u1online,
@@ -104,11 +104,13 @@ export function setupSocket(io: SocketServer): void {
         ORDER BY c.last_time DESC
       `, [userId, userId, userId]);
 
-      const conversations = (directResult[0]?.values || []).map((row: any[]) => {
+      const conversations = [];
+
+      for (const row of (directResult[0]?.values || [])) {
         const [convId, u1Id, u2Id, isGroup, groupName, groupAvatar, lastMsg, lastTime, u1name, u1av, u1on, u2name, u2av, u2on] = row;
 
         if (isGroup) {
-          const memberResult = query(
+          const memberResult = await query(
             `SELECT u.id, u.username, u.avatar, u.online FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?`,
             [convId]
           );
@@ -116,13 +118,13 @@ export function setupSocket(io: SocketServer): void {
             id: m[0], username: m[1], avatar: m[2], online: !!m[3],
           }));
 
-          const unreadResult = query(
+          const unreadResult = await query(
             `SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ? AND sender_id != ? AND read = 0`,
             [convId, userId]
           );
           const unread = (unreadResult[0]?.values[0]?.[0] as number) || 0;
 
-          return {
+          conversations.push({
             id: convId,
             isGroup: true,
             groupName: groupName || 'Unnamed Group',
@@ -130,31 +132,31 @@ export function setupSocket(io: SocketServer): void {
             lastMessage: lastMsg,
             lastTime,
             unread,
+          });
+        } else {
+          const isUser1 = u1Id === userId;
+          const contact = {
+            id: isUser1 ? u2Id : u1Id,
+            username: isUser1 ? u2name : u1name,
+            avatar: isUser1 ? u2av : u1av,
+            online: isUser1 ? !!u2on : !!u1on,
           };
+
+          const unreadResult = await query(
+            `SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ? AND sender_id != ? AND read = 0`,
+            [convId, userId]
+          );
+          const unread = (unreadResult[0]?.values[0]?.[0] as number) || 0;
+
+          conversations.push({ id: convId, isGroup: false, contact, lastMessage: lastMsg, lastTime, unread });
         }
-
-        const isUser1 = u1Id === userId;
-        const contact = {
-          id: isUser1 ? u2Id : u1Id,
-          username: isUser1 ? u2name : u1name,
-          avatar: isUser1 ? u2av : u1av,
-          online: isUser1 ? !!u2on : !!u1on,
-        };
-
-        const unreadResult = query(
-          `SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ? AND sender_id != ? AND read = 0`,
-          [convId, userId]
-        );
-        const unread = (unreadResult[0]?.values[0]?.[0] as number) || 0;
-
-        return { id: convId, isGroup: false, contact, lastMessage: lastMsg, lastTime, unread };
-      });
+      }
 
       socket.emit('conversations:list', conversations);
     });
 
-    socket.on('messages:get', ({ conversationId }: { conversationId: string }) => {
-      const result = query(`
+    socket.on('messages:get', async ({ conversationId }: { conversationId: string }) => {
+      const result = await query(`
         SELECT id, conversation_id, sender_id, content, attachments, read, created_at
         FROM messages WHERE conversation_id = ?
         ORDER BY created_at ASC
@@ -170,9 +172,9 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('messages:list', messages);
     });
 
-    socket.on('direct:start', ({ receiverId }: { receiverId: string }) => {
+    socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       const participants = [userId, receiverId].sort();
-      let convResult = query(`
+      let convResult = await query(`
         SELECT id FROM conversations
         WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))
       `, [...participants, ...participants]);
@@ -180,7 +182,7 @@ export function setupSocket(io: SocketServer): void {
       let conversationId: string;
       if (convResult.length === 0 || convResult[0].values.length === 0) {
         conversationId = uuidv4();
-        mutate(
+        await mutate(
           `INSERT INTO conversations (id, user1_id, user2_id, is_group) VALUES (?, ?, ?, 0)`,
           [conversationId, participants[0], participants[1]]
         );
@@ -191,18 +193,18 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('direct:started', { conversationId, receiverId });
     });
 
-    socket.on('group:create', ({ name, memberIds }: { name: string; memberIds: string[] }) => {
+    socket.on('group:create', async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
       const allMembers = [...new Set([userId, ...memberIds])];
       if (allMembers.length < 2) return;
 
       const conversationId = uuidv4();
-      mutate(
+      await mutate(
         `INSERT INTO conversations (id, user1_id, is_group, group_name) VALUES (?, ?, 1, ?)`,
         [conversationId, userId, name || 'Unnamed Group']
       );
 
       for (const memberId of allMembers) {
-        mutate(
+        await mutate(
           `INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)`,
           [conversationId, memberId]
         );
@@ -215,7 +217,7 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('group:created', { conversationId, name: name || 'Unnamed Group' });
     });
 
-    socket.on('message:send', ({ receiverId, content, groupId, attachments }: { receiverId?: string; content: string; groupId?: string; attachments?: any[] }) => {
+    socket.on('message:send', async ({ receiverId, content, groupId, attachments }: { receiverId?: string; content: string; groupId?: string; attachments?: any[] }) => {
       if (!content.trim()) return;
 
       let conversationId: string;
@@ -226,14 +228,14 @@ export function setupSocket(io: SocketServer): void {
         isGroup = true;
       } else if (receiverId) {
         const participants = [userId, receiverId].sort();
-        let convResult = query(`
+        let convResult = await query(`
           SELECT id FROM conversations
           WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))
         `, [...participants, ...participants]);
 
         if (convResult.length === 0 || convResult[0].values.length === 0) {
           conversationId = uuidv4();
-          mutate(
+          await mutate(
             `INSERT INTO conversations (id, user1_id, user2_id, is_group) VALUES (?, ?, ?, 0)`,
             [conversationId, participants[0], participants[1]]
           );
@@ -247,12 +249,12 @@ export function setupSocket(io: SocketServer): void {
       const messageId = uuidv4();
       const createdAt = new Date().toISOString();
       const attachmentsJson = attachments ? JSON.stringify(attachments) : '[]';
-      mutate(
+      await mutate(
         `INSERT INTO messages (id, conversation_id, sender_id, content, attachments, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
         [messageId, conversationId, userId, content, attachmentsJson, createdAt]
       );
 
-      mutate(
+      await mutate(
         `UPDATE conversations SET last_message = ?, last_time = ? WHERE id = ?`,
         [content, createdAt, conversationId]
       );
@@ -277,13 +279,13 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    socket.on('message:read', ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
-      mutate(
+    socket.on('message:read', async ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
+      await mutate(
         `UPDATE messages SET read = 1 WHERE id = ? AND sender_id != ?`,
         [messageId, userId]
       );
 
-      const result = query(
+      const result = await query(
         `SELECT sender_id FROM messages WHERE id = ?`,
         [messageId]
       );
@@ -315,14 +317,14 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    socket.on('group:addMember', ({ groupId, newMemberId }: { groupId: string; newMemberId: string }) => {
-      const isCreator = query(
+    socket.on('group:addMember', async ({ groupId, newMemberId }: { groupId: string; newMemberId: string }) => {
+      const isCreator = await query(
         `SELECT id FROM conversations WHERE id = ? AND user1_id = ? AND is_group = 1`,
         [groupId, userId]
       );
       if (isCreator.length === 0 || isCreator[0].values.length === 0) return;
 
-      mutate(
+      await mutate(
         `INSERT OR IGNORE INTO group_members (group_id, user_id) VALUES (?, ?)`,
         [groupId, newMemberId]
       );
@@ -331,24 +333,24 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
     });
 
-    socket.on('profile:update', ({ username: newUsername }: { username: string }) => {
+    socket.on('profile:update', async ({ username: newUsername }: { username: string }) => {
       if (!newUsername || !/^[A-Za-z]{5,8}$/.test(newUsername)) {
         socket.emit('profile:updateResult', { error: 'Username must be 5-8 letters' });
         return;
       }
 
-      const existing = query(`SELECT id FROM users WHERE username = ? AND id != ?`, [newUsername, userId]);
+      const existing = await query(`SELECT id FROM users WHERE username = ? AND id != ?`, [newUsername, userId]);
       if (existing.length > 0 && existing[0].values.length > 0) {
         socket.emit('profile:updateResult', { error: 'Username already taken' });
         return;
       }
 
-      mutate(`UPDATE users SET username = ? WHERE id = ?`, [newUsername, userId]);
+      await mutate(`UPDATE users SET username = ? WHERE id = ?`, [newUsername, userId]);
       socket.emit('profile:updateResult', { success: true, username: newUsername });
     });
 
-    socket.on('call:offer', ({ receiverId, offer }: { receiverId: string; offer: any }) => {
-      emitToUser(io, receiverId, 'call:offer', { from: userId, offer });
+    socket.on('call:offer', ({ receiverId, type, offer }: { receiverId: string; type?: string; offer: any }) => {
+      emitToUser(io, receiverId, 'call:offer', { from: userId, username, type: type || 'audio', offer });
     });
 
     socket.on('call:answer', ({ receiverId, answer }: { receiverId: string; answer: any }) => {

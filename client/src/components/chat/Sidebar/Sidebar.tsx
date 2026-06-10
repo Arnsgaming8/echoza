@@ -9,7 +9,7 @@ interface Contact {
   id: string;
   username: string;
   avatar: string;
-  online: boolean;
+  online?: boolean;
 }
 
 interface Conversation {
@@ -17,7 +17,7 @@ interface Conversation {
   isGroup?: boolean;
   contact?: Contact;
   groupName?: string;
-  members?: { id: string; username: string; avatar: string; online: boolean }[];
+  members?: { id: string; username: string; avatar: string; online?: boolean }[];
   lastMessage: string;
   lastTime: string;
   unread: number;

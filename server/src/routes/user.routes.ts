@@ -4,7 +4,7 @@ import { verifyToken } from '../auth.js';
 
 const router = Router();
 
-router.get('/me', (req: Request, res: Response) => {
+router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'No token provided' });
@@ -18,7 +18,7 @@ router.get('/me', (req: Request, res: Response) => {
     return;
   }
 
-  const result = query(
+  const result = await query(
     `SELECT id, username, avatar, online FROM users WHERE id = ?`,
     [decoded.userId]
   );
@@ -32,21 +32,21 @@ router.get('/me', (req: Request, res: Response) => {
   res.json({ id: row[0], username: row[1], avatar: row[2], online: !!row[3] });
 });
 
-router.get('/search', (req: Request, res: Response) => {
+router.get('/search', async (req: Request, res: Response) => {
   const { q } = req.query;
   if (!q || typeof q !== 'string') {
     res.json([]);
     return;
   }
 
-  const result = query(
+  const result = await query(
     `SELECT id, username, avatar, online FROM users WHERE username LIKE ? LIMIT 20`,
     [`%${q}%`]
   );
 
-  const users = result[0]?.values.map((row: any[]) => ({
+  const users = (result[0]?.values || []).map((row: any[]) => ({
     id: row[0], username: row[1], avatar: row[2], online: !!row[3],
-  })) || [];
+  }));
 
   res.json(users);
 });

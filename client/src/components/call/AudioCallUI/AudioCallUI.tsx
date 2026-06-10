@@ -102,7 +102,7 @@ export default function AudioCallUI({ contact, onEnd, socket }: AudioCallUIProps
 
   useEffect(() => {
     if (socket && contact) {
-      socket.emit('call:offer', { receiverId: contact.id, offer: {} });
+      socket.emit('call:offer', { receiverId: contact.id, type: 'audio', offer: {} });
       return () => {
         socket.emit('call:end', { receiverId: contact.id });
       };

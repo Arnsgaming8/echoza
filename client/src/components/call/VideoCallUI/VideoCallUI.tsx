@@ -124,7 +124,7 @@ export default function VideoCallUI({ contact, onEnd, socket }: VideoCallUIProps
 
   useEffect(() => {
     if (socket && contact) {
-      socket.emit('call:offer', { receiverId: contact.id, offer: {} });
+      socket.emit('call:offer', { receiverId: contact.id, type: 'video', offer: {} });
       return () => {
         socket.emit('call:end', { receiverId: contact.id });
       };

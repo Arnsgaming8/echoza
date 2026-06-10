@@ -5,7 +5,7 @@ import { hashPassword, comparePassword, generateToken } from '../auth.js';
 
 const router = Router();
 
-router.post('/register', (req: Request, res: Response) => {
+router.post('/register', async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -23,7 +23,7 @@ router.post('/register', (req: Request, res: Response) => {
     return;
   }
 
-  const existing = query(`SELECT id FROM users WHERE username = ?`, [username]);
+  const existing = await query(`SELECT id FROM users WHERE username = ?`, [username]);
   if (existing.length > 0 && existing[0].values.length > 0) {
     res.status(409).json({ error: 'Username already taken' });
     return;
@@ -32,7 +32,7 @@ router.post('/register', (req: Request, res: Response) => {
   const id = uuidv4();
   const hashedPassword = hashPassword(password);
 
-  mutate(
+  await mutate(
     `INSERT INTO users (id, username, password) VALUES (?, ?, ?)`,
     [id, username, hashedPassword]
   );
@@ -41,7 +41,7 @@ router.post('/register', (req: Request, res: Response) => {
   res.status(201).json({ token, user: { id, username, avatar: '', online: false } });
 });
 
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   if (!username || !password) {
@@ -49,7 +49,7 @@ router.post('/login', (req: Request, res: Response) => {
     return;
   }
 
-  const result = query(
+  const result = await query(
     `SELECT id, username, password, avatar, online FROM users WHERE username = ?`,
     [username]
   );

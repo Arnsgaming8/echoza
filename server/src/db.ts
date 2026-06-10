@@ -1,35 +1,31 @@
-import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import pg from 'pg';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_PATH = join(__dirname, '..', 'echoza.db');
+const { Pool } = pg;
 
-let db: SqlJsDatabase;
+let pool: pg.Pool;
 
-export async function initDb(): Promise<SqlJsDatabase> {
-  const SQL = await initSqlJs();
+export async function initDb(): Promise<void> {
+  const connectionString = process.env.DATABASE_URL;
+  const ssl = connectionString?.includes('sslmode')
+    ? { rejectUnauthorized: false }
+    : false;
 
-  if (existsSync(DB_PATH)) {
-    const buffer = readFileSync(DB_PATH);
-    db = new SQL.Database(buffer);
-  } else {
-    db = new SQL.Database();
-  }
+  pool = new Pool({ connectionString, ssl });
 
-  db.run(`
+  await pool.query('SELECT 1');
+
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       avatar TEXT DEFAULT '',
       online INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (NOW())
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS conversations (
       id TEXT PRIMARY KEY,
       user1_id TEXT NOT NULL,
@@ -43,18 +39,18 @@ export async function initDb(): Promise<SqlJsDatabase> {
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS group_members (
       group_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
-      joined_at TEXT DEFAULT (datetime('now')),
+      joined_at TEXT DEFAULT (NOW()),
       PRIMARY KEY (group_id, user_id),
       FOREIGN KEY (group_id) REFERENCES conversations(id),
       FOREIGN KEY (user_id) REFERENCES users(id)
     )
   `);
 
-  db.run(`
+  await pool.query(`
     CREATE TABLE IF NOT EXISTS messages (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -62,35 +58,57 @@ export async function initDb(): Promise<SqlJsDatabase> {
       content TEXT NOT NULL,
       attachments TEXT DEFAULT '[]',
       read INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
+      created_at TEXT DEFAULT (NOW()),
       FOREIGN KEY (conversation_id) REFERENCES conversations(id),
       FOREIGN KEY (sender_id) REFERENCES users(id)
     )
   `);
 
-  try { db.run(`ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '[]'`); } catch {}
+  try {
+    await pool.query(`ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '[]'`);
+  } catch {}
 
-  saveDb();
-  return db;
+  console.log('Database connected and schema ready');
 }
 
-export function getDb(): SqlJsDatabase {
-  return db;
+export function getPool(): pg.Pool {
+  return pool;
 }
 
-export function saveDb(): void {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  writeFileSync(DB_PATH, buffer);
+interface SqlJsResult {
+  columns: string[];
+  values: any[][];
 }
 
-type SqlValue = number | string | Uint8Array | null;
+let paramIndex = 0;
 
-export function query(sql: string, params: SqlValue[] = []) {
-  return db.exec(sql, params as any);
+function toPgSql(sql: string): string {
+  paramIndex = 0;
+  return sql.replace(/\?/g, () => `$${++paramIndex}`);
 }
 
-export function mutate(sql: string, params: SqlValue[] = []) {
-  db.run(sql, params as any);
-  saveDb();
+export async function query(sql: string, params: any[] = []): Promise<SqlJsResult[]> {
+  const hadInsertOrIgnore = /INSERT\s+OR\s+IGNORE/i.test(sql);
+  let pgSql = toPgSql(sql);
+
+  if (hadInsertOrIgnore) {
+    pgSql = pgSql.replace(/INSERT\s+OR\s+IGNORE/i, 'INSERT') + ' ON CONFLICT DO NOTHING';
+  }
+
+  const result = await pool.query(pgSql, params);
+  return [{
+    columns: result.fields.map(f => f.name),
+    values: result.rows.map(row => Object.values(row)),
+  }];
+}
+
+export async function mutate(sql: string, params: any[] = []): Promise<void> {
+  const hadInsertOrIgnore = /INSERT\s+OR\s+IGNORE/i.test(sql);
+  let pgSql = toPgSql(sql);
+
+  if (hadInsertOrIgnore) {
+    pgSql = pgSql.replace(/INSERT\s+OR\s+IGNORE/i, 'INSERT') + ' ON CONFLICT DO NOTHING';
+  }
+
+  await pool.query(pgSql, params);
 }
