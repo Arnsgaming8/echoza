@@ -41,6 +41,13 @@ const BubbleWrapper = styled.div<{ $isSent: boolean }>`
   align-items: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
 `;
 
+const BubbleRow = styled.div<{ $isSent: boolean }>`
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  flex-direction: ${({ $isSent }) => ($isSent ? 'row' : 'row')};
+`;
+
 const SenderName = styled.span`
   font-size: 11px;
   font-weight: ${({ theme }) => theme.font.weight.semibold};
@@ -169,39 +176,41 @@ export default function MessageBubble({ message, showSenderName }: MessageBubble
         {showSenderName && !isSent && message.senderUsername && (
           <SenderName>{message.senderUsername}</SenderName>
         )}
-        <Bubble $isSent={isSent}>
-          {message.attachments && message.attachments.length > 0 && (
-            <AttachmentGrid>
-              {message.attachments.map((att, i) => (
-                att.type === 'image' && att.data ? (
-                  <ImageAtt key={i} src={att.data} alt={att.name} />
-                ) : att.type === 'video' && att.data ? (
-                  <video controls style={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px' }}>
-                    <source src={att.data} type={att.mime} />
-                  </video>
-                ) : (
-                  <FileAtt key={i} href={att.data || '#'} download={att.name} $isSent={isSent}>
-                    <FileIconWrap>{attIcon(att.type)}</FileIconWrap>
-                    <FileInfo>
-                      <FileName>{att.name}</FileName>
-                      <FileSize>{formatFileSize(att.size)}</FileSize>
-                    </FileInfo>
-                    <FiDownload style={{ marginLeft: 'auto', opacity: 0.6 }} />
-                  </FileAtt>
-                )
-              ))}
-            </AttachmentGrid>
-          )}
-          {message.content && <BubbleText>{message.content}</BubbleText>}
-          <BubbleFooter>
-            <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
-            {isSent && (
-              <ReadIcon $read={message.read}>
-                {message.read ? <FiCheckCircle /> : <FiCheck />}
-              </ReadIcon>
+        <BubbleRow $isSent={isSent}>
+          <Bubble $isSent={isSent}>
+            {message.attachments && message.attachments.length > 0 && (
+              <AttachmentGrid>
+                {message.attachments.map((att, i) => (
+                  att.type === 'image' && att.data ? (
+                    <ImageAtt key={i} src={att.data} alt={att.name} />
+                  ) : att.type === 'video' && att.data ? (
+                    <video controls style={{ maxWidth: '100%', maxHeight: 200, borderRadius: '8px' }}>
+                      <source src={att.data} type={att.mime} />
+                    </video>
+                  ) : (
+                    <FileAtt key={i} href={att.data || '#'} download={att.name} $isSent={isSent}>
+                      <FileIconWrap>{attIcon(att.type)}</FileIconWrap>
+                      <FileInfo>
+                        <FileName>{att.name}</FileName>
+                        <FileSize>{formatFileSize(att.size)}</FileSize>
+                      </FileInfo>
+                      <FiDownload style={{ marginLeft: 'auto', opacity: 0.6 }} />
+                    </FileAtt>
+                  )
+                ))}
+              </AttachmentGrid>
             )}
-          </BubbleFooter>
-        </Bubble>
+            {message.content && <BubbleText>{message.content}</BubbleText>}
+            <BubbleFooter>
+              <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
+            </BubbleFooter>
+          </Bubble>
+          {isSent && (
+            <ReadIcon $read={message.read}>
+              {message.read ? <FiCheckCircle /> : <FiCheck />}
+            </ReadIcon>
+          )}
+        </BubbleRow>
       </BubbleWrapper>
     </Wrapper>
   );
