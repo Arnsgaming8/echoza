@@ -159,9 +159,15 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
           }
         };
 
+        pc.oniceconnectionstatechange = () => {
+          console.log('ICE state:', pc?.iceConnectionState);
+        };
+
         pc.ontrack = (e) => {
+          console.log('Remote audio track received');
           if (remoteAudioRef.current) {
             remoteAudioRef.current.srcObject = e.streams[0];
+            remoteAudioRef.current.play().catch(() => {});
             setConnected(true);
           }
         };

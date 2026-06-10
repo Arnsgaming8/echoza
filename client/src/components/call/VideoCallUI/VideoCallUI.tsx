@@ -148,9 +148,15 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
           }
         };
 
+        pc.oniceconnectionstatechange = () => {
+          console.log('ICE state:', pc?.iceConnectionState);
+        };
+
         pc.ontrack = (e) => {
+          console.log('Remote track received');
           if (remoteVideoRef.current) {
             remoteVideoRef.current.srcObject = e.streams[0];
+            remoteVideoRef.current.play().catch(() => {});
             setConnected(true);
           }
         };

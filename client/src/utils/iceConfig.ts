@@ -8,6 +8,13 @@ export async function getIceServers(): Promise<RTCIceServer[]> {
     cachedIceConfig = data.iceServers as RTCIceServer[];
     return cachedIceConfig;
   } catch {
-    return [{ urls: 'stun:stun.l.google.com:19302' }];
+    return [
+      { urls: 'stun:stun.l.google.com:19302' },
+      {
+        urls: ['turn:openrelay.metered.ca:80', 'turns:openrelay.metered.ca:443'],
+        username: 'openrelayproject',
+        credential: 'openrelayproject',
+      },
+    ];
   }
 }
