@@ -290,19 +290,13 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('message:read', async ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
-      await mutate(
-        `UPDATE messages SET read = 1 WHERE id = ? AND sender_id != ?`,
-        [messageId, userId]
-      );
+      const msgResult = await query(`SELECT sender_id FROM messages WHERE id = ?`, [messageId]);
+      if (msgResult.length === 0 || msgResult[0].values.length === 0) return;
+      const senderId = msgResult[0].values[0][0] as string;
+      if (senderId === userId) return;
 
-      const result = await query(
-        `SELECT sender_id FROM messages WHERE id = ?`,
-        [messageId]
-      );
-      if (result.length > 0 && result[0].values.length > 0) {
-        const senderId = result[0].values[0][0] as string;
-        emitToUser(io, senderId, 'message:readReceipt', { messageId, conversationId });
-      }
+      await mutate(`UPDATE messages SET read = 1 WHERE id = ? AND sender_id != ?`, [messageId, userId]);
+      emitToUser(io, senderId, 'message:readReceipt', { messageId, conversationId });
     });
 
     socket.on('typing:start', ({ receiverId, conversationId, groupId }: { receiverId?: string; conversationId?: string; groupId?: string }) => {

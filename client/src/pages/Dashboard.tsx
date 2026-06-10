@@ -214,7 +214,7 @@ export default function Dashboard() {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
         });
-        if (document.visibilityState === 'visible') {
+        if (document.visibilityState === 'visible' && message.senderId !== user?.id) {
           setTimeout(() => {
             socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
           }, 500);
