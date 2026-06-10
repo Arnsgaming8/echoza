@@ -4,7 +4,7 @@ services:
     runtime: node
     repo: https://github.com/YOUR_USERNAME/echoza
     plan: free
-    buildCommand: npm install --prefix client && npm run build --prefix client && npm run build --prefix server
+    buildCommand: npm install --prefix client && npm install --prefix server && npm run build --prefix client && npm run build --prefix server
     startCommand: node server/dist/index.js
     healthCheckPath: /api/health
     envVars:

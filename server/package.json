@@ -4,9 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "cd ../client && npx vite build && cd ../server && npx tsc",
-    "start": "node dist/index.js",
-    "postinstall": "cd ../client && npm install"
+    "build": "npx tsc",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
