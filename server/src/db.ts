@@ -84,7 +84,9 @@ let paramIndex = 0;
 
 function toPgSql(sql: string): string {
   paramIndex = 0;
-  return sql.replace(/\?/g, () => `$${++paramIndex}`);
+  let result = sql.replace(/\?/g, () => `$${++paramIndex}`);
+  result = result.replace(/\bLIKE\b/gi, 'ILIKE');
+  return result;
 }
 
 export async function query(sql: string, params: any[] = []): Promise<SqlJsResult[]> {
