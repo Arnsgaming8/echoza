@@ -118,22 +118,44 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
   }, []);
 
   useEffect(() => {
-    async function setupCall() {
-      if (!socket || !user) return;
+    if (!socket || !user) return;
 
+    const receiverId = contact.id;
+    let pc: RTCPeerConnection | null = null;
+    let localStream: MediaStream | null = null;
+
+    const handleAnswer = ({ from, answer }: { from: string; answer: any }) => {
+      if (from === receiverId && pc && pc.signalingState === 'have-local-offer') {
+        pc.setRemoteDescription(new RTCSessionDescription(answer));
+        setConnected(true);
+      }
+    };
+
+    const handleIceCandidate = ({ from, candidate }: { from: string; candidate: any }) => {
+      if (from === receiverId && pc && pc.remoteDescription && candidate) {
+        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      }
+    };
+
+    if (isInitiator) {
+      socket.on('call:answer', handleAnswer);
+    }
+    socket.on('call:ice-candidate', handleIceCandidate);
+
+    async function setupCall() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = stream;
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        localStreamRef.current = localStream;
 
         const iceServers = await getIceServers();
-        const pc = new RTCPeerConnection({ iceServers });
+        pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
 
         pc.onicecandidate = (e) => {
           if (e.candidate && socket) {
-            socket.emit('call:ice-candidate', { receiverId: contact.id, candidate: e.candidate.toJSON() });
+            socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
           }
         };
 
@@ -147,27 +169,13 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
         if (isInitiator) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          socket.emit('call:offer', { receiverId: contact.id, type: 'audio', offer: pc.localDescription!.toJSON() });
-
-          socket.on('call:answer', ({ from, answer }: { from: string; answer: any }) => {
-            if (from === contact.id && pc.signalingState === 'have-local-offer') {
-              pc.setRemoteDescription(new RTCSessionDescription(answer));
-              setConnected(true);
-            }
-          });
+          socket!.emit('call:offer', { receiverId, type: 'audio', offer: pc.localDescription!.toJSON() });
         } else if (remoteOffer) {
           await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          socket.emit('call:answer', { receiverId: contact.id, answer: pc.localDescription!.toJSON() });
+          socket!.emit('call:answer', { receiverId, answer: pc.localDescription!.toJSON() });
         }
-
-        socket.on('call:ice-candidate', ({ from, candidate }: { from: string; candidate: any }) => {
-          if (from === contact.id && pc.remoteDescription && candidate) {
-            pc.addIceCandidate(new RTCIceCandidate(candidate));
-          }
-        });
-
       } catch (err) {
         console.warn('Audio call setup failed:', err);
       }
@@ -176,14 +184,10 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
     setupCall();
 
     return () => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(t => t.stop());
-      }
-      if (pcRef.current) {
-        pcRef.current.close();
-      }
-      socket?.off('call:answer');
-      socket?.off('call:ice-candidate');
+      if (localStream) localStream.getTracks().forEach(t => t.stop());
+      if (pc) pc.close();
+      socket.off('call:answer', handleAnswer);
+      socket.off('call:ice-candidate', handleIceCandidate);
     };
   }, []);
 
