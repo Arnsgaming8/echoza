@@ -124,9 +124,11 @@ export default function Dashboard() {
   const [callContact, setCallContact] = useState<Contact | null>(null);
   const [showAudioCall, setShowAudioCall] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
+  const [receivedOffer, setReceivedOffer] = useState<any>(null);
   const [incomingCall, setIncomingCall] = useState<{
     caller: { id: string; username: string; avatar: string };
     type: 'audio' | 'video';
+    offer: any;
   } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -230,15 +232,18 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('call:offer', ({ from, username: callerUsername, type }: { from: string; username: string; type: 'audio' | 'video' }) => {
+    socket.on('call:offer', ({ from, username: callerUsername, type, offer }: { from: string; username: string; type: 'audio' | 'video'; offer: any }) => {
       setIncomingCall({
         caller: { id: from, username: callerUsername, avatar: '' },
         type: type || 'audio',
+        offer,
       });
     });
 
     socket.on('call:end', ({ from }: { from: string }) => {
-      setIncomingCall(prev => prev?.caller.id === from ? null : prev);
+      if (!showAudioCall && !showVideoCall) {
+        setIncomingCall(prev => prev?.caller.id === from ? null : prev);
+      }
     });
 
     return () => {
@@ -396,17 +401,20 @@ export default function Dashboard() {
 
   const handleAudioCall = () => {
     if (!activeConv || activeConv.isGroup) return;
+    setReceivedOffer(null);
     setShowAudioCall(true);
   };
 
   const handleVideoCall = () => {
     if (!activeConv || activeConv.isGroup) return;
+    setReceivedOffer(null);
     setShowVideoCall(true);
   };
 
   const handleAcceptCall = () => {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
+    setReceivedOffer(incomingCall.offer);
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {
@@ -494,16 +502,22 @@ export default function Dashboard() {
       {showAudioCall && (activeConv?.contact || callContact) && (
         <AudioCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowAudioCall(false); setCallContact(null); }}
+          onEnd={() => { setShowAudioCall(false); setCallContact(null); setReceivedOffer(null); }}
           socket={socket}
+          user={user}
+          isInitiator={!receivedOffer}
+          remoteOffer={receivedOffer}
         />
       )}
 
       {showVideoCall && (activeConv?.contact || callContact) && (
         <VideoCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowVideoCall(false); setCallContact(null); }}
+          onEnd={() => { setShowVideoCall(false); setCallContact(null); setReceivedOffer(null); }}
           socket={socket}
+          user={user}
+          isInitiator={!receivedOffer}
+          remoteOffer={receivedOffer}
         />
       )}
 

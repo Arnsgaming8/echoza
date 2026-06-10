@@ -84,67 +84,108 @@ const ContactLabel = styled.div`
   text-shadow: 0 2px 8px rgba(0,0,0,0.5);
 `;
 
+const ICE_SERVERS = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
 interface VideoCallUIProps {
   contact: { id: string; username: string; avatar: string };
   onEnd: () => void;
   socket: Socket | null;
+  user: { id: string; username: string } | null;
+  isInitiator: boolean;
+  remoteOffer: any;
 }
 
-export default function VideoCallUI({ contact, onEnd, socket }: VideoCallUIProps) {
+export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator, remoteOffer }: VideoCallUIProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
+  const [connected, setConnected] = useState(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
 
   useEffect(() => {
-    async function startLocalStream() {
+    async function setupCall() {
+      if (!socket || !user) return;
+
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localStreamRef.current = stream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-      } catch {
-        console.warn('Could not access camera/microphone');
+
+        const pc = new RTCPeerConnection(ICE_SERVERS);
+        pcRef.current = pc;
+
+        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+        pc.onicecandidate = (e) => {
+          if (e.candidate && socket) {
+            socket.emit('call:ice-candidate', { receiverId: contact.id, candidate: e.candidate.toJSON() });
+          }
+        };
+
+        pc.ontrack = (e) => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = e.streams[0];
+            setConnected(true);
+          }
+        };
+
+        if (isInitiator) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit('call:offer', { receiverId: contact.id, type: 'video', offer: pc.localDescription!.toJSON() });
+
+          socket.on('call:answer', ({ from, answer }: { from: string; answer: any }) => {
+            if (from === contact.id && pc.signalingState === 'have-local-offer') {
+              pc.setRemoteDescription(new RTCSessionDescription(answer));
+              setConnected(true);
+            }
+          });
+        } else if (remoteOffer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('call:answer', { receiverId: contact.id, answer: pc.localDescription!.toJSON() });
+        }
+
+        socket.on('call:ice-candidate', ({ from, candidate }: { from: string; candidate: any }) => {
+          if (from === contact.id && pc.remoteDescription && candidate) {
+            pc.addIceCandidate(new RTCIceCandidate(candidate));
+          }
+        });
+
+      } catch (err) {
+        console.warn('Video call setup failed:', err);
       }
     }
 
-    startLocalStream();
+    setupCall();
 
     return () => {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(t => t.stop());
       }
+      if (pcRef.current) {
+        pcRef.current.close();
+      }
+      socket?.off('call:answer');
+      socket?.off('call:ice-candidate');
     };
   }, []);
 
-  useEffect(() => {
-    if (socket && contact) {
-      socket.emit('call:offer', { receiverId: contact.id, type: 'video', offer: {} });
-      return () => {
-        socket.emit('call:end', { receiverId: contact.id });
-      };
-    }
-  }, [socket, contact]);
-
   const toggleMute = () => {
     if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => {
-        t.enabled = !t.enabled;
-      });
+      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
       setIsMuted(!isMuted);
     }
   };
 
   const toggleCamera = () => {
     if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach(t => {
-        t.enabled = !t.enabled;
-      });
+      localStreamRef.current.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
       setIsCameraOn(!isCameraOn);
     }
   };
@@ -160,11 +201,18 @@ export default function VideoCallUI({ contact, onEnd, socket }: VideoCallUIProps
     }
   };
 
+  const handleEnd = () => {
+    if (socket && contact) {
+      socket.emit('call:end', { receiverId: contact.id });
+    }
+    onEnd();
+  };
+
   return (
     <Overlay>
-      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline muted />
+      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
       <LocalVideo ref={localVideoRef} autoPlay playsInline muted />
-      <ContactLabel>{contact.username}</ContactLabel>
+      <ContactLabel>{connected ? contact.username : `Calling ${contact.username}...`}</ContactLabel>
       <Controls>
         <ControlBtn $active={!isMuted} onClick={toggleMute}>
           {isMuted ? <FiMicOff /> : <FiMic />}
@@ -175,7 +223,7 @@ export default function VideoCallUI({ contact, onEnd, socket }: VideoCallUIProps
         <ControlBtn $active onClick={handleScreenShare}>
           <FiMonitor />
         </ControlBtn>
-        <ControlBtn $danger onClick={onEnd}>
+        <ControlBtn $danger onClick={handleEnd}>
           <FiX size={24} />
         </ControlBtn>
       </Controls>

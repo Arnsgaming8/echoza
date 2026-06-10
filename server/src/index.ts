@@ -5,7 +5,7 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb } from './db.js';
+import { initDb, getPool } from './db.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -32,6 +32,16 @@ async function main() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
+  });
+
+  app.post('/api/db/clear', async (_req, res) => {
+    try {
+      const pool = getPool();
+      await pool.query('TRUNCATE users, conversations, group_members, messages, push_subscriptions RESTART IDENTITY CASCADE');
+      res.json({ ok: true, message: 'All data cleared' });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to clear database' });
+    }
   });
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
