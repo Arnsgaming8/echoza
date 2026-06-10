@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { useAuth } from '../../../contexts/AuthContext';
-import { FiCheck, FiCheckCircle, FiFile, FiImage, FiVideo, FiDownload } from 'react-icons/fi';
+import { FiFile, FiImage, FiVideo, FiDownload } from 'react-icons/fi';
 
 interface Attachment {
   name: string;
@@ -138,11 +138,11 @@ const Time = styled.span<{ $isSent: boolean }>`
     $isSent ? theme.colors.secondary.warmGray : theme.colors.secondary.warmGray};
 `;
 
-const ReadIcon = styled.span<{ $read: boolean }>`
-  font-size: 12px;
+const ReadLabel = styled.span<{ $read: boolean }>`
+  font-size: 11px;
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ $read, theme }) =>
     $read ? theme.colors.primary.echoBlue : theme.colors.secondary.warmGray};
-  display: flex;
 `;
 
 const AudioPlayer = styled.audio`
@@ -211,9 +211,9 @@ export default function MessageBubble({ message, showSenderName }: MessageBubble
         <MetaRow $isSent={isSent}>
           <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
           {isSent && (
-            <ReadIcon $read={message.read}>
-              {message.read ? <FiCheckCircle /> : <FiCheck />}
-            </ReadIcon>
+            <ReadLabel $read={message.read}>
+              {message.read ? 'Read' : 'Sent'}
+            </ReadLabel>
           )}
         </MetaRow>
       </BubbleWrapper>
