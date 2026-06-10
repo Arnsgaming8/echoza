@@ -68,6 +68,18 @@ export async function initDb(): Promise<void> {
     await pool.query(`ALTER TABLE messages ADD COLUMN attachments TEXT DEFAULT '[]'`);
   } catch {}
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      user_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT DEFAULT (NOW()),
+      PRIMARY KEY (user_id, endpoint),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    )
+  `);
+
   console.log('Database connected and schema ready');
 }
 

@@ -1,0 +1,16 @@
+{
+  "name": "Echoza",
+  "short_name": "Echoza",
+  "description": "Text. Talk. Connect.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F1A2F",
+  "theme_color": "#3A7BFF",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

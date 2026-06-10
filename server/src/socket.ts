@@ -2,6 +2,7 @@ import { Server as SocketServer, Socket } from 'socket.io';
 import { query, mutate } from './db.js';
 import { verifyToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
+import { sendPushNotification } from './routes/push.routes.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -276,6 +277,12 @@ export function setupSocket(io: SocketServer): void {
       } else if (receiverId) {
         emitToUser(io, receiverId, 'message:new', message);
         emitToUser(io, receiverId, 'conversation:update', { conversationId });
+        sendPushNotification(
+          receiverId,
+          username,
+          content || 'Sent an attachment',
+          '/'
+        );
       }
     });
 

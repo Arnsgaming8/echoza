@@ -99,6 +99,17 @@ const MessagesEnd = styled.div`
   height: 1px;
 `;
 
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    output[i] = rawData.charCodeAt(i);
+  }
+  return output;
+}
+
 export default function Dashboard() {
   const { socket, onlineUsers } = useSocket();
   const { user } = useAuth();
@@ -128,6 +139,31 @@ export default function Dashboard() {
       Notification.requestPermission();
     }
   }, []);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
+    if (Notification.permission !== 'granted') return;
+
+    const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
+
+    navigator.serviceWorker.ready.then(reg => {
+      reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
+      }).then(sub => {
+        fetch('/api/push/subscribe', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + localStorage.getItem('token'),
+          },
+          body: JSON.stringify(sub.toJSON()),
+        }).catch(() => {});
+      }).catch(() => {});
+    });
+  }, [user]);
+
+
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {

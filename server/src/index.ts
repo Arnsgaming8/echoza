@@ -9,6 +9,7 @@ import { initDb } from './db.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
+import pushRoutes from './routes/push.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -27,6 +28,7 @@ async function main() {
 
   app.use('/api/auth', authRoutes);
   app.use('/api/users', userRoutes);
+  app.use('/api/push', pushRoutes);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
