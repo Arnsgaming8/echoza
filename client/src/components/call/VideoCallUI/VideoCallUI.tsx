@@ -130,7 +130,14 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
 
     async function setupCall() {
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 640, max: 854 },
+            height: { ideal: 480, max: 480 },
+            frameRate: { ideal: 24, max: 30 },
+          },
+          audio: true,
+        });
         localStreamRef.current = localStream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
@@ -141,6 +148,14 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         pcRef.current = pc;
 
         localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
+
+        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          videoSender.setParameters({
+            ...videoSender.getParameters() as RTCRtpSendParameters,
+            encodings: [{ maxBitrate: 500000 }],
+          });
+        }
 
         pc.onicecandidate = (e) => {
           if (e.candidate && socket) {
