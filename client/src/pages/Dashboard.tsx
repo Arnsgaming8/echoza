@@ -226,7 +226,7 @@ export default function Dashboard() {
             socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
           }, 500);
         }
-      } else if (message.senderId !== user?.id && 'Notification' in window) {
+      } else if (document.visibilityState !== 'visible' && message.senderId !== user?.id && 'Notification' in window) {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
         const body = senderName + ': ' + (message.content || 'Sent an attachment');
         if (Notification.permission === 'granted') {
@@ -273,6 +273,20 @@ export default function Dashboard() {
         type: type || 'audio',
         offer,
       });
+
+      if (document.visibilityState !== 'visible' && 'Notification' in window && Notification.permission === 'granted') {
+        const body = (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername;
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification('Echoza', {
+            body,
+            icon: '/vite.svg',
+            tag: 'call-' + from,
+            data: { url: '/' },
+          });
+        }).catch(() => {
+          try { new Notification('Echoza', { body, icon: '/vite.svg' }); } catch {}
+        });
+      }
     });
 
     socket.on('call:end', ({ from }: { from: string }) => {
