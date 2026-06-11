@@ -77,14 +77,23 @@ export function setupSocket(io: SocketServer): void {
     const userId = socket.userId!;
     const username = socket.username!;
 
-    const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
-    const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
-
+    // Must add to onlineUsers BEFORE any await to avoid race with user:getOnline
     const isFirstConnection = !onlineUsers.has(userId) || onlineUsers.get(userId)!.size === 0;
     if (!onlineUsers.has(userId)) {
       onlineUsers.set(userId, new Map());
     }
-    onlineUsers.get(userId)!.set(socket.id, { username, avatar });
+    onlineUsers.get(userId)!.set(socket.id, { username, avatar: '' });
+
+    const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
+    const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
+
+    // Update the stored avatar now that we have it
+    const sockets = onlineUsers.get(userId);
+    if (sockets) {
+      for (const [sid, data] of sockets) {
+        sockets.set(sid, { ...data, avatar });
+      }
+    }
 
     if (isFirstConnection) {
       mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
