@@ -171,10 +171,9 @@ const HiddenInput = styled.input`
 const DeleteBar = styled.div`
   display: flex;
   align-items: center;
-  gap: ${({ theme }) => theme.spacing.sm};
-  padding: ${({ theme }) => theme.spacing.md};
-  background: ${({ theme }) => theme.colors.bg.sidebar};
-  border-top: 1px solid ${({ theme }) => theme.colors.border};
+  gap: 6px;
+  padding: 0 4px;
+  flex-shrink: 0;
 `;
 
 const DeleteBarText = styled.span`
@@ -289,66 +288,63 @@ const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
 
   return (
     <Wrapper>
-      {deleteMode ? (
-        <DeleteBar>
-          <DeleteBarText>{selectedCount} message{selectedCount !== 1 ? 's' : ''} selected</DeleteBarText>
-          <DeleteBarBtn onClick={onToggleDeleteMode}>
-            <FiX /> Cancel
-          </DeleteBarBtn>
-          <DeleteBarBtn $danger disabled={!selectedCount} onClick={onDeleteSelected}>
-            <FiTrash2 /> Delete
-          </DeleteBarBtn>
-        </DeleteBar>
-      ) : (
-        <>
-          {attachments.length > 0 && (
-            <PreviewBar>
-              {attachments.map((att, i) => (
-                <PreviewItem key={i}>
-                  {att.type === 'image' && att.preview ? (
-                    <PreviewImg src={att.preview} alt={att.file.name} />
-                  ) : (
-                    <FileIcon>{fileIcon(att.type)}</FileIcon>
-                  )}
-                  <RemoveBtn onClick={() => removeAttachment(i)}>
-                    <FiX />
-                  </RemoveBtn>
-                </PreviewItem>
-              ))}
-            </PreviewBar>
-          )}
-          <InputRow>
-            <InputWrapper>
-              <AttachBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
-                <FiPaperclip />
-              </AttachBtn>
-              <TextInput
-                ref={textareaRef}
-                placeholder="Type a message..."
-                value={content}
-                onChange={e => handleChange(e.target.value)}
-                onKeyDown={handleKeyDown}
-                rows={1}
-                disabled={disabled}
-              />
-              <SendButton
-                $hasContent={hasContent}
-                onClick={handleSend}
-                disabled={disabled}
-              >
-                <FiSend />
-              </SendButton>
-            </InputWrapper>
-            <HiddenInput
-              ref={fileInputRef}
-              type="file"
-              multiple
-              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
-              onChange={handleFileSelect}
-            />
-          </InputRow>
-        </>
+      {attachments.length > 0 && (
+        <PreviewBar>
+          {attachments.map((att, i) => (
+            <PreviewItem key={i}>
+              {att.type === 'image' && att.preview ? (
+                <PreviewImg src={att.preview} alt={att.file.name} />
+              ) : (
+                <FileIcon>{fileIcon(att.type)}</FileIcon>
+              )}
+              <RemoveBtn onClick={() => removeAttachment(i)}>
+                <FiX />
+              </RemoveBtn>
+            </PreviewItem>
+          ))}
+        </PreviewBar>
       )}
+      <InputRow>
+        <InputWrapper>
+          {deleteMode && (
+            <DeleteBar>
+              <DeleteBarText>{selectedCount} message{selectedCount !== 1 ? 's' : ''} selected</DeleteBarText>
+              <DeleteBarBtn onClick={onToggleDeleteMode}>
+                <FiX size={14} />
+              </DeleteBarBtn>
+              <DeleteBarBtn $danger disabled={!selectedCount} onClick={onDeleteSelected}>
+                <FiTrash2 size={14} /> Delete
+              </DeleteBarBtn>
+            </DeleteBar>
+          )}
+          <AttachBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
+            <FiPaperclip />
+          </AttachBtn>
+          <TextInput
+            ref={textareaRef}
+            placeholder={deleteMode ? 'Select messages to delete...' : 'Type a message...'}
+            value={content}
+            onChange={e => handleChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={1}
+            disabled={disabled}
+          />
+          <SendButton
+            $hasContent={hasContent}
+            onClick={handleSend}
+            disabled={disabled}
+          >
+            <FiSend />
+          </SendButton>
+        </InputWrapper>
+        <HiddenInput
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
+          onChange={handleFileSelect}
+        />
+      </InputRow>
     </Wrapper>
   );
 }
