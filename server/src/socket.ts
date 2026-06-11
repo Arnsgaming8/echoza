@@ -9,12 +9,25 @@ interface AuthSocket extends Socket {
   username?: string;
 }
 
-const onlineUsers = new Map<string, { socketId: string; username: string; avatar: string }>();
+const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
-  const user = onlineUsers.get(userId);
-  if (user) {
-    io.to(user.socketId).emit(event, data);
+  const sockets = onlineUsers.get(userId);
+  if (sockets) {
+    for (const socketId of sockets.keys()) {
+      io.to(socketId).emit(event, data);
+    }
+  }
+}
+
+function emitToUserExcept(io: SocketServer, userId: string, exceptSocketId: string, event: string, data: any) {
+  const sockets = onlineUsers.get(userId);
+  if (sockets) {
+    for (const socketId of sockets.keys()) {
+      if (socketId !== exceptSocketId) {
+        io.to(socketId).emit(event, data);
+      }
+    }
   }
 }
 
@@ -67,15 +80,22 @@ export function setupSocket(io: SocketServer): void {
     const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
     const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
 
-    onlineUsers.set(userId, { socketId: socket.id, username, avatar });
-    mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
+    const isFirstConnection = !onlineUsers.has(userId) || onlineUsers.get(userId)!.size === 0;
+    if (!onlineUsers.has(userId)) {
+      onlineUsers.set(userId, new Map());
+    }
+    onlineUsers.get(userId)!.set(socket.id, { username, avatar });
 
-    io.emit('user:online', { userId, username });
+    if (isFirstConnection) {
+      mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
+      io.emit('user:online', { userId, username });
+    }
 
     socket.on('user:getOnline', () => {
-      const online = Array.from(onlineUsers.entries()).map(([id, data]) => ({
-        userId: id, username: data.username,
-      }));
+      const online = Array.from(onlineUsers.entries()).map(([id, sockets]) => {
+        const first = sockets.values().next().value;
+        return { userId: id, username: first?.username || '' };
+      });
       socket.emit('user:onlineList', online);
     });
 
@@ -272,7 +292,8 @@ export function setupSocket(io: SocketServer): void {
         read: false, createdAt, isGroup,
       };
 
-      io.to(socket.id).emit('message:new', message);
+      // Emit to all sender devices
+      emitToUser(io, userId, 'message:new', message);
 
       if (isGroup) {
         emitToGroupMembers(io, conversationId, 'message:new', message, userId);
@@ -353,12 +374,24 @@ export function setupSocket(io: SocketServer): void {
       if (avatar) {
         await mutate(`UPDATE users SET avatar = ? WHERE id = ?`, [avatar, userId]);
       }
-      socket.emit('profile:updateResult', { success: true, username: newUsername });
+
+      // Update stored data for all this user's sockets
+      const sockets = onlineUsers.get(userId);
+      if (sockets) {
+        for (const [sid, data] of sockets) {
+          sockets.set(sid, { ...data, username: newUsername });
+        }
+      }
+
+      // Tell all devices about the profile update
+      emitToUser(io, userId, 'profile:updateResult', { success: true, username: newUsername, avatar });
     });
 
     socket.on('call:offer', ({ receiverId, type, offer }: { receiverId: string; type?: string; offer: any }) => {
+      const sockets = onlineUsers.get(userId);
+      const userData = sockets?.values().next().value;
       emitToUser(io, receiverId, 'call:offer', {
-        from: userId, username, avatar: onlineUsers.get(userId)?.avatar || '',
+        from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', offer,
       });
     });
@@ -392,9 +425,15 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('disconnect', () => {
-      onlineUsers.delete(userId);
-      mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]);
-      io.emit('user:offline', { userId });
+      const sockets = onlineUsers.get(userId);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(userId);
+          mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]);
+          io.emit('user:offline', { userId });
+        }
+      }
     });
   });
 }

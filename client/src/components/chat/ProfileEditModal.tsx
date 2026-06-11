@@ -173,8 +173,7 @@ export default function ProfileEditModal({
 
     socket.emit('profile:update', { username, avatar });
 
-    socket.on('profile:updateResult', (result: { success?: boolean; error?: string; username?: string }) => {
-      socket.off('profile:updateResult');
+    socket.once('profile:updateResult', (result: { success?: boolean; error?: string; username?: string }) => {
       setSaving(false);
 
       if (result.error) {

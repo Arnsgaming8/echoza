@@ -113,6 +113,8 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 export default function Dashboard() {
   const { socket, onlineUsers } = useSocket();
   const { user, updateUser } = useAuth();
+  const updateUserRef = useRef(updateUser);
+  updateUserRef.current = updateUser;
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const conversationsRef = useRef(conversations);
@@ -286,6 +288,12 @@ export default function Dashboard() {
       }
     });
 
+    socket.on('profile:updateResult', (result: { success?: boolean; username?: string; avatar?: string }) => {
+      if (result.success && result.username) {
+        updateUserRef.current({ username: result.username, avatar: result.avatar || '' });
+      }
+    });
+
     return () => {
       socket.off('conversations:list');
       socket.off('conversation:update');
@@ -295,6 +303,7 @@ export default function Dashboard() {
       socket.off('typing:stop');
       socket.off('call:offer');
       socket.off('call:end');
+      socket.off('profile:updateResult');
     };
   }, [socket, activeChat]);
 
