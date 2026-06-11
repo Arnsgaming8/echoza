@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { Avatar, Badge, StatusDot } from '../../common';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSocket } from '../../../contexts/SocketContext';
-import { FiLogOut, FiSearch, FiMessageSquare, FiEdit3, FiPlus, FiUsers, FiX } from 'react-icons/fi';
+import { FiLogOut, FiSearch, FiMessageSquare, FiEdit3, FiPlus, FiUsers, FiX, FiTrash2 } from 'react-icons/fi';
 
 interface Contact {
   id: string;
@@ -27,6 +27,7 @@ interface SidebarProps {
   conversations: Conversation[];
   activeChat: string | null;
   onSelectChat: (conversationId: string, conv: Conversation) => void;
+  onDeleteChat: (conversationId: string) => void;
   onSearch: (query: string) => void;
   onAddChat: () => void;
   onEditProfile: () => void;
@@ -206,6 +207,28 @@ const ChatItem = styled.div<{ $active: boolean }>`
   &:hover {
     background: ${({ theme }) => theme.colors.bg.hover};
   }
+
+  &:hover .delete-btn {
+    opacity: 1;
+  }
+`;
+
+const DeleteBtn = styled.button`
+  opacity: 0;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  color: ${({ theme }) => theme.colors.danger || '#e74c3c'};
+  font-size: 14px;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.hover};
+  }
 `;
 
 const ChatInfo = styled.div`
@@ -280,6 +303,7 @@ export default function Sidebar({
   conversations,
   activeChat,
   onSelectChat,
+  onDeleteChat,
   onSearch,
   onAddChat,
   onEditProfile,
@@ -390,6 +414,9 @@ export default function Sidebar({
                   <Time>{formatTime(conv.lastTime)}</Time>
                   <Badge count={conv.unread} />
                 </TimeBadge>
+                <DeleteBtn className="delete-btn" onClick={e => { e.stopPropagation(); onDeleteChat(conv.id); }}>
+                  <FiTrash2 />
+                </DeleteBtn>
               </ChatItem>
             ))
           )}

@@ -368,6 +368,41 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
     });
 
+    socket.on('conversation:delete', async ({ conversationId }: { conversationId: string }) => {
+      const conv = await query(
+        `SELECT is_group, user1_id FROM conversations WHERE id = ?`,
+        [conversationId]
+      );
+      if (!conv[0]?.values?.length) return;
+
+      const [isGroup, creatorId] = conv[0].values[0];
+
+      if (isGroup) {
+        if (creatorId !== userId) return;
+        const members = await query(
+          `SELECT user_id FROM group_members WHERE group_id = ?`,
+          [conversationId]
+        );
+        const memberIds = (members[0]?.values || []).map(r => r[0] as string);
+        await mutate(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
+        await mutate(`DELETE FROM group_members WHERE group_id = ?`, [conversationId]);
+        await mutate(`DELETE FROM conversations WHERE id = ?`, [conversationId]);
+        for (const mid of memberIds) {
+          emitToUser(io, mid, 'conversation:deleted', { conversationId });
+        }
+      } else {
+        const otherUserId = await query(
+          `SELECT CASE WHEN user1_id = ? THEN user2_id ELSE user1_id END FROM conversations WHERE id = ?`,
+          [userId, conversationId]
+        );
+        const otherId = otherUserId[0]?.values[0]?.[0] as string;
+        await mutate(`DELETE FROM messages WHERE conversation_id = ?`, [conversationId]);
+        await mutate(`DELETE FROM conversations WHERE id = ?`, [conversationId]);
+        emitToUser(io, userId, 'conversation:deleted', { conversationId });
+        emitToUser(io, otherId, 'conversation:deleted', { conversationId });
+      }
+    });
+
     socket.on('profile:update', async ({ username: newUsername, avatar }: { username: string; avatar?: string }) => {
       if (!newUsername || !/^[A-Za-z]{5,8}$/.test(newUsername)) {
         socket.emit('profile:updateResult', { error: 'Username must be 5-8 letters' });

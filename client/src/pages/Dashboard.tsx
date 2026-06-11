@@ -308,6 +308,15 @@ export default function Dashboard() {
       }
     });
 
+    socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
+      setConversations(prev => prev.filter(c => c.id !== conversationId));
+      if (activeChat === conversationId) {
+        setActiveChat(null);
+        setActiveConv(null);
+        setMessages([]);
+      }
+    });
+
     return () => {
       socket.off('conversations:list');
       socket.off('conversation:update');
@@ -318,6 +327,7 @@ export default function Dashboard() {
       socket.off('call:offer');
       socket.off('call:end');
       socket.off('profile:updateResult');
+      socket.off('conversation:deleted');
     };
   }, [socket, activeChat]);
 
@@ -338,6 +348,12 @@ export default function Dashboard() {
   };
   const handleSelectChatRef = useRef(handleSelectChat);
   handleSelectChatRef.current = handleSelectChat;
+
+  const handleDeleteChat = (conversationId: string) => {
+    if (socket) {
+      socket.emit('conversation:delete', { conversationId });
+    }
+  };
 
   useEffect(() => {
     if (!socket || !activeChat) return;
@@ -513,6 +529,7 @@ export default function Dashboard() {
         conversations={conversations}
         activeChat={activeChat}
         onSelectChat={handleSelectChat}
+        onDeleteChat={handleDeleteChat}
         onSearch={handleSearch}
         onAddChat={() => setShowNewChat(true)}
         onEditProfile={() => setShowProfileEdit(true)}
