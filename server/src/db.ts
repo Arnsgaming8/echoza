@@ -6,9 +6,7 @@ let pool: pg.Pool;
 
 export async function initDb(): Promise<void> {
   const connectionString = process.env.DATABASE_URL;
-  const ssl = connectionString?.includes('sslmode')
-    ? { rejectUnauthorized: false }
-    : false;
+  const ssl = { rejectUnauthorized: false };
 
   pool = new Pool({ connectionString, ssl });
 
