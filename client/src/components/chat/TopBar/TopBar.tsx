@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { Avatar, StatusDot } from '../../common';
-import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu } from 'react-icons/fi';
+import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu, FiTrash2 } from 'react-icons/fi';
 import { useTheme } from '../../../contexts/ThemeContext';
 
 interface Contact {
@@ -23,6 +23,8 @@ interface TopBarProps {
   onAudioCall: () => void;
   onVideoCall: () => void;
   onToggleSidebar?: () => void;
+  deleteMode?: boolean;
+  onToggleDeleteMode?: () => void;
 }
 
 const Wrapper = styled.header`
@@ -129,25 +131,29 @@ const Right = styled.div`
   gap: ${({ theme }) => theme.spacing.sm};
 `;
 
-const IconBtn = styled.button`
+const IconBtn = styled.button<{ $active?: boolean }>`
   width: 36px;
   height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: ${({ theme }) => theme.radius.sm};
-  background: transparent;
-  color: ${({ theme }) => theme.colors.text.secondary};
+  background: ${({ $active, theme }) =>
+    $active ? theme.colors.primary.echoBlue : 'transparent'};
+  color: ${({ $active }) =>
+    $active ? 'white' : 'inherit'};
   font-size: 18px;
   transition: all ${({ theme }) => theme.transition};
 
   &:hover {
-    background: ${({ theme }) => theme.colors.bg.hover};
-    color: ${({ theme }) => theme.colors.text.primary};
+    background: ${({ $active, theme }) =>
+      $active ? theme.colors.primary.echoBlue : theme.colors.bg.hover};
+    color: ${({ $active }) =>
+      $active ? 'white' : 'inherit'};
   }
 `;
 
-export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar }: TopBarProps) {
+export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
 
   const showCallButtons = !!conversation;
@@ -199,6 +205,11 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
               <FiVideo />
             </IconBtn>
           </>
+        )}
+        {conversation && (
+          <IconBtn onClick={onToggleDeleteMode} title={deleteMode ? 'Cancel' : 'Delete messages'} $active={deleteMode}>
+            <FiTrash2 />
+          </IconBtn>
         )}
         <IconBtn onClick={toggleTheme} title="Toggle theme">
           {isDark ? <FiSun /> : <FiMoon />}

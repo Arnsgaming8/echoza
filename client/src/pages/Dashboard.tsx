@@ -135,6 +135,8 @@ export default function Dashboard() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [deleteMode, setDeleteMode] = useState(false);
+  const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvRef = useRef(activeConv);
@@ -317,6 +319,15 @@ export default function Dashboard() {
       }
     });
 
+    socket.on('messages:deleted', ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
+      setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+      setConversations(prev => prev.map(c =>
+        c.id === conversationId ? { ...c, unread: 0 } : c
+      ));
+      setDeleteMode(false);
+      setSelectedMessages(new Set());
+    });
+
     return () => {
       socket.off('conversations:list');
       socket.off('conversation:update');
@@ -328,6 +339,7 @@ export default function Dashboard() {
       socket.off('call:end');
       socket.off('profile:updateResult');
       socket.off('conversation:deleted');
+      socket.off('messages:deleted');
     };
   }, [socket, activeChat]);
 
@@ -341,6 +353,8 @@ export default function Dashboard() {
     setMessages([]);
     setTypingUsers(new Set());
     setShowSidebar(false);
+    setDeleteMode(false);
+    setSelectedMessages(new Set());
 
     if (socket) {
       socket.emit('messages:get', { conversationId });
@@ -353,6 +367,27 @@ export default function Dashboard() {
     if (socket) {
       socket.emit('conversation:delete', { conversationId });
     }
+  };
+
+  const toggleDeleteMode = () => {
+    setDeleteMode(prev => !prev);
+    setSelectedMessages(new Set());
+  };
+
+  const toggleSelectMessage = (messageId: string) => {
+    setSelectedMessages(prev => {
+      const next = new Set(prev);
+      if (next.has(messageId)) next.delete(messageId); else next.add(messageId);
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = () => {
+    if (!socket || !activeChat || selectedMessages.size === 0) return;
+    socket.emit('messages:delete', {
+      messageIds: Array.from(selectedMessages),
+      conversationId: activeChat,
+    });
   };
 
   useEffect(() => {
@@ -542,6 +577,8 @@ export default function Dashboard() {
           onAudioCall={handleAudioCall}
           onVideoCall={handleVideoCall}
           onToggleSidebar={() => setShowSidebar(s => !s)}
+          deleteMode={deleteMode}
+          onToggleDeleteMode={toggleDeleteMode}
         />
         <ChatArea>
           {activeChat && activeConv ? (
@@ -558,6 +595,9 @@ export default function Dashboard() {
                     key={msg.id}
                     message={msg}
                     showSenderName={!!activeConv.isGroup}
+                    deleteMode={deleteMode}
+                    isSelected={selectedMessages.has(msg.id)}
+                    onToggleSelect={toggleSelectMessage}
                   />
                 ))}
                 {showTyping.map(uid => (
@@ -573,6 +613,10 @@ export default function Dashboard() {
                 onSend={handleSend}
                 onTypingStart={handleTypingStart}
                 onTypingStop={handleTypingStop}
+                deleteMode={deleteMode}
+                selectedCount={selectedMessages.size}
+                onToggleDeleteMode={toggleDeleteMode}
+                onDeleteSelected={handleDeleteSelected}
               />
             </>
           ) : (

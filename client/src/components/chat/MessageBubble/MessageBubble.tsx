@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { useAuth } from '../../../contexts/AuthContext';
-import { FiFile, FiImage, FiVideo, FiDownload } from 'react-icons/fi';
+import { FiFile, FiImage, FiVideo, FiDownload, FiCheckCircle, FiCircle } from 'react-icons/fi';
 
 interface Attachment {
   name: string;
@@ -25,6 +25,9 @@ interface Message {
 interface MessageBubbleProps {
   message: Message;
   showSenderName?: boolean;
+  deleteMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (messageId: string) => void;
 }
 
 const Wrapper = styled.div<{ $isSent: boolean }>`
@@ -32,6 +35,8 @@ const Wrapper = styled.div<{ $isSent: boolean }>`
   justify-content: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
   animation: fadeIn 0.3s ease;
   margin-bottom: 4px;
+  align-items: flex-start;
+  gap: 6px;
 `;
 
 const BubbleWrapper = styled.div<{ $isSent: boolean }>`
@@ -150,6 +155,20 @@ const AudioPlayer = styled.audio`
   height: 40px;
 `;
 
+const Checkbox = styled.button`
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: transparent;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-size: 18px;
+  flex-shrink: 0;
+  margin-top: 4px;
+`;
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -164,7 +183,7 @@ function attIcon(type: string) {
   }
 }
 
-export default function MessageBubble({ message, showSenderName }: MessageBubbleProps) {
+export default function MessageBubble({ message, showSenderName, deleteMode, isSelected, onToggleSelect }: MessageBubbleProps) {
   const { user } = useAuth();
   const isSent = message.senderId === user?.id;
 
@@ -175,6 +194,11 @@ export default function MessageBubble({ message, showSenderName }: MessageBubble
 
   return (
     <Wrapper $isSent={isSent}>
+      {deleteMode && isSent && (
+        <Checkbox onClick={() => onToggleSelect?.(message.id)}>
+          {isSelected ? <FiCheckCircle /> : <FiCircle />}
+        </Checkbox>
+      )}
       <BubbleWrapper $isSent={isSent}>
         {showSenderName && !isSent && message.senderUsername && (
           <SenderName>{message.senderUsername}</SenderName>

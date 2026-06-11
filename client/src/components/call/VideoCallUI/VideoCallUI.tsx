@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX } from 'react-icons/fi';
+import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX, FiSettings } from 'react-icons/fi';
 import { getIceServers } from '../../../utils/iceConfig';
 
 const Overlay = styled.div`
@@ -85,6 +85,65 @@ const ContactLabel = styled.div`
   text-shadow: 0 2px 8px rgba(0,0,0,0.5);
 `;
 
+const SettingsPanel = styled.div`
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 300px;
+  background: #222;
+  border-radius: ${({ theme }) => theme.radius.lg};
+  padding: ${({ theme }) => theme.spacing.lg};
+  z-index: 10;
+  box-shadow: ${({ theme }) => theme.shadow.lg};
+`;
+
+const SettingsTitle = styled.h3`
+  color: white;
+  font-size: ${({ theme }) => theme.font.size.md};
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+`;
+
+const SettingsRow = styled.div`
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+`;
+
+const SettingsLabel = styled.label`
+  display: block;
+  color: rgba(255,255,255,0.7);
+  font-size: ${({ theme }) => theme.font.size.xs};
+  margin-bottom: 4px;
+`;
+
+const SettingsSelect = styled.select`
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: #333;
+  color: white;
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: ${({ theme }) => theme.font.size.sm};
+`;
+
+const SettingsClose = styled.button`
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: rgba(255,255,255,0.5);
+  font-size: 16px;
+
+  &:hover {
+    background: rgba(255,255,255,0.1);
+    color: white;
+  }
+`;
+
 interface VideoCallUIProps {
   contact: { id: string; username: string; avatar: string };
   onEnd: () => void;
@@ -98,6 +157,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedInput, setSelectedInput] = useState('');
+  const [selectedOutput, setSelectedOutput] = useState('');
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -233,11 +297,76 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
     onEnd();
   };
 
+  const openSettings = async () => {
+    setShowSettings(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
+      setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
+      if (!selectedInput && devices.find(d => d.kind === 'audioinput')) {
+        setSelectedInput(devices.find(d => d.kind === 'audioinput')!.deviceId);
+      }
+      if (!selectedOutput && devices.find(d => d.kind === 'audiooutput')) {
+        setSelectedOutput(devices.find(d => d.kind === 'audiooutput')!.deviceId);
+      }
+    } catch {}
+  };
+
+  const changeAudioInput = async (deviceId: string) => {
+    setSelectedInput(deviceId);
+    if (!localStreamRef.current || !pcRef.current) return;
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+      const newTrack = newStream.getAudioTracks()[0];
+      const oldTrack = localStreamRef.current.getAudioTracks()[0];
+      if (oldTrack) {
+        localStreamRef.current.removeTrack(oldTrack);
+        oldTrack.stop();
+      }
+      localStreamRef.current.addTrack(newTrack);
+      const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio');
+      if (sender) await sender.replaceTrack(newTrack);
+    } catch {}
+  };
+
+  const changeAudioOutput = (deviceId: string) => {
+    setSelectedOutput(deviceId);
+    if (remoteVideoRef.current && 'setSinkId' in remoteVideoRef.current) {
+      (remoteVideoRef.current as any).setSinkId(deviceId).catch(() => {});
+    }
+  };
+
   return (
     <Overlay>
       <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
       <LocalVideo ref={localVideoRef} autoPlay playsInline muted />
       <ContactLabel>{connected ? contact.username : `Calling ${contact.username}...`}</ContactLabel>
+
+      {showSettings && (
+        <SettingsPanel>
+          <SettingsClose onClick={() => setShowSettings(false)}>
+            <FiX />
+          </SettingsClose>
+          <SettingsTitle>Audio Settings</SettingsTitle>
+          <SettingsRow>
+            <SettingsLabel>Microphone</SettingsLabel>
+            <SettingsSelect value={selectedInput} onChange={e => changeAudioInput(e.target.value)}>
+              {audioInputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </SettingsSelect>
+          </SettingsRow>
+          <SettingsRow>
+            <SettingsLabel>Speaker</SettingsLabel>
+            <SettingsSelect value={selectedOutput} onChange={e => changeAudioOutput(e.target.value)}>
+              {audioOutputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </SettingsSelect>
+          </SettingsRow>
+        </SettingsPanel>
+      )}
+
       <Controls>
         <ControlBtn $active={!isMuted} onClick={toggleMute}>
           {isMuted ? <FiMicOff /> : <FiMic />}
@@ -247,6 +376,9 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         </ControlBtn>
         <ControlBtn $active onClick={handleScreenShare}>
           <FiMonitor />
+        </ControlBtn>
+        <ControlBtn $active={showSettings} onClick={openSettings}>
+          <FiSettings />
         </ControlBtn>
         <ControlBtn $danger onClick={handleEnd}>
           <FiX size={24} />

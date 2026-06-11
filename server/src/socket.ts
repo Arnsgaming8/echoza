@@ -1,5 +1,5 @@
 import { Server as SocketServer, Socket } from 'socket.io';
-import { query, mutate } from './db.js';
+import { query, mutate, getPool } from './db.js';
 import { verifyToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
@@ -328,6 +328,33 @@ export function setupSocket(io: SocketServer): void {
 
       await mutate(`UPDATE messages SET read = 1 WHERE id = ? AND sender_id != ?`, [messageId, userId]);
       emitToUser(io, senderId, 'message:readReceipt', { messageId, conversationId });
+    });
+
+    socket.on('messages:delete', async ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
+      if (!messageIds.length) return;
+
+      const pool = getPool();
+      const placeholders = messageIds.map((_, i) => `$${i + 1}`).join(',');
+      await pool.query(
+        `DELETE FROM messages WHERE id IN (${placeholders}) AND sender_id = $${messageIds.length + 1}`,
+        [...messageIds, userId]
+      );
+
+      // Find all participants to broadcast
+      const conv = await query(`SELECT is_group, user1_id, user2_id FROM conversations WHERE id = ?`, [conversationId]);
+      if (!conv[0]?.values?.length) return;
+      const [isGroup, u1, u2] = conv[0].values[0];
+
+      const msg = { messageIds, conversationId };
+      if (isGroup) {
+        const members = await query(`SELECT user_id FROM group_members WHERE group_id = ?`, [conversationId]);
+        for (const row of (members[0]?.values || [])) {
+          emitToUser(io, row[0] as string, 'messages:deleted', msg);
+        }
+      } else {
+        emitToUser(io, u1 as string, 'messages:deleted', msg);
+        emitToUser(io, u2 as string, 'messages:deleted', msg);
+      }
     });
 
     socket.on('typing:start', ({ receiverId, conversationId, groupId }: { receiverId?: string; conversationId?: string; groupId?: string }) => {

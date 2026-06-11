@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
-import { FiSend, FiPaperclip, FiX, FiFile, FiImage, FiVideo } from 'react-icons/fi';
+import { FiSend, FiPaperclip, FiX, FiFile, FiImage, FiVideo, FiTrash2, FiCheck } from 'react-icons/fi';
 
 interface Attachment {
   file: File;
@@ -13,6 +13,10 @@ interface ChatInputProps {
   onTypingStart: () => void;
   onTypingStop: () => void;
   disabled?: boolean;
+  deleteMode?: boolean;
+  selectedCount?: number;
+  onToggleDeleteMode?: () => void;
+  onDeleteSelected?: () => void;
 }
 
 const Wrapper = styled.div`
@@ -164,7 +168,45 @@ const HiddenInput = styled.input`
   display: none;
 `;
 
-export default function ChatInput({ onSend, onTypingStart, onTypingStop, disabled }: ChatInputProps) {
+const DeleteBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.md};
+  background: ${({ theme }) => theme.colors.bg.sidebar};
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const DeleteBarText = styled.span`
+  flex: 1;
+  font-size: ${({ theme }) => theme.font.size.sm};
+  color: ${({ theme }) => theme.colors.text.secondary};
+`;
+
+const DeleteBarBtn = styled.button<{ $danger?: boolean }>`
+  height: 36px;
+  padding: 0 16px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: ${({ theme }) => theme.font.size.sm};
+  font-weight: ${({ theme }) => theme.font.weight.medium};
+  background: ${({ $danger, theme }) =>
+    $danger ? '#FF3B5C' : 'transparent'};
+  color: ${({ $danger }) => ($danger ? 'white' : 'inherit')};
+
+  &:hover {
+    opacity: 0.9;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+`;
+
+export default function ChatInput({ onSend, onTypingStart, onTypingStop, disabled, deleteMode, selectedCount, onToggleDeleteMode, onDeleteSelected }: ChatInputProps) {
   const [content, setContent] = useState('');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const typingTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -247,52 +289,66 @@ const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
 
   return (
     <Wrapper>
-      {attachments.length > 0 && (
-        <PreviewBar>
-          {attachments.map((att, i) => (
-            <PreviewItem key={i}>
-              {att.type === 'image' && att.preview ? (
-                <PreviewImg src={att.preview} alt={att.file.name} />
-              ) : (
-                <FileIcon>{fileIcon(att.type)}</FileIcon>
-              )}
-              <RemoveBtn onClick={() => removeAttachment(i)}>
-                <FiX />
-              </RemoveBtn>
-            </PreviewItem>
-          ))}
-        </PreviewBar>
+      {deleteMode ? (
+        <DeleteBar>
+          <DeleteBarText>{selectedCount} message{selectedCount !== 1 ? 's' : ''} selected</DeleteBarText>
+          <DeleteBarBtn onClick={onToggleDeleteMode}>
+            <FiX /> Cancel
+          </DeleteBarBtn>
+          <DeleteBarBtn $danger disabled={!selectedCount} onClick={onDeleteSelected}>
+            <FiTrash2 /> Delete
+          </DeleteBarBtn>
+        </DeleteBar>
+      ) : (
+        <>
+          {attachments.length > 0 && (
+            <PreviewBar>
+              {attachments.map((att, i) => (
+                <PreviewItem key={i}>
+                  {att.type === 'image' && att.preview ? (
+                    <PreviewImg src={att.preview} alt={att.file.name} />
+                  ) : (
+                    <FileIcon>{fileIcon(att.type)}</FileIcon>
+                  )}
+                  <RemoveBtn onClick={() => removeAttachment(i)}>
+                    <FiX />
+                  </RemoveBtn>
+                </PreviewItem>
+              ))}
+            </PreviewBar>
+          )}
+          <InputRow>
+            <InputWrapper>
+              <AttachBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
+                <FiPaperclip />
+              </AttachBtn>
+              <TextInput
+                ref={textareaRef}
+                placeholder="Type a message..."
+                value={content}
+                onChange={e => handleChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                rows={1}
+                disabled={disabled}
+              />
+              <SendButton
+                $hasContent={hasContent}
+                onClick={handleSend}
+                disabled={disabled}
+              >
+                <FiSend />
+              </SendButton>
+            </InputWrapper>
+            <HiddenInput
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
+              onChange={handleFileSelect}
+            />
+          </InputRow>
+        </>
       )}
-      <InputRow>
-        <InputWrapper>
-          <AttachBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
-            <FiPaperclip />
-          </AttachBtn>
-          <TextInput
-            ref={textareaRef}
-            placeholder="Type a message..."
-            value={content}
-            onChange={e => handleChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            disabled={disabled}
-          />
-          <SendButton
-            $hasContent={hasContent}
-            onClick={handleSend}
-            disabled={disabled}
-          >
-            <FiSend />
-          </SendButton>
-        </InputWrapper>
-        <HiddenInput
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
-          onChange={handleFileSelect}
-        />
-      </InputRow>
     </Wrapper>
   );
 }
