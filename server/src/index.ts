@@ -5,7 +5,7 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb, query, getPool } from './db.js';
+import { initDb } from './db.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -57,31 +57,6 @@ async function main() {
     }
 
     res.json({ iceServers });
-  });
-
-  // TEMP: delete contact Steph from arnav
-  app.post('/api/admin/delete-contact', async (_req, res) => {
-    const [users1, users2] = await Promise.all([
-      query('SELECT id FROM users WHERE username = $1', ['arnav']),
-      query('SELECT id FROM users WHERE username = $1', ['Steph']),
-    ]);
-    if (!users1[0]?.values?.length || !users2[0]?.values?.length) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    const arnavId = users1[0].values[0][0] as string;
-    const stephId = users2[0].values[0][0] as string;
-    const pool = getPool();
-
-    const convs = await query(
-      `SELECT id FROM conversations WHERE (user1_id = $1 AND user2_id = $2) OR (user2_id = $1 AND user1_id = $2)`,
-      [arnavId, stephId]
-    );
-    const convIds = (convs[0]?.values || []).map(r => r[0] as string);
-    if (convIds.length === 0) return res.json({ success: true, deletedConversation: 0, note: 'No conversation found' });
-
-    await pool.query('DELETE FROM messages WHERE conversation_id = $1', [convIds[0]]);
-    await pool.query('DELETE FROM conversations WHERE id = $1', [convIds[0]]);
-    res.json({ success: true, deletedConversation: 1 });
   });
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
