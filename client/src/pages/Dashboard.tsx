@@ -145,8 +145,39 @@ export default function Dashboard() {
   callContactRef.current = callContact;
 
   useEffect(() => {
+    const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
+
+    const subscribePush = () => {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
+      if (Notification.permission !== 'granted') return;
+
+      navigator.serviceWorker.ready.then(reg => {
+        reg.pushManager.getSubscription().then(existingSub => {
+          if (existingSub) return;
+          reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
+          }).then(sub => {
+            fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: 'Bearer ' + localStorage.getItem('echoza-token'),
+              },
+              body: JSON.stringify(sub.toJSON()),
+            }).then(r => r.ok && console.log('Push subscribed'))
+              .catch(e => console.warn('Push subscribe POST failed:', e));
+          }).catch(err => console.warn('Push subscribe failed:', err));
+        });
+      });
+    };
+
     if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') subscribePush();
+      });
+    } else {
+      subscribePush();
     }
 
     const handleSwMessage = (event: MessageEvent) => {
@@ -159,32 +190,6 @@ export default function Dashboard() {
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
     return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-  }, []);
-
-  useEffect(() => {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
-    if (Notification.permission !== 'granted') return;
-
-    const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
-
-    navigator.serviceWorker.ready.then(reg => {
-      reg.pushManager.getSubscription().then(existingSub => {
-        if (existingSub) return;
-        reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
-        }).then(sub => {
-          fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: 'Bearer ' + localStorage.getItem('echoza-token'),
-            },
-            body: JSON.stringify(sub.toJSON()),
-          });
-        }).catch(err => console.warn('Push subscribe failed:', err));
-      });
-    });
   }, [user]);
 
 
@@ -222,7 +227,7 @@ export default function Dashboard() {
       } else if (message.senderId !== user?.id && 'Notification' in window) {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
         const body = senderName + ': ' + (message.content || 'Sent an attachment');
-        if (Notification.permission === 'granted' && document.visibilityState !== 'visible') {
+        if (Notification.permission === 'granted') {
           navigator.serviceWorker.ready.then(reg => {
             reg.showNotification('Echoza', {
               body,
@@ -231,7 +236,7 @@ export default function Dashboard() {
               data: { conversationId: message.conversationId, url: '/' },
             });
           }).catch(() => {
-            new Notification('Echoza', { body, icon: '/vite.svg' });
+            try { new Notification('Echoza', { body, icon: '/vite.svg' }); } catch {}
           });
         }
       }
