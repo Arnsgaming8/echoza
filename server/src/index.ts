@@ -5,7 +5,7 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb } from './db.js';
+import { initDb, query, getPool } from './db.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -57,6 +57,16 @@ async function main() {
     }
 
     res.json({ iceServers });
+  });
+
+  // TEMP: delete only Steph's sent messages
+  app.post('/api/admin/delete-steph-msgs', async (_req, res) => {
+    const users = await query('SELECT id FROM users WHERE username = $1', ['Steph']);
+    if (!users[0]?.values?.length) return res.status(404).json({ error: 'Steph not found' });
+    const userId = users[0].values[0][0] as string;
+    const pool = getPool();
+    const result = await pool.query('DELETE FROM messages WHERE sender_id = $1', [userId]);
+    res.json({ success: true, deletedMessages: result.rowCount });
   });
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
