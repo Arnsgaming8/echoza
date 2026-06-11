@@ -305,7 +305,8 @@ export function setupSocket(io: SocketServer): void {
           receiverId,
           username,
           content || 'Sent an attachment',
-          '/'
+          '/',
+          conversationId
         );
       }
     });

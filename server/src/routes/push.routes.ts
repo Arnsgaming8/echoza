@@ -44,7 +44,7 @@ router.post('/subscribe', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-export async function sendPushNotification(userId: string, title: string, body: string, url?: string) {
+export async function sendPushNotification(userId: string, title: string, body: string, url?: string, conversationId?: string) {
   if (!publicKey || !privateKey) return;
 
   const subs = await query(
@@ -52,7 +52,7 @@ export async function sendPushNotification(userId: string, title: string, body: 
     [userId]
   );
 
-  const payload = JSON.stringify({ title, body, url: url || '/' });
+  const payload = JSON.stringify({ title, body, url: url || '/', conversationId });
 
   for (const row of (subs[0]?.values || [])) {
     try {
