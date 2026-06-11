@@ -287,10 +287,10 @@ export default function Sidebar({
   onToggleSidebar,
 }: SidebarProps) {
   const { user, logout } = useAuth();
-  const { onlineUsers } = useSocket();
+  const { onlineUsers, selfOnline } = useSocket();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const isOnline = user ? onlineUsers.includes(user.id) : false;
+  const isOnline = user ? selfOnline : false;
 
   const handleSearch = (val: string) => {
     setSearchQuery(val);
