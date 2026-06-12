@@ -111,8 +111,13 @@ const Username = styled.h3`
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 `;
 
 const StatusRow = styled.div`
@@ -241,8 +246,13 @@ const ChatName = styled.h4`
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 `;
 
 const GroupLabel = styled.span`
