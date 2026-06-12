@@ -124,8 +124,8 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('conversations:list', async () => {
-      const [convRows, unreadRows, memberRows] = await Promise.all([
-        query(`
+      try {
+        const convRows = await query(`
           SELECT c.id, c.user1_id, c.user2_id, c.is_group, c.group_name, c.group_avatar,
                  c.last_message, c.last_time,
                  u1.username as u1name, u1.avatar as u1avatar, u1.online as u1online,
@@ -136,63 +136,79 @@ export function setupSocket(io: SocketServer): void {
           WHERE (c.is_group = 0 AND (c.user1_id = ? OR c.user2_id = ?))
              OR (c.is_group = 1 AND c.id IN (SELECT group_id FROM group_members WHERE user_id = ?))
           ORDER BY c.last_time DESC
-        `, [userId, userId, userId]),
-        query(
-          `SELECT conversation_id, COUNT(*) as cnt FROM messages WHERE sender_id != ? AND read = 0 AND conversation_id IN (SELECT id FROM conversations WHERE user1_id = ? OR user2_id = ? OR id IN (SELECT group_id FROM group_members WHERE user_id = ?)) GROUP BY conversation_id`,
-          [userId, userId, userId, userId]
-        ),
-        query(
-          `SELECT gm.group_id, u.id, u.username, u.avatar, u.online FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id IN (SELECT id FROM conversations WHERE is_group = 1 AND (user1_id = ? OR id IN (SELECT group_id FROM group_members WHERE user_id = ?)))`,
-          [userId, userId]
-        ),
-      ]);
+        `, [userId, userId, userId]);
 
-      const unreadMap = new Map<string, number>();
-      for (const row of (unreadRows[0]?.values || [])) {
-        unreadMap.set(row[0] as string, row[1] as number);
-      }
+        const convValues = convRows[0]?.values || [];
+        const conversations = [];
 
-      const memberMap = new Map<string, { id: string; username: string; avatar: string; online: boolean }[]>();
-      for (const row of (memberRows[0]?.values || [])) {
-        const groupId = row[0] as string;
-        if (!memberMap.has(groupId)) memberMap.set(groupId, []);
-        memberMap.get(groupId)!.push({ id: row[1], username: row[2], avatar: row[3], online: !!row[4] });
-      }
+        const unreadPromises = [];
+        const memberPromises = [];
 
-      const conversations = [];
+        for (const row of convValues) {
+          const convId = row[0] as string;
+          const isGroup = row[3] as number;
 
-      for (const row of (convRows[0]?.values || [])) {
-        const [convId, u1Id, u2Id, isGroup, groupName, groupAvatar, lastMsg, lastTime, u1name, u1av, u1on, u2name, u2av, u2on] = row;
+          unreadPromises.push(
+            query(
+              `SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ? AND sender_id != ? AND read = 0`,
+              [convId, userId]
+            ).then(r => ({ convId, count: (r[0]?.values[0]?.[0] as number) || 0 }))
+          );
 
-        if (isGroup) {
-          conversations.push({
-            id: convId,
-            isGroup: true,
-            groupName: groupName || 'Unnamed Group',
-            members: memberMap.get(convId) || [],
-            lastMessage: lastMsg,
-            lastTime,
-            unread: unreadMap.get(convId) || 0,
-          });
-        } else {
-          const isUser1 = u1Id === userId;
-          conversations.push({
-            id: convId,
-            isGroup: false,
-            contact: {
-              id: isUser1 ? u2Id : u1Id,
-              username: isUser1 ? u2name : u1name,
-              avatar: isUser1 ? u2av : u1av,
-              online: isUser1 ? !!u2on : !!u1on,
-            },
-            lastMessage: lastMsg,
-            lastTime,
-            unread: unreadMap.get(convId) || 0,
-          });
+          if (isGroup) {
+            memberPromises.push(
+              query(
+                `SELECT u.id, u.username, u.avatar, u.online FROM group_members gm JOIN users u ON gm.user_id = u.id WHERE gm.group_id = ?`,
+                [convId]
+              ).then(r => ({ convId, members: (r[0]?.values || []).map((m: any[]) => ({ id: m[0], username: m[1], avatar: m[2], online: !!m[3] })) }))
+            );
+          }
         }
-      }
 
-      socket.emit('conversations:list', conversations);
+        const [unreadResults, memberResults] = await Promise.all([
+          Promise.all(unreadPromises),
+          Promise.all(memberPromises),
+        ]);
+
+        const unreadMap = new Map(unreadResults.map(r => [r.convId, r.count]));
+        const memberMap = new Map(memberResults.map(r => [r.convId, r.members]));
+
+        for (const row of convValues) {
+          const [convId, u1Id, u2Id, isGroup, groupName, groupAvatar, lastMsg, lastTime, u1name, u1av, u1on, u2name, u2av, u2on] = row;
+
+          if (isGroup) {
+            conversations.push({
+              id: convId,
+              isGroup: true,
+              groupName: groupName || 'Unnamed Group',
+              members: memberMap.get(convId) || [],
+              lastMessage: lastMsg,
+              lastTime,
+              unread: unreadMap.get(convId) || 0,
+            });
+          } else {
+            const isUser1 = u1Id === userId;
+            conversations.push({
+              id: convId,
+              isGroup: false,
+              contact: {
+                id: isUser1 ? u2Id : u1Id,
+                username: isUser1 ? u2name : u1name,
+                avatar: isUser1 ? u2av : u1av,
+                online: isUser1 ? !!u2on : !!u1on,
+              },
+              lastMessage: lastMsg,
+              lastTime,
+              unread: unreadMap.get(convId) || 0,
+            });
+          }
+        }
+
+        socket.emit('conversations:list', conversations);
+      } catch (err) {
+        console.error('conversations:list error:', err);
+        socket.emit('conversations:list', []);
+      }
     });
 
     socket.on('messages:get', async ({ conversationId }: { conversationId: string }) => {

@@ -344,7 +344,7 @@ export default function Dashboard() {
       socket.off('conversation:deleted');
       socket.off('messages:deleted');
     };
-  }, [socket, activeChat]);
+  }, [socket, activeChat, onlineUsers]);
 
   useEffect(() => {
     scrollToBottom();
