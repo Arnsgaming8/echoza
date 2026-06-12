@@ -224,6 +224,9 @@ export default function Dashboard() {
           return [...prev, message];
         });
         if (document.visibilityState === 'visible' && message.senderId !== user?.id) {
+          setConversations(prev => prev.map(c =>
+            c.id === message.conversationId ? { ...c, unread: 0 } : c
+          ));
           setTimeout(() => {
             socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
           }, 500);
@@ -396,6 +399,10 @@ export default function Dashboard() {
     const handler = (data: Message[]) => {
       setMessages(data);
       scrollToBottom();
+
+      setConversations(prev => prev.map(c =>
+        c.id === activeChat ? { ...c, unread: 0 } : c
+      ));
 
       data.forEach(m => {
         if (m.senderId !== user?.id && !m.read) {
