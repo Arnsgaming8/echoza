@@ -30,7 +30,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('echoza-token'));
 
   useEffect(() => {
-    if (token) {
+    if (!token) return;
+
+    let cancelled = false;
+    let retries = 0;
+
+    const check = () => {
       fetch('/api/users/me', {
         headers: { Authorization: `Bearer ${token}` },
       })
@@ -39,14 +44,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return res.json();
         })
         .then(data => {
-          setUser(data);
-          localStorage.setItem('echoza-token', token);
+          if (!cancelled) {
+            setUser(data);
+            localStorage.setItem('echoza-token', token);
+          }
         })
         .catch(() => {
-          setToken(null);
-          localStorage.removeItem('echoza-token');
+          if (cancelled) return;
+          retries++;
+          if (retries < 5) {
+            setTimeout(check, 3000);
+          } else {
+            setToken(null);
+            localStorage.removeItem('echoza-token');
+          }
         });
-    }
+    };
+
+    check();
+    return () => { cancelled = true; };
   }, [token]);
 
   const login = (newToken: string, newUser: User) => {
