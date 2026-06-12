@@ -204,10 +204,9 @@ export default function Dashboard() {
     }, 50);
   }, []);
 
+  // Register conversation:list handlers once (never cleaned up)
   useEffect(() => {
     if (!socket) return;
-
-    socket.emit('conversations:list');
 
     socket.on('conversations:list', (data: Conversation[]) => {
       setConversations(data);
@@ -216,6 +215,37 @@ export default function Dashboard() {
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
       socket.emit('conversations:list');
     });
+
+    socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
+      setConversations(prev => prev.filter(c => c.id !== conversationId));
+      if (activeChat === conversationId) {
+        setActiveChat(null);
+        setActiveConv(null);
+        setMessages([]);
+      }
+    });
+
+    socket.on('messages:deleted', ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
+      setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
+      setConversations(prev => prev.map(c =>
+        c.id === conversationId ? { ...c, unread: 0 } : c
+      ));
+      setDeleteMode(false);
+      setSelectedMessages(new Set());
+    });
+
+    socket.emit('conversations:list');
+
+    return () => {
+      socket.off('conversations:list');
+      socket.off('conversation:update');
+      socket.off('conversation:deleted');
+      socket.off('messages:deleted');
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    if (!socket) return;
 
     socket.on('message:new', (message: Message) => {
       if (message.conversationId === activeChat) {
@@ -313,27 +343,7 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
-      setConversations(prev => prev.filter(c => c.id !== conversationId));
-      if (activeChat === conversationId) {
-        setActiveChat(null);
-        setActiveConv(null);
-        setMessages([]);
-      }
-    });
-
-    socket.on('messages:deleted', ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
-      setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
-      setConversations(prev => prev.map(c =>
-        c.id === conversationId ? { ...c, unread: 0 } : c
-      ));
-      setDeleteMode(false);
-      setSelectedMessages(new Set());
-    });
-
     return () => {
-      socket.off('conversations:list');
-      socket.off('conversation:update');
       socket.off('message:new');
       socket.off('message:readReceipt');
       socket.off('typing:start');
@@ -341,8 +351,6 @@ export default function Dashboard() {
       socket.off('call:offer');
       socket.off('call:end');
       socket.off('profile:updateResult');
-      socket.off('conversation:deleted');
-      socket.off('messages:deleted');
     };
   }, [socket, activeChat, connected]);
 

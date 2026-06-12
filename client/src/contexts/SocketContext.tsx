@@ -35,6 +35,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setConnected(true);
       setSelfOnline(true);
       socket.emit('user:getOnline');
+      socket.emit('conversations:list');
     });
 
     socket.on('disconnect', () => {
