@@ -133,8 +133,8 @@ export default function ProfileEditModal({
 
   const validate = (val: string) => {
     setUsername(val);
-    if (val && !/^[A-Za-z]{5,8}$/.test(val)) {
-      setError('Must be 5–8 letters');
+    if (val && !/^[A-Za-z]{3,20}$/.test(val)) {
+      setError('Must be 3–20 letters');
     } else {
       setError('');
     }
@@ -210,7 +210,7 @@ export default function ProfileEditModal({
           {success && <SuccessMsg>Profile updated!</SuccessMsg>}
           <Input
             label="Username"
-            placeholder="5–8 letters"
+            placeholder="3–20 letters"
             value={username}
             onChange={validate}
             error={error}

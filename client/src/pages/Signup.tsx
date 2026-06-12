@@ -114,8 +114,8 @@ export default function Signup() {
 
   const validateUsername = (val: string) => {
     setUsername(val);
-    if (val && !/^[A-Za-z]{5,8}$/.test(val)) {
-      setUsernameError('Must be 5–8 letters');
+    if (val && !/^[A-Za-z]{3,20}$/.test(val)) {
+      setUsernameError('Must be 3–20 letters');
     } else {
       setUsernameError('');
     }
@@ -172,7 +172,7 @@ export default function Signup() {
           {serverError && <ErrorMsg>{serverError}</ErrorMsg>}
           <Input
             label="Username"
-            placeholder="Enter username (5–8 letters)"
+            placeholder="Enter username (3–20 letters)"
             value={username}
             onChange={validateUsername}
             error={usernameError}

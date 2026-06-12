@@ -13,8 +13,8 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!/^[A-Za-z]{5,8}$/.test(username)) {
-    res.status(400).json({ error: 'Username must be 5-8 letters' });
+  if (!/^[A-Za-z]{3,20}$/.test(username)) {
+    res.status(400).json({ error: 'Username must be 3-20 letters' });
     return;
   }
 
