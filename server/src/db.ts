@@ -86,6 +86,16 @@ export async function initDb(): Promise<void> {
       )
     `);
 
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_conv_user1 ON conversations(user1_id)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_conv_user2 ON conversations(user2_id)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_conv_is_group ON conversations(is_group)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_conv_last_time ON conversations(last_time)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_msg_conversation ON messages(conversation_id)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(sender_id)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_msg_read ON messages(read)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_gm_user ON group_members(user_id)`); } catch {}
+    try { await pool.query(`CREATE INDEX IF NOT EXISTS idx_gm_group ON group_members(group_id)`); } catch {}
+
     console.log('PostgreSQL connected and schema ready');
   } else {
     const SQL = await initSqlJs();
@@ -159,6 +169,15 @@ export async function initDb(): Promise<void> {
       )
     `);
 
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_conv_user1 ON conversations(user1_id)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_conv_user2 ON conversations(user2_id)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_conv_is_group ON conversations(is_group)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_conv_last_time ON conversations(last_time)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_msg_conversation ON messages(conversation_id)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(sender_id)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_msg_read ON messages(read)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_gm_user ON group_members(user_id)'); } catch {}
+    try { sqlDb.run('CREATE INDEX IF NOT EXISTS idx_gm_group ON group_members(group_id)'); } catch {}
     saveSqlite();
     console.log('SQLite database ready at:', DB_PATH);
   }

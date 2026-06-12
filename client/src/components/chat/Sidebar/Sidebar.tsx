@@ -400,7 +400,7 @@ export default function Sidebar({
                     username={conv.contact?.username}
                     src={conv.contact?.avatar}
                     size={40}
-                    online={conv.contact?.online}
+                    online={conv.contact ? onlineUsers.includes(conv.contact.id) : false}
                   />
                 )}
                 <ChatInfo>
