@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import { Avatar, Badge, StatusDot } from '../../common';
 import { useAuth } from '../../../contexts/AuthContext';
 import { useSocket } from '../../../contexts/SocketContext';
@@ -106,17 +106,24 @@ const UserInfo = styled.div`
   min-width: 0;
 `;
 
+const scrollText = keyframes`
+  0%, 15% { transform: translateX(0); }
+  50% { transform: translateX(calc(-100% + 200px)); }
+  85%, 100% { transform: translateX(calc(-100% + 200px)); }
+`;
+
 const Username = styled.h3`
   font-size: ${({ theme }) => theme.font.size.md};
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  overflow: hidden;
 
-  &::-webkit-scrollbar {
-    display: none;
+  & > span {
+    display: inline-block;
+    animation: ${scrollText} 8s ease-in-out infinite;
+    animation-delay: 2s;
+    padding-right: 40px;
   }
 `;
 
@@ -246,12 +253,13 @@ const ChatName = styled.h4`
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
+  overflow: hidden;
 
-  &::-webkit-scrollbar {
-    display: none;
+  & > span {
+    display: inline-block;
+    animation: ${scrollText} 8s ease-in-out infinite;
+    animation-delay: 2s;
+    padding-right: 40px;
   }
 `;
 
@@ -354,7 +362,7 @@ export default function Sidebar({
             online={isOnline}
           />
           <UserInfo>
-            <Username>{user?.username || 'User'}</Username>
+            <Username><span>{user?.username || 'User'}</span></Username>
             <StatusRow>
               <StatusDot online={isOnline} />
               <StatusText>{isOnline ? 'Online' : 'Offline'}</StatusText>
@@ -415,7 +423,7 @@ export default function Sidebar({
                 )}
                 <ChatInfo>
                   <ChatName>
-                    {conv.isGroup ? conv.groupName : conv.contact?.username}
+                    <span>{conv.isGroup ? conv.groupName : conv.contact?.username}</span>
                     {conv.isGroup && <GroupLabel>group</GroupLabel>}
                   </ChatName>
                   <LastMessage>{conv.lastMessage || 'No messages yet'}</LastMessage>
