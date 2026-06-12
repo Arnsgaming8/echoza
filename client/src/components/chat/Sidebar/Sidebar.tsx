@@ -124,8 +124,8 @@ function ChatNameContent({ text }: { text: string | undefined }) {
 
   return (
     <TickerInner $speed={speed}>
-      <span>{text}</span>
-      <span>{text}</span>
+      <span style={{ paddingRight: 24 }}>{text}</span>
+      <span style={{ paddingRight: 24 }}>{text}</span>
     </TickerInner>
   );
 }
