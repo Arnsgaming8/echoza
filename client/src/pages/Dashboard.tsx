@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import Sidebar from '../components/chat/Sidebar/Sidebar';
 import TopBar from '../components/chat/TopBar/TopBar';
 import MessageBubble from '../components/chat/MessageBubble/MessageBubble';
@@ -52,10 +52,53 @@ interface Message {
   isGroup?: boolean;
 }
 
+const spin = keyframes`
+  to { transform: rotate(360deg); }
+`;
+
+const pulse = keyframes`
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+`;
+
 const Wrapper = styled.div`
   display: flex;
   height: 100dvh;
   overflow: hidden;
+`;
+
+const LoadingOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: ${({ theme }) => theme.colors.bg.main};
+  z-index: 9999;
+`;
+
+const LoadingLogo = styled.h1`
+  font-size: 28px;
+  font-weight: 700;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  letter-spacing: -0.5px;
+`;
+
+const LoadingSpinner = styled.div`
+  width: 40px;
+  height: 40px;
+  border: 3px solid ${({ theme }) => theme.colors.border};
+  border-top-color: ${({ theme }) => theme.colors.primary.echoBlue};
+  border-radius: 50%;
+  animation: ${spin} 0.8s linear infinite;
+`;
+
+const LoadingText = styled.p`
+  font-size: ${({ theme }) => theme.font.size.sm};
+  color: ${({ theme }) => theme.colors.text.secondary};
+  animation: ${pulse} 1.5s ease-in-out infinite;
 `;
 
 const Main = styled.div`
@@ -119,6 +162,7 @@ export default function Dashboard() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
+  const [conversationsLoaded, setConversationsLoaded] = useState(false);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -210,6 +254,7 @@ export default function Dashboard() {
 
     socket.on('conversations:list', (data: Conversation[]) => {
       setConversations(data);
+      if (!conversationsLoaded) setConversationsLoaded(true);
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
@@ -575,6 +620,13 @@ export default function Dashboard() {
 
   return (
     <Wrapper>
+      {!conversationsLoaded && (
+        <LoadingOverlay>
+          <LoadingLogo>Echoza</LoadingLogo>
+          <LoadingSpinner />
+          <LoadingText>Loading conversations...</LoadingText>
+        </LoadingOverlay>
+      )}
       <Sidebar
         conversations={conversations}
         activeChat={activeChat}
