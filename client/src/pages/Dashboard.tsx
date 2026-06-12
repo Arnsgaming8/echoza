@@ -111,7 +111,7 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
 }
 
 export default function Dashboard() {
-  const { socket, onlineUsers } = useSocket();
+  const { socket, onlineUsers, connected } = useSocket();
   const { user, updateUser } = useAuth();
   const updateUserRef = useRef(updateUser);
   updateUserRef.current = updateUser;
@@ -344,7 +344,7 @@ export default function Dashboard() {
       socket.off('conversation:deleted');
       socket.off('messages:deleted');
     };
-  }, [socket, activeChat, onlineUsers]);
+  }, [socket, activeChat, connected]);
 
   useEffect(() => {
     scrollToBottom();

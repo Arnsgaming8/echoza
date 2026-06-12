@@ -6,12 +6,14 @@ interface SocketContextType {
   socket: Socket | null;
   onlineUsers: string[];
   selfOnline: boolean;
+  connected: boolean;
 }
 
 const SocketContext = createContext<SocketContextType>({
   socket: null,
   onlineUsers: [],
   selfOnline: false,
+  connected: false,
 });
 
 export function SocketProvider({ children }: { children: ReactNode }) {
@@ -19,6 +21,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [selfOnline, setSelfOnline] = useState(false);
+  const [connected, setConnected] = useState(false);
 
   useEffect(() => {
     if (!isAuthenticated || !token) return;
@@ -29,6 +32,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('connect', () => {
+      setConnected(true);
       setSelfOnline(true);
       socket.emit('user:getOnline');
     });
@@ -54,12 +58,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     return () => {
       socket.disconnect();
       socketRef.current = null;
+      setConnected(false);
       setSelfOnline(false);
     };
   }, [isAuthenticated, token, user?.id]);
 
   return (
-    <SocketContext.Provider value={{ socket: socketRef.current, onlineUsers, selfOnline }}>
+    <SocketContext.Provider value={{ socket: socketRef.current, onlineUsers, selfOnline, connected }}>
       {children}
     </SocketContext.Provider>
   );
