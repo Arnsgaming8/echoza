@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Avatar, Badge, StatusDot } from '../../common';
 import { useAuth } from '../../../contexts/AuthContext';
@@ -106,11 +106,29 @@ const UserInfo = styled.div`
   min-width: 0;
 `;
 
-const scrollText = keyframes`
-  0%, 15% { transform: translateX(0); }
-  50% { transform: translateX(calc(-100% + 200px)); }
-  85%, 100% { transform: translateX(calc(-100% + 200px)); }
-`;
+function ChatNameContent({ text }: { text: string | undefined }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [overflows, setOverflows] = useState(false);
+
+  useEffect(() => {
+    if (ref.current) {
+      setOverflows(ref.current.scrollWidth > ref.current.clientWidth);
+    }
+  }, [text]);
+
+  if (!text) return <>&nbsp;</>;
+
+  if (!overflows) return <span ref={ref}>{text}</span>;
+
+  const speed = Math.max(8, text.length * 0.4);
+
+  return (
+    <TickerInner $speed={speed}>
+      <span>{text}</span>
+      <span>{text}</span>
+    </TickerInner>
+  );
+}
 
 const Username = styled.h3`
   font-size: ${({ theme }) => theme.font.size.md};
@@ -118,13 +136,7 @@ const Username = styled.h3`
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
   overflow: hidden;
-
-  & > span {
-    display: inline-block;
-    animation: ${scrollText} 8s ease-in-out infinite;
-    animation-delay: 2s;
-    padding-right: 40px;
-  }
+  text-overflow: ellipsis;
 `;
 
 const StatusRow = styled.div`
@@ -248,19 +260,22 @@ const ChatInfo = styled.div`
   min-width: 0;
 `;
 
+const ticker = keyframes`
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+`;
+
 const ChatName = styled.h4`
   font-size: ${({ theme }) => theme.font.size.sm};
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
   white-space: nowrap;
   overflow: hidden;
+`;
 
-  & > span {
-    display: inline-block;
-    animation: ${scrollText} 8s ease-in-out infinite;
-    animation-delay: 2s;
-    padding-right: 40px;
-  }
+const TickerInner = styled.span<{ $speed: number }>`
+  display: inline-flex;
+  animation: ${ticker} ${({ $speed }) => $speed}s linear infinite;
 `;
 
 const GroupLabel = styled.span`
@@ -362,7 +377,7 @@ export default function Sidebar({
             online={isOnline}
           />
           <UserInfo>
-            <Username><span>{user?.username || 'User'}</span></Username>
+            <Username>{user?.username || 'User'}</Username>
             <StatusRow>
               <StatusDot online={isOnline} />
               <StatusText>{isOnline ? 'Online' : 'Offline'}</StatusText>
@@ -423,7 +438,7 @@ export default function Sidebar({
                 )}
                 <ChatInfo>
                   <ChatName>
-                    <span>{conv.isGroup ? conv.groupName : conv.contact?.username}</span>
+                    <ChatNameContent text={conv.isGroup ? conv.groupName : conv.contact?.username} />
                     {conv.isGroup && <GroupLabel>group</GroupLabel>}
                   </ChatName>
                   <LastMessage>{conv.lastMessage || 'No messages yet'}</LastMessage>
