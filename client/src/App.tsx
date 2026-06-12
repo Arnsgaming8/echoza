@@ -6,6 +6,7 @@ import Landing from './pages/Landing';
 import Signup from './pages/Signup';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import LoadingScreen from './components/LoadingScreen';
 import { ReactNode } from 'react';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
@@ -21,7 +22,9 @@ function PublicRoute({ children }: { children: ReactNode }) {
 }
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, authLoading } = useAuth();
+
+  if (authLoading) return <LoadingScreen />;
 
   return (
     <SocketProvider>

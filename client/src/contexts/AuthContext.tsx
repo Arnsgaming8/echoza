@@ -14,6 +14,7 @@ interface AuthContextType {
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
   isAuthenticated: boolean;
+  authLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -23,14 +24,19 @@ const AuthContext = createContext<AuthContextType>({
   logout: () => {},
   updateUser: () => {},
   isAuthenticated: false,
+  authLoading: true,
 });
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('echoza-token'));
+  const [authLoading, setAuthLoading] = useState(!!localStorage.getItem('echoza-token'));
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setAuthLoading(false);
+      return;
+    }
 
     let cancelled = false;
     let retries = 0;
@@ -46,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then(data => {
           if (!cancelled) {
             setUser(data);
+            setAuthLoading(false);
             localStorage.setItem('echoza-token', token);
           }
         })
@@ -57,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             setToken(null);
             localStorage.removeItem('echoza-token');
+            setAuthLoading(false);
           }
         });
     };
@@ -68,12 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = (newToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
+    setAuthLoading(false);
     localStorage.setItem('echoza-token', newToken);
   };
 
   const logout = () => {
     setToken(null);
     setUser(null);
+    setAuthLoading(false);
     localStorage.removeItem('echoza-token');
   };
 
@@ -82,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, updateUser, isAuthenticated: !!user }}>
+    <AuthContext.Provider value={{ user, token, login, logout, updateUser, isAuthenticated: !!user, authLoading }}>
       {children}
     </AuthContext.Provider>
   );
