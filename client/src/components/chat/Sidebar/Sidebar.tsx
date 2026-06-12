@@ -111,8 +111,8 @@ function ChatNameContent({ text }: { text: string | undefined }) {
   const [overflows, setOverflows] = useState(false);
 
   useEffect(() => {
-    if (ref.current) {
-      setOverflows(ref.current.scrollWidth > ref.current.clientWidth);
+    if (ref.current && ref.current.parentElement) {
+      setOverflows(ref.current.scrollWidth > ref.current.parentElement.clientWidth);
     }
   }, [text]);
 
