@@ -124,6 +124,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('conversations:list', async () => {
+      console.log('[Server] conversations:list received from', userId);
       try {
         const convRows = await query(`
           SELECT c.id, c.user1_id, c.user2_id, c.is_group, c.group_name, c.group_avatar,
@@ -204,9 +205,10 @@ export function setupSocket(io: SocketServer): void {
           }
         }
 
+        console.log('[Server] conversations:list sending', conversations.length, 'convos to', userId);
         socket.emit('conversations:list', conversations);
       } catch (err) {
-        console.error('conversations:list error:', err);
+        console.error('[Server] conversations:list error:', err);
         socket.emit('conversations:list', []);
       }
     });

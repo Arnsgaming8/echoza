@@ -32,10 +32,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('connect', () => {
+      console.log('[SocketContext] socket connected');
       setConnected(true);
       setSelfOnline(true);
       socket.emit('user:getOnline');
-      socket.emit('conversations:list');
     });
 
     socket.on('disconnect', () => {

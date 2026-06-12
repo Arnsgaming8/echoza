@@ -250,9 +250,14 @@ export default function Dashboard() {
 
   // Register conversation:list handlers once (never cleaned up)
   useEffect(() => {
-    if (!socket) return;
+    if (!socket) {
+      console.log('[Dashboard] useConversationEffect: no socket yet, skipping');
+      return;
+    }
 
+    console.log('[Dashboard] useConversationEffect: registering handlers');
     socket.on('conversations:list', (data: Conversation[]) => {
+      console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
       if (!conversationsLoaded) setConversationsLoaded(true);
     });
