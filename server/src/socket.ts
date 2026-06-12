@@ -84,21 +84,8 @@ export function setupSocket(io: SocketServer): void {
     }
     onlineUsers.get(userId)!.set(socket.id, { username, avatar: '' });
 
-    const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
-    const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
-
-    // Update the stored avatar now that we have it
-    const sockets = onlineUsers.get(userId);
-    if (sockets) {
-      for (const [sid, data] of sockets) {
-        sockets.set(sid, { ...data, avatar });
-      }
-    }
-
-    if (isFirstConnection) {
-      mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
-      io.emit('user:online', { userId, username });
-    }
+    // Register ALL event handlers synchronously before any await
+    // so a failed DB query doesn't orphan the socket with no handlers
 
     socket.on('user:getOnline', () => {
       const online = Array.from(onlineUsers.entries()).map(([id, sockets]) => {
@@ -532,5 +519,26 @@ export function setupSocket(io: SocketServer): void {
         }
       }
     });
+
+    // Async work after all handlers registered so a failed query doesn't orphan the socket
+    try {
+      const userResult = await query(`SELECT avatar FROM users WHERE id = ?`, [userId]);
+      const avatar = (userResult[0]?.values[0]?.[0] as string) || '';
+      const sockets = onlineUsers.get(userId);
+      if (sockets) {
+        for (const [sid, data] of sockets) {
+          sockets.set(sid, { ...data, avatar });
+        }
+      }
+    } catch (err) {
+      console.error('[Server] failed to fetch avatar for', userId, err);
+    }
+
+    if (isFirstConnection) {
+      try {
+        await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
+      } catch {}
+      io.emit('user:online', { userId, username });
+    }
   });
 }
