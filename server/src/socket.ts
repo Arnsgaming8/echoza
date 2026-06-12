@@ -443,7 +443,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('profile:update', async ({ username: newUsername, avatar }: { username: string; avatar?: string }) => {
-      if (!newUsername || !/^[A-Za-z]{3,20}$/.test(newUsername)) {
+      if (!newUsername || !/^[A-Za-z_]{3,20}$/.test(newUsername)) {
         socket.emit('profile:updateResult', { error: 'Username must be 3-20 letters' });
         return;
       }

@@ -114,7 +114,7 @@ export default function Signup() {
 
   const validateUsername = (val: string) => {
     setUsername(val);
-    if (val && !/^[A-Za-z]{3,20}$/.test(val)) {
+    if (val && !/^[A-Za-z_]{3,20}$/.test(val)) {
       setUsernameError('Must be 3–20 letters');
     } else {
       setUsernameError('');

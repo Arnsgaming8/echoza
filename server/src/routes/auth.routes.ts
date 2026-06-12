@@ -13,7 +13,7 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  if (!/^[A-Za-z]{3,20}$/.test(username)) {
+  if (!/^[A-Za-z_]{3,20}$/.test(username)) {
     res.status(400).json({ error: 'Username must be 3-20 letters' });
     return;
   }
