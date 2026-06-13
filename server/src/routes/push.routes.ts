@@ -47,20 +47,27 @@ router.post('/subscribe', (req: Request, res: Response) => {
 export async function sendPushNotification(userId: string, title: string, body: string, url?: string, conversationId?: string) {
   if (!publicKey || !privateKey) return;
 
+  console.log(`[Push] sendPushNotification called userId=${userId} title="${title}" body="${body}"`);
+
   const subs = await query(
     `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?`,
     [userId]
   );
 
+  const endpoints = (subs[0]?.values || []).map((r: any[]) => r[0]);
+  console.log(`[Push] found ${endpoints.length} subscriptions for userId=${userId}:`, endpoints.map((e: string) => e.slice(0, 40) + '...'));
+
   const payload = JSON.stringify({ title, body, url: url || '/', conversationId });
 
   for (const row of (subs[0]?.values || [])) {
     try {
+      console.log(`[Push] sending to endpoint: ${(row[0] as string).slice(0, 40)}...`);
       await webpush.sendNotification({
         endpoint: row[0] as string,
         keys: { p256dh: row[1] as string, auth: row[2] as string },
       }, payload);
-    } catch {
+    } catch (err: any) {
+      console.warn(`[Push] send failed for endpoint, deleting: ${err?.message || 'unknown'}`);
       mutate(`DELETE FROM push_subscriptions WHERE endpoint = ?`, [row[0] as string]);
     }
   }

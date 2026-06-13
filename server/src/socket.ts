@@ -314,14 +314,17 @@ export function setupSocket(io: SocketServer): void {
       };
 
       // Emit to all sender devices via message:sent (separate event — never triggers notification)
+      console.log(`[Server] message:send userId=${userId} receiverId=${receiverId} groupId=${groupId} — emitting message:sent`);
       emitToUser(io, userId, 'message:sent', message);
 
       if (isGroup) {
         emitToGroupMembers(io, conversationId, 'message:new', message, userId);
         emitToGroupMembers(io, conversationId, 'conversation:update', { conversationId }, userId);
       } else if (receiverId) {
+        console.log(`[Server] emitting message:new to receiver=${receiverId} from sender=${userId}`);
         emitToUser(io, receiverId, 'message:new', message);
         emitToUser(io, receiverId, 'conversation:update', { conversationId });
+        console.log(`[Server] sending push to receiver=${receiverId} from=${username}`);
         sendPushNotification(
           receiverId,
           username,
