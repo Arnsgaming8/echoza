@@ -33,6 +33,7 @@ const LocalVideo = styled.video`
   border: 2px solid rgba(255,255,255,0.2);
   box-shadow: ${({ theme }) => theme.shadow.lg};
   cursor: grab;
+  transform: scaleX(-1);
 
   @media (max-width: 768px) {
     width: 120px;
