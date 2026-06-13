@@ -263,7 +263,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('message:send', async ({ receiverId, content, groupId, attachments }: { receiverId?: string; content: string; groupId?: string; attachments?: any[] }) => {
-      if (!content.trim()) return;
+      if (!content.trim() && !attachments?.length) return;
 
       let conversationId: string;
       let isGroup = false;
