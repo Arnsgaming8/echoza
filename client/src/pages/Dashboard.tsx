@@ -182,6 +182,8 @@ export default function Dashboard() {
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
 
+  const userRef = useRef(user);
+  userRef.current = user;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvRef = useRef(activeConv);
   activeConvRef.current = activeConv;
@@ -333,7 +335,7 @@ export default function Dashboard() {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
         });
-        if (document.visibilityState === 'visible' && message.senderId !== user?.id) {
+        if (document.visibilityState === 'visible' && message.senderId !== userRef.current?.id) {
           setConversations(prev => prev.map(c =>
             c.id === message.conversationId ? { ...c, unread: 0 } : c
           ));
@@ -341,7 +343,7 @@ export default function Dashboard() {
             socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
           }, 500);
         }
-      } else if (document.visibilityState !== 'visible' && message.senderId !== user?.id) {
+      } else if (document.visibilityState !== 'visible' && message.senderId !== userRef.current?.id) {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
         notify('Echoza', senderName + ': ' + (message.content || 'Sent an attachment'), message.conversationId, { conversationId: message.conversationId, url: '/' });
       }
