@@ -483,7 +483,9 @@ export default function Dashboard() {
     const toDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
       if (file.type.startsWith('image/')) {
         const img = new Image();
+        const blobUrl = URL.createObjectURL(file);
         img.onload = () => {
+          URL.revokeObjectURL(blobUrl);
           let w = img.naturalWidth;
           let h = img.naturalHeight;
           const max = 1200;
@@ -497,8 +499,8 @@ export default function Dashboard() {
           canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
           resolve(canvas.toDataURL('image/jpeg', 0.8));
         };
-        img.onerror = reject;
-        img.src = URL.createObjectURL(file);
+        img.onerror = () => { URL.revokeObjectURL(blobUrl); reject(); };
+        img.src = blobUrl;
       } else {
         const reader = new FileReader();
         reader.onload = () => resolve(reader.result as string);
