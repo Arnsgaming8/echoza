@@ -222,23 +222,25 @@ const ChatItem = styled.div<{ $active: boolean }>`
   padding: ${({ theme }) => theme.spacing.md};
   border-radius: ${({ theme }) => theme.radius.md};
   cursor: pointer;
+  touch-action: manipulation;
   transition: all ${({ theme }) => theme.transition};
   background: ${({ $active, theme }) =>
     $active ? theme.colors.bg.hover : 'transparent'};
   border-left: 3px solid ${({ $active, theme }) =>
     $active ? theme.colors.primary.echoBlue : 'transparent'};
 
-  &:hover {
-    background: ${({ theme }) => theme.colors.bg.hover};
-  }
+  @media (hover: hover) {
+    &:hover {
+      background: ${({ theme }) => theme.colors.bg.hover};
+    }
 
-  &:hover .delete-btn {
-    opacity: 1;
+    &:hover .delete-btn {
+      opacity: 1;
+    }
   }
 `;
 
 const DeleteBtn = styled.button`
-  opacity: 0;
   width: 28px;
   height: 28px;
   display: flex;
@@ -247,11 +249,15 @@ const DeleteBtn = styled.button`
   border-radius: ${({ theme }) => theme.radius.sm};
   color: ${({ theme }) => theme.colors.danger || '#e74c3c'};
   font-size: 14px;
-  transition: opacity 0.2s;
   flex-shrink: 0;
 
-  &:hover {
-    background: ${({ theme }) => theme.colors.bg.hover};
+  @media (hover: hover) {
+    opacity: 0;
+    transition: opacity 0.2s;
+
+    &:hover {
+      background: ${({ theme }) => theme.colors.bg.hover};
+    }
   }
 `;
 
