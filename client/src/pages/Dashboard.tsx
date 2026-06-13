@@ -232,7 +232,10 @@ export default function Dashboard() {
       });
     };
 
-    if ('Notification' in window) {
+    const requestNotifPermission = () => {
+      document.removeEventListener('click', requestNotifPermission);
+      document.removeEventListener('touchstart', requestNotifPermission);
+      if (!('Notification' in window)) { subscribePush(); return; }
       if (Notification.permission === 'default') {
         Notification.requestPermission().then(perm => {
           if (perm === 'granted') subscribePush();
@@ -242,8 +245,13 @@ export default function Dashboard() {
       } else {
         subscribePush();
       }
+    };
+
+    if ('Notification' in window && Notification.permission === 'default') {
+      document.addEventListener('click', requestNotifPermission);
+      document.addEventListener('touchstart', requestNotifPermission);
     } else {
-      subscribePush();
+      requestNotifPermission();
     }
 
     const handleSwMessage = (event: MessageEvent) => {
@@ -255,7 +263,11 @@ export default function Dashboard() {
     };
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      document.removeEventListener('click', requestNotifPermission);
+      document.removeEventListener('touchstart', requestNotifPermission);
+    };
   }, [user]);
 
 
