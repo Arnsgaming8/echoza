@@ -214,6 +214,10 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;

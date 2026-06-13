@@ -686,6 +686,7 @@ export default function Dashboard() {
                 <MessagesEnd ref={messagesEndRef} />
               </MessagesContainer>
               <ChatInput
+                key={activeChat}
                 onSend={handleSend}
                 onTypingStart={handleTypingStart}
                 onTypingStop={handleTypingStop}
