@@ -329,7 +329,20 @@ export default function Dashboard() {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('message:new', (message: Message) => {
+    socket.on('message:new', (message: any) => {
+      const isOwn = message.isOwn === true;
+      if (isOwn) {
+        // Still add own messages to the messages list so they appear in chat
+        if (message.conversationId === activeChat) {
+          setMessages(prev => {
+            if (prev.some(m => m.id === message.id)) return prev;
+            return [...prev, message];
+          });
+        }
+        socket.emit('conversations:list');
+        return;
+      }
+
       if (message.conversationId === activeChat) {
         setMessages(prev => {
           if (prev.some(m => m.id === message.id)) return prev;

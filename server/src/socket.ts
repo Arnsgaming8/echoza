@@ -313,8 +313,8 @@ export function setupSocket(io: SocketServer): void {
         read: false, createdAt, isGroup,
       };
 
-      // Emit to all sender devices
-      emitToUser(io, userId, 'message:new', message);
+      // Emit to all sender devices with isOwn flag so client can skip notification
+      emitToUser(io, userId, 'message:new', { ...message, isOwn: true });
 
       if (isGroup) {
         emitToGroupMembers(io, conversationId, 'message:new', message, userId);
