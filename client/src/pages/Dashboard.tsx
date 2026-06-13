@@ -329,20 +329,18 @@ export default function Dashboard() {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('message:new', (message: any) => {
-      const isOwn = message.isOwn === true;
-      if (isOwn) {
-        // Still add own messages to the messages list so they appear in chat
-        if (message.conversationId === activeChat) {
-          setMessages(prev => {
-            if (prev.some(m => m.id === message.id)) return prev;
-            return [...prev, message];
-          });
-        }
-        socket.emit('conversations:list');
-        return;
+    // message:sent is echoed to the sender only — never triggers notification
+    socket.on('message:sent', (message: any) => {
+      if (message.conversationId === activeChat) {
+        setMessages(prev => {
+          if (prev.some(m => m.id === message.id)) return prev;
+          return [...prev, message];
+        });
       }
+      socket.emit('conversations:list');
+    });
 
+    socket.on('message:new', (message: any) => {
       if (message.conversationId === activeChat) {
         setMessages(prev => {
           if (prev.some(m => m.id === message.id)) return prev;
@@ -417,6 +415,7 @@ export default function Dashboard() {
     });
 
     return () => {
+      socket.off('message:sent');
       socket.off('message:new');
       socket.off('message:readReceipt');
       socket.off('typing:start');
