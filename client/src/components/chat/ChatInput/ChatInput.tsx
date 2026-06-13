@@ -238,11 +238,14 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     const newAttachments: Attachment[] = files.map(file => {
-const type = file.type.startsWith('image/') ? 'image' as const
-  : file.type.startsWith('video/') ? 'video' as const
-  : file.type.startsWith('audio/') ? 'audio' as const
-  : 'file' as const;
-const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
+      const name = file.name.toLowerCase();
+      const extMatch = name.match(/\.(\w+)$/);
+      const ext = extMatch ? extMatch[1] : '';
+      const isImage = file.type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
+      const isVideo = file.type.startsWith('video/') || ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext);
+      const isAudio = file.type.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'aac', 'm4a'].includes(ext);
+      const type = isImage ? 'image' as const : isVideo ? 'video' as const : isAudio ? 'audio' as const : 'file' as const;
+      const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
       return { file, preview, type };
     });
     setAttachments(prev => [...prev, ...newAttachments]);
