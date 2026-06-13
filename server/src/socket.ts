@@ -482,6 +482,8 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('call:answer', ({ receiverId, answer }: { receiverId: string; answer: any }) => {
       emitToUser(io, receiverId, 'call:answer', { from: userId, answer });
+      // Notify this user's other devices to dismiss incoming call UI
+      emitToUserExcept(io, userId, socket.id, 'call:end', { from: receiverId });
     });
 
     socket.on('call:ice-candidate', ({ receiverId, candidate }: { receiverId: string; candidate: any }) => {
