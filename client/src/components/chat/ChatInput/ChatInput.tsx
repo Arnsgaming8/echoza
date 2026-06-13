@@ -356,7 +356,7 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*"
+          accept="image/*,video/*,audio/*"
           onChange={handleFileSelect}
         />
       </InputRow>
