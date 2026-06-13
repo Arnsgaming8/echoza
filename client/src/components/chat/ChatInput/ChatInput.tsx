@@ -165,7 +165,12 @@ const SendButton = styled.button<{ $hasContent: boolean }>`
 `;
 
 const HiddenInput = styled.input`
-  display: none;
+  position: fixed;
+  top: -100px;
+  left: -100px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: -1;
 `;
 
 const DeleteBar = styled.div`
@@ -324,9 +329,11 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
               </DeleteBarBtn>
             </DeleteBar>
           )}
-          <AttachBtn onClick={() => fileInputRef.current?.click()} title="Attach file">
-            <FiPaperclip />
-          </AttachBtn>
+          <label htmlFor="attach-file-input" style={{ display: 'flex', cursor: 'pointer' }}>
+            <AttachBtn as="span" title="Attach file">
+              <FiPaperclip />
+            </AttachBtn>
+          </label>
           <TextInput
             ref={textareaRef}
             placeholder={deleteMode ? 'Select messages to delete...' : 'Type a message...'}
@@ -345,10 +352,11 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
           </SendButton>
         </InputWrapper>
         <HiddenInput
+          id="attach-file-input"
           ref={fileInputRef}
           type="file"
           multiple
-          accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip"
+          accept="image/*"
           onChange={handleFileSelect}
         />
       </InputRow>
