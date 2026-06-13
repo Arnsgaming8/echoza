@@ -19,7 +19,7 @@ services:
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
       - key: TURN_URL
-        value: turn:129.151.21.154:3478
+        value: turn:129.146.28.208:3478
       - key: TURN_USERNAME
         value: echoza
       - key: TURN_CREDENTIAL
