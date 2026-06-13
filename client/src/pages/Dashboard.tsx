@@ -192,12 +192,24 @@ export default function Dashboard() {
   const callContactRef = useRef(callContact);
   callContactRef.current = callContact;
 
+  const notify = useCallback((title: string, body: string, tag?: string, data?: any) => {
+    // SW postMessage works on all platforms including iOS PWA (SW has its own permission)
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'show-notification', title, body, icon: '/vite.svg', tag, data,
+      });
+      return;
+    }
+    // Fallback: only for desktop without SW
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    try { new Notification(title, { body, icon: '/vite.svg' }); } catch {}
+  }, []);
+
   useEffect(() => {
     const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
 
     const subscribePush = () => {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
-      if (Notification.permission !== 'granted') return;
 
       navigator.serviceWorker.ready.then(reg => {
         reg.pushManager.getSubscription().then(existingSub => {
@@ -220,10 +232,16 @@ export default function Dashboard() {
       });
     };
 
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') subscribePush();
-      });
+    if ('Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') subscribePush();
+        });
+      } else if (Notification.permission === 'granted') {
+        subscribePush();
+      } else {
+        subscribePush();
+      }
     } else {
       subscribePush();
     }
@@ -313,24 +331,7 @@ export default function Dashboard() {
         }
       } else if (document.visibilityState !== 'visible' && message.senderId !== user?.id) {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
-        const body = senderName + ': ' + (message.content || 'Sent an attachment');
-        try {
-          new Notification('Echoza', {
-            body,
-            icon: '/vite.svg',
-          });
-        } catch {
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.ready.then(reg => {
-              reg.showNotification('Echoza', {
-                body,
-                icon: '/vite.svg',
-                tag: message.conversationId,
-                data: { conversationId: message.conversationId, url: '/' },
-              });
-            }).catch(() => {});
-          }
-        }
+        notify('Echoza', senderName + ': ' + (message.content || 'Sent an attachment'), message.conversationId, { conversationId: message.conversationId, url: '/' });
       }
       socket.emit('conversations:list');
     });
@@ -365,16 +366,7 @@ export default function Dashboard() {
       });
 
       if (document.visibilityState !== 'visible') {
-        const body = (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername;
-        try {
-          new Notification('Echoza', { body, icon: '/vite.svg' });
-        } catch {
-          if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.ready.then(reg => {
-              reg.showNotification('Echoza', { body, icon: '/vite.svg', tag: 'call-' + from, data: { url: '/' } });
-            }).catch(() => {});
-          }
-        }
+        notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/' });
       }
     });
 
