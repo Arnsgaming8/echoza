@@ -480,6 +480,33 @@ export default function Dashboard() {
   const handleSend = (content: string, attachments?: { file: File; preview?: string; type: string }[]) => {
     if (!socket || !activeConv) return;
 
+    const toDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+      if (file.type.startsWith('image/')) {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+          const max = 1200;
+          if (w > max || h > max) {
+            if (w > h) { h = h * max / w; w = max; }
+            else { w = w * max / h; h = max; }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          canvas.getContext('2d')!.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.onerror = reject;
+        img.src = URL.createObjectURL(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      }
+    });
+
     const processAttachments = async () => {
       if (!attachments || attachments.length === 0) return undefined;
 
@@ -491,14 +518,14 @@ export default function Dashboard() {
           mime: att.file.type,
           size: att.file.size,
         };
-        base.data = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(att.file);
-        });
+        try {
+          base.data = await toDataUrl(att.file);
+        } catch {
+          continue;
+        }
         processed.push(base);
       }
-      return processed;
+      return processed.length > 0 ? processed : undefined;
     };
 
     processAttachments().then(processedAttachments => {
