@@ -5,7 +5,7 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb } from './db.js';
+import { initDb, getPool } from './db.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -72,6 +72,13 @@ async function main() {
 
   httpServer.listen(PORT, () => {
     console.log(`Echoza server running on port ${PORT}`);
+  });
+
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, shutting down...');
+    httpServer.close();
+    try { await getPool().end(); } catch {}
+    process.exit(0);
   });
 }
 

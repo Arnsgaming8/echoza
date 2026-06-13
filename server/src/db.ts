@@ -17,7 +17,7 @@ export async function initDb(): Promise<void> {
   if (USE_PG) {
     const connectionString = process.env.DATABASE_URL;
     const ssl = { rejectUnauthorized: false };
-    pool = new Pool({ connectionString, ssl });
+    pool = new Pool({ connectionString, ssl, max: 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 5000 });
     await pool.query('SELECT 1');
 
     await pool.query(`
