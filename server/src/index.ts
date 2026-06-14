@@ -50,28 +50,16 @@ async function main() {
   });
 
   app.get('/api/ice-config', (_req, res) => {
-    const turnUrl = process.env.TURN_URL;
-    const turnUsername = process.env.TURN_USERNAME;
-    const turnCredential = process.env.TURN_CREDENTIAL;
-
-    const iceServers: RTCIceServer[] = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      {
-        urls: ['turn:openrelay.metered.ca:80', 'turns:openrelay.metered.ca:443'],
-        username: 'openrelayproject',
-        credential: 'openrelayproject',
-      },
-    ];
-
-    if (turnUrl && turnUsername && turnCredential) {
-      iceServers.push({
-        urls: turnUrl.split(',').map(s => s.trim()),
-        username: turnUsername,
-        credential: turnCredential,
-      });
-    }
-
-    res.json({ iceServers });
+    res.json({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        {
+          urls: ['turn:openrelay.metered.ca:80', 'turns:openrelay.metered.ca:443'],
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+      ],
+    });
   });
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
