@@ -17,6 +17,21 @@ const PORT = process.env.PORT || 3001;
 async function main() {
   await initDb();
 
+  // Clean up stale push subscriptions (same endpoint, different user — keeps newest)
+  try {
+    const pool = getPool();
+    if (pool) {
+      await pool.query(`
+        DELETE FROM push_subscriptions WHERE (user_id, endpoint) NOT IN (
+          SELECT user_id, endpoint FROM (
+            SELECT user_id, endpoint, ROW_NUMBER() OVER (PARTITION BY endpoint ORDER BY created_at DESC) rn
+            FROM push_subscriptions
+          ) sub WHERE rn = 1
+        )
+      `);
+    }
+  } catch {}
+
   const app = express();
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, {
