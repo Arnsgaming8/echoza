@@ -210,6 +210,7 @@ export default function Dashboard() {
   useEffect(() => {
     const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
 
+    // PushManager works independently of page-level Notification API (iOS PWA + desktop)
     const subscribePush = () => {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
 
@@ -234,27 +235,18 @@ export default function Dashboard() {
       });
     };
 
-    const requestNotifPermission = () => {
-      document.removeEventListener('click', requestNotifPermission);
-      document.removeEventListener('touchstart', requestNotifPermission);
-      if (!('Notification' in window)) { subscribePush(); return; }
-      if (Notification.permission === 'default') {
-        Notification.requestPermission().then(perm => {
-          if (perm === 'granted') subscribePush();
-        });
-      } else if (Notification.permission === 'granted') {
-        subscribePush();
-      } else {
-        subscribePush();
+    // Always try push subscription (SW PushManager works without page Notification API)
+    subscribePush();
+
+    const onUserGesture = () => {
+      document.removeEventListener('click', onUserGesture, true);
+      document.removeEventListener('touchstart', onUserGesture, true);
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
       }
     };
-
-    if ('Notification' in window && Notification.permission === 'default') {
-      document.addEventListener('click', requestNotifPermission);
-      document.addEventListener('touchstart', requestNotifPermission);
-    } else {
-      requestNotifPermission();
-    }
+    document.addEventListener('click', onUserGesture, true);
+    document.addEventListener('touchstart', onUserGesture, true);
 
     const handleSwMessage = (event: MessageEvent) => {
       if (event.data?.type === 'navigate-conversation') {
@@ -267,8 +259,8 @@ export default function Dashboard() {
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-      document.removeEventListener('click', requestNotifPermission);
-      document.removeEventListener('touchstart', requestNotifPermission);
+      document.removeEventListener('click', onUserGesture, true);
+      document.removeEventListener('touchstart', onUserGesture, true);
     };
   }, [user]);
 
