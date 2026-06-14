@@ -36,6 +36,12 @@ router.post('/subscribe', (req: Request, res: Response) => {
     return;
   }
 
+  // Remove any stale subscription from a previous account on the same device
+  mutate(
+    `DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id != ?`,
+    [endpoint, decoded.userId]
+  );
+
   mutate(
     `INSERT OR IGNORE INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)`,
     [decoded.userId, endpoint, keys.p256dh, keys.auth]
