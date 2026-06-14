@@ -17,7 +17,7 @@ const Overlay = styled.div`
 const RemoteVideo = styled.video`
   flex: 1;
   width: 100%;
-  object-fit: contain;
+  object-fit: cover;
   background: #1a1a1a;
 `;
 
