@@ -17,7 +17,7 @@ const Overlay = styled.div`
 const RemoteVideo = styled.video`
   flex: 1;
   width: 100%;
-  object-fit: cover;
+  object-fit: contain;
   background: #1a1a1a;
 `;
 
@@ -28,7 +28,7 @@ const LocalVideo = styled.video`
   width: 200px;
   height: 140px;
   border-radius: ${({ theme }) => theme.radius.md};
-  object-fit: cover;
+  object-fit: contain;
   background: #333;
   border: 2px solid rgba(255,255,255,0.2);
   box-shadow: ${({ theme }) => theme.shadow.lg};
