@@ -215,7 +215,10 @@ export default function Dashboard() {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
 
       navigator.serviceWorker.ready.then(reg => {
-        (force ? reg.pushManager.getSubscription().then(s => s ? s.unsubscribe() : Promise.resolve()) : Promise.resolve()).then(() => {
+        const maybeUnsub = force
+          ? reg.pushManager.getSubscription().then(s => { s?.unsubscribe().catch(() => {}); })
+          : Promise.resolve();
+        maybeUnsub.then(() => {
           reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
@@ -395,9 +398,7 @@ export default function Dashboard() {
         offer,
       });
 
-      if (document.visibilityState !== 'visible') {
-        notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/' });
-      }
+      notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType: type, callerId: from });
     });
 
     socket.on('call:end', ({ from }: { from: string }) => {

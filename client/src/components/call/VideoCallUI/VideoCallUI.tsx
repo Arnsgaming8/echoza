@@ -178,7 +178,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
     const handleAnswer = ({ from, answer }: { from: string; answer: any }) => {
       if (from === receiverId && pc && pc.signalingState === 'have-local-offer') {
         pc.setRemoteDescription(new RTCSessionDescription(answer));
-        setConnected(true);
       }
     };
 

@@ -31,13 +31,16 @@ self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const urlToOpen = event.notification.data?.url || '/';
   const conversationId = event.notification.data?.conversationId;
+  const callType = event.notification.data?.callType;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       if (windowClients.length > 0) {
         const client = windowClients[0];
         client.focus();
-        if (conversationId) {
+        if (callType) {
+          client.postMessage({ type: 'focus-app' });
+        } else if (conversationId) {
           client.postMessage({ type: 'navigate-conversation', conversationId });
         }
         return;
