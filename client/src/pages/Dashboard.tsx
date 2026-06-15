@@ -320,7 +320,9 @@ export default function Dashboard() {
 
     socket.emit('conversations:list');
 
+    const poll = setInterval(() => socket.emit('conversations:list'), 1000);
     return () => {
+      clearInterval(poll);
       socket.off('conversations:list');
       socket.off('conversation:update');
       socket.off('conversation:deleted');
