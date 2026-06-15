@@ -242,7 +242,9 @@ export default function Dashboard() {
       document.removeEventListener('click', onUserGesture, true);
       document.removeEventListener('touchstart', onUserGesture, true);
       if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
+        Notification.requestPermission().then(perm => {
+          if (perm === 'granted') subscribePush();
+        });
       }
     };
     document.addEventListener('click', onUserGesture, true);
