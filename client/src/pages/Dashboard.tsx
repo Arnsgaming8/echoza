@@ -346,24 +346,21 @@ export default function Dashboard() {
       if (message.senderId === userRef.current?.id) return;
 
       const isActive = message.conversationId === activeChat;
+      const senderName = message.senderUsername || message.senderId.slice(0, 6);
 
       if (isActive) {
         setMessages(prev => {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
         });
-      }
-
-      if (document.visibilityState !== 'visible') {
-        const senderName = message.senderUsername || message.senderId.slice(0, 6);
-        notify('Echoza', senderName + ': ' + (message.content || 'Sent an attachment'), message.conversationId, { conversationId: message.conversationId, url: '/' });
-      } else if (isActive) {
         setConversations(prev => prev.map(c =>
           c.id === message.conversationId ? { ...c, unread: 0 } : c
         ));
         setTimeout(() => {
           socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
         }, 500);
+      } else {
+        notify('Echoza', senderName + ': ' + (message.content || 'Sent an attachment'), message.conversationId, { conversationId: message.conversationId, url: '/' });
       }
 
       socket.emit('conversations:list');
