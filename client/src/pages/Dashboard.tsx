@@ -187,6 +187,8 @@ export default function Dashboard() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const activeConvRef = useRef(activeConv);
   activeConvRef.current = activeConv;
+  const activeChatRef = useRef(activeChat);
+  activeChatRef.current = activeChat;
   const showAudioCallRef = useRef(showAudioCall);
   showAudioCallRef.current = showAudioCall;
   const showVideoCallRef = useRef(showVideoCall);
@@ -196,20 +198,17 @@ export default function Dashboard() {
 
   const notify = useCallback((title: string, body: string, tag?: string, data?: any) => {
     const opts = { body, icon: '/vite.svg', tag, data: data || {} };
-    const swNotify = () => {
-      if (navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
-        return true;
-      }
-      return false;
-    };
-    if (swNotify()) return;
-    if ('serviceWorker' in navigator) {
+    // SW postMessage (works on iOS PWA + desktop once SW is active)
+    if (navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
+    } else if ('serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then(() => {
-        if (!navigator.serviceWorker.controller) return;
-        navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
+        }
       });
     }
+    // Always try desktop Notification API as well (permission-dependent)
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     try { new Notification(title, opts); } catch {}
   }, []);
@@ -342,7 +341,7 @@ export default function Dashboard() {
 
     // message:sent is echoed to the sender only — never triggers notification
     socket.on('message:sent', (message: any) => {
-      if (message.conversationId === activeChat) {
+      if (message.conversationId === activeChatRef.current) {
         setMessages(prev => {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
@@ -354,7 +353,7 @@ export default function Dashboard() {
     socket.on('message:new', (message: any) => {
       if (message.senderId === userRef.current?.id) return;
 
-      const isActive = message.conversationId === activeChat;
+      const isActive = message.conversationId === activeChatRef.current;
       const senderName = message.senderUsername || message.senderId.slice(0, 6);
 
       if (isActive) {
@@ -382,13 +381,13 @@ export default function Dashboard() {
     });
 
     socket.on('typing:start', ({ userId: typingUserId, conversationId }: { userId: string; conversationId: string }) => {
-      if (conversationId === activeChat) {
+      if (conversationId === activeChatRef.current) {
         setTypingUsers(prev => new Set(prev).add(typingUserId));
       }
     });
 
     socket.on('typing:stop', ({ userId: typingUserId, conversationId }: { userId: string; conversationId: string }) => {
-      if (conversationId === activeChat) {
+      if (conversationId === activeChatRef.current) {
         setTypingUsers(prev => {
           const next = new Set(prev);
           next.delete(typingUserId);
@@ -436,7 +435,7 @@ export default function Dashboard() {
       socket.off('call:end');
       socket.off('profile:updateResult');
     };
-  }, [socket, activeChat, connected]);
+  }, [socket]);
 
   useEffect(() => {
     scrollToBottom();
