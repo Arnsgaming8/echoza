@@ -107,6 +107,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const CALL_TIMEOUT = 120000;
 
   useEffect(() => {
     timerRef.current = setInterval(() => {
@@ -195,6 +196,14 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
       socket.off('call:ice-candidate', handleIceCandidate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!connected) return;
+    const timer = setTimeout(() => {
+      handleEnd();
+    }, CALL_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   const toggleMute = () => {
     if (localStreamRef.current) {

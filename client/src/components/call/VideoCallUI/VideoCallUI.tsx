@@ -167,6 +167,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
+  const CALL_TIMEOUT = 120000;
 
   useEffect(() => {
     if (!socket || !user) return;
@@ -264,6 +265,17 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
       socket.off('call:ice-candidate', handleIceCandidate);
     };
   }, []);
+
+  useEffect(() => {
+    if (!connected) return;
+    const timer = setTimeout(() => {
+      if (socket && contact) {
+        socket.emit('call:end', { receiverId: contact.id });
+      }
+      onEnd();
+    }, CALL_TIMEOUT);
+    return () => clearTimeout(timer);
+  }, [connected]);
 
   const toggleMute = () => {
     if (localStreamRef.current) {
