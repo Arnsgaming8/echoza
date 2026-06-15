@@ -197,12 +197,20 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
     };
   }, []);
 
+  const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (!connected) return;
-    const timer = setTimeout(() => {
+    ringingRef.current = setTimeout(() => {
       handleEnd();
     }, CALL_TIMEOUT);
-    return () => clearTimeout(timer);
+    return () => { if (ringingRef.current) clearTimeout(ringingRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (connected && ringingRef.current) {
+      clearTimeout(ringingRef.current);
+      ringingRef.current = null;
+    }
   }, [connected]);
 
   const toggleMute = () => {

@@ -266,15 +266,23 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
     };
   }, []);
 
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (!connected) return;
-    const timer = setTimeout(() => {
+    timeoutRef.current = setTimeout(() => {
       if (socket && contact) {
         socket.emit('call:end', { receiverId: contact.id });
       }
       onEnd();
     }, CALL_TIMEOUT);
-    return () => clearTimeout(timer);
+    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (connected && timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
   }, [connected]);
 
   const toggleMute = () => {
