@@ -211,12 +211,11 @@ export default function Dashboard() {
     const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
 
     // PushManager works independently of page-level Notification API (iOS PWA + desktop)
-    const subscribePush = () => {
+    const subscribePush = (force = false) => {
       if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
 
       navigator.serviceWorker.ready.then(reg => {
-        reg.pushManager.getSubscription().then(existingSub => {
-          if (existingSub) return;
+        (force ? reg.pushManager.getSubscription().then(s => s ? s.unsubscribe() : Promise.resolve()) : Promise.resolve()).then(() => {
           reg.pushManager.subscribe({
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
@@ -237,6 +236,10 @@ export default function Dashboard() {
 
     // Always try push subscription (SW PushManager works without page Notification API)
     subscribePush();
+
+    // Re-subscribe when SW updates (new deploy) — unsubscribes old first
+    const handleSwUpdate = () => { subscribePush(true); };
+    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
 
     const onUserGesture = () => {
       document.removeEventListener('click', onUserGesture, true);
@@ -259,8 +262,10 @@ export default function Dashboard() {
     };
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
       document.removeEventListener('click', onUserGesture, true);
       document.removeEventListener('touchstart', onUserGesture, true);
     };
@@ -335,23 +340,29 @@ export default function Dashboard() {
     });
 
     socket.on('message:new', (message: any) => {
-      if (message.conversationId === activeChat) {
+      if (message.senderId === userRef.current?.id) return;
+
+      const isActive = message.conversationId === activeChat;
+
+      if (isActive) {
         setMessages(prev => {
           if (prev.some(m => m.id === message.id)) return prev;
           return [...prev, message];
         });
-        if (document.visibilityState === 'visible' && message.senderId !== userRef.current?.id) {
-          setConversations(prev => prev.map(c =>
-            c.id === message.conversationId ? { ...c, unread: 0 } : c
-          ));
-          setTimeout(() => {
-            socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
-          }, 500);
-        }
-      } else if (document.visibilityState !== 'visible' && message.senderId !== userRef.current?.id) {
+      }
+
+      if (document.visibilityState !== 'visible') {
         const senderName = message.senderUsername || message.senderId.slice(0, 6);
         notify('Echoza', senderName + ': ' + (message.content || 'Sent an attachment'), message.conversationId, { conversationId: message.conversationId, url: '/' });
+      } else if (isActive) {
+        setConversations(prev => prev.map(c =>
+          c.id === message.conversationId ? { ...c, unread: 0 } : c
+        ));
+        setTimeout(() => {
+          socket.emit('message:read', { messageId: message.id, conversationId: message.conversationId });
+        }, 500);
       }
+
       socket.emit('conversations:list');
     });
 
