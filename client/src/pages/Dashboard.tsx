@@ -195,16 +195,23 @@ export default function Dashboard() {
   callContactRef.current = callContact;
 
   const notify = useCallback((title: string, body: string, tag?: string, data?: any) => {
-    // SW postMessage works on all platforms including iOS PWA (SW has its own permission)
-    if (navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'show-notification', title, body, icon: '/vite.svg', tag, data,
+    const opts = { body, icon: '/vite.svg', tag, data: data || {} };
+    const swNotify = () => {
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
+        return true;
+      }
+      return false;
+    };
+    if (swNotify()) return;
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(() => {
+        if (!navigator.serviceWorker.controller) return;
+        navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
       });
-      return;
     }
-    // Fallback: only for desktop without SW
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    try { new Notification(title, { body, icon: '/vite.svg' }); } catch {}
+    try { new Notification(title, opts); } catch {}
   }, []);
 
   useEffect(() => {
