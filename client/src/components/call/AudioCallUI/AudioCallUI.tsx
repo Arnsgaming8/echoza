@@ -134,6 +134,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
 
     const handleIceCandidate = ({ from, candidate }: { from: string; candidate: any }) => {
       if (from !== receiverId || !candidate) return;
+      console.log('Received remote ICE candidate:', candidate.type || candidate.candidate?.substring(0, 60));
       if (pc && pc.remoteDescription) {
         pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
       } else {
