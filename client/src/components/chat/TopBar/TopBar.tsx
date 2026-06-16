@@ -2,6 +2,7 @@ import styled from 'styled-components';
 import { Avatar, StatusDot } from '../../common';
 import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu, FiTrash2 } from 'react-icons/fi';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { useSocket } from '../../../contexts/SocketContext';
 
 interface Contact {
   id: string;
@@ -155,6 +156,8 @@ const IconBtn = styled.button<{ $active?: boolean }>`
 
 export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
+  const { onlineUsers } = useSocket();
+  const contactOnline = conversation?.contact ? onlineUsers.includes(conversation.contact.id) : false;
 
   const showCallButtons = !!conversation;
 
@@ -176,7 +179,7 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
                 username={conversation.contact?.username}
                 src={conversation.contact?.avatar}
                 size={36}
-                online={conversation.contact?.online}
+                online={contactOnline}
               />
             )}
             <div>
@@ -187,8 +190,8 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
                 <MemberCount>{conversation.members?.length || 0} members</MemberCount>
               ) : (
                 <StatusLabel>
-                  <StatusDot online={conversation.contact?.online || false} />
-                  {' '}{conversation.contact?.online ? 'Online' : 'Offline'}
+                  <StatusDot online={contactOnline} />
+                  {' '}{contactOnline ? 'Online' : 'Offline'}
                 </StatusLabel>
               )}
             </div>
