@@ -209,7 +209,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         }
 
         const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
+        pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
         localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
@@ -223,13 +223,20 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         }
 
         pc.onicecandidate = (e) => {
-          if (e.candidate && socket) {
-            socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
+          if (e.candidate) {
+            if (e.candidate.type === 'relay') console.log('TURN relay candidate:', e.candidate.candidate);
+            if (socket) {
+              socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
+            }
           }
         };
 
         pc.oniceconnectionstatechange = () => {
           console.log('ICE state:', pc?.iceConnectionState);
+        };
+
+        pc.onicegatheringstatechange = () => {
+          console.log('ICE gathering state:', pc?.iceGatheringState);
         };
 
         pc.ontrack = (e) => {
