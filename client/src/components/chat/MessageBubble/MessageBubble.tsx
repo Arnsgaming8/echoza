@@ -1,3 +1,4 @@
+import React from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../../../contexts/AuthContext';
 import { FiFile, FiImage, FiVideo, FiDownload, FiCheckCircle, FiCircle } from 'react-icons/fi';
@@ -183,6 +184,22 @@ function attIcon(type: string) {
   }
 }
 
+function linkify(text: string) {
+  const urlRegex = /(https?:\/\/[^\s<]+|[a-z0-9][a-z0-9.-]*\.[a-z]{2,}(?:\/[^\s<]*)?)/gi;
+  const parts: (string | React.ReactNode)[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = urlRegex.exec(text)) !== null) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    let url = match[0];
+    if (!/^https?:\/\//i.test(url)) url = 'http://' + url;
+    parts.push(<a key={match.index} href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>{match[0]}</a>);
+    lastIndex = urlRegex.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts.length ? parts : text;
+}
+
 export default function MessageBubble({ message, showSenderName, deleteMode, isSelected, onToggleSelect }: MessageBubbleProps) {
   const { user } = useAuth();
   const isSent = message.senderId === user?.id;
@@ -230,7 +247,7 @@ export default function MessageBubble({ message, showSenderName, deleteMode, isS
               ))}
             </AttachmentGrid>
           )}
-          {message.content && <BubbleText>{message.content}</BubbleText>}
+          {message.content && <BubbleText>{linkify(message.content)}</BubbleText>}
         </Bubble>
         <MetaRow $isSent={isSent}>
           <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>

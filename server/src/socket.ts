@@ -88,6 +88,10 @@ export function setupSocket(io: SocketServer): void {
     // so a failed DB query doesn't orphan the socket with no handlers
 
     socket.on('user:getOnline', () => {
+
+    socket.on('user:myIp', () => {
+      socket.emit('user:myIp', socket.handshake.address);
+    });
       const online = Array.from(onlineUsers.entries()).map(([id, sockets]) => {
         const first = sockets.values().next().value;
         return { userId: id, username: first?.username || '' };
