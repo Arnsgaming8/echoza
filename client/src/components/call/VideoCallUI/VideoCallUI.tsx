@@ -209,7 +209,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         }
 
         const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers });
+        pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
         pcRef.current = pc;
 
         localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
