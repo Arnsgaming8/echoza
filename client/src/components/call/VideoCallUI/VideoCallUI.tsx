@@ -175,6 +175,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
     const receiverId = contact.id;
     let pc: RTCPeerConnection | null = null;
     let localStream: MediaStream | null = null;
+    const candidateQueue: RTCIceCandidateInit[] = [];
 
     const handleAnswer = ({ from, answer }: { from: string; answer: any }) => {
       if (from === receiverId && pc && pc.signalingState === 'have-local-offer') {
@@ -183,8 +184,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
     };
 
     const handleIceCandidate = ({ from, candidate }: { from: string; candidate: any }) => {
-      if (from === receiverId && pc && pc.remoteDescription && candidate) {
+      if (from !== receiverId || !candidate) return;
+      if (pc && pc.remoteDescription) {
         pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+      } else {
+        candidateQueue.push(candidate);
       }
     };
 
@@ -257,6 +261,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           socket!.emit('call:answer', { receiverId, answer: pc.localDescription!.toJSON() });
+        }
+
+        while (candidateQueue.length) {
+          const c = candidateQueue.shift()!;
+          try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
         }
       } catch (err) {
         console.warn('Video call setup failed:', err);
