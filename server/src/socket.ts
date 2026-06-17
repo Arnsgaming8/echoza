@@ -494,6 +494,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('call:ice-candidate', ({ receiverId, candidate }: { receiverId: string; candidate: any }) => {
+      console.log(`[Server] call:ice-candidate from=${userId} to=${receiverId} candidateType=${candidate?.candidate?.substring(0, 40) || 'unknown'}`);
       emitToUser(io, receiverId, 'call:ice-candidate', { from: userId, candidate });
     });
 
