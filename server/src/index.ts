@@ -64,8 +64,11 @@ async function main() {
     ];
 
     if (turnUrl && turnUsername && turnCredential) {
+      const urls = turnUrl.split(',').map(s => s.trim());
+      // Add TCP transport fallback for networks that block UDP
+      urls.push(...urls.map(u => u + '?transport=tcp'));
       iceServers.push({
-        urls: turnUrl.split(',').map(s => s.trim()),
+        urls,
         username: turnUsername,
         credential: turnCredential,
       });
