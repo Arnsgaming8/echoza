@@ -220,7 +220,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
         }
 
         const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
+        pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
         localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));

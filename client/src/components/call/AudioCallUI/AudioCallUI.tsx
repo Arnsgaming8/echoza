@@ -153,7 +153,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
         localStreamRef.current = localStream;
 
         const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: 'relay' });
+        pc = new RTCPeerConnection({ iceServers });
         pcRef.current = pc;
 
         localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
