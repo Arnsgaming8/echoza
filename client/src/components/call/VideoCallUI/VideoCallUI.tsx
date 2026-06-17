@@ -200,14 +200,20 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
 
     async function setupCall() {
       try {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 640, max: 854 },
-            height: { ideal: 480, max: 480 },
-            frameRate: { ideal: 24, max: 30 },
-          },
-          audio: true,
-        });
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 640, max: 854 },
+              height: { ideal: 480, max: 480 },
+              frameRate: { ideal: 24, max: 30 },
+            },
+            audio: true,
+          });
+        } catch (mediaErr) {
+          console.warn('Video + audio getUserMedia failed, trying audio only:', mediaErr);
+          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          setIsCameraOn(false);
+        }
         localStreamRef.current = localStream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = localStream;
@@ -376,7 +382,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
   return (
     <Overlay>
       <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
-      <LocalVideo ref={localVideoRef} autoPlay playsInline muted />
+      {isCameraOn && <LocalVideo ref={localVideoRef} autoPlay playsInline muted />}
       <ContactLabel>{connected ? contact.username : `Calling ${contact.username}...`}</ContactLabel>
 
       {showSettings && (
