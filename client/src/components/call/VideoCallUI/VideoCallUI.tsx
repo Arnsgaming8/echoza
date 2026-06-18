@@ -235,15 +235,28 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
 
         pc.onicecandidate = (e) => {
           if (e.candidate) {
-            if (e.candidate.type === 'relay') console.log('TURN relay candidate:', e.candidate.candidate);
+            console.log(`ICE candidate: type=${e.candidate.type}`, e.candidate.candidate?.substring(0, 100));
             if (socket) {
               socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
             }
           }
         };
 
+        pc.onicecandidateerror = (e) => {
+          console.error('ICE candidate error:', e.errorCode, e.errorText);
+        };
+
         pc.oniceconnectionstatechange = () => {
-          console.log('ICE state:', pc?.iceConnectionState);
+          console.log('ICE state:', pc?.iceConnectionState, '- gathering:', pc?.iceGatheringState);
+          if (pc?.iceConnectionState === 'failed') {
+            pc.getStats(null).then(stats => {
+              stats.forEach(s => {
+                if (s.type === 'candidate-pair' && s.state === 'failed') {
+                  console.log('Failed candidate pair:', s.localCandidateId, s.remoteCandidateId, s.nominated);
+                }
+              });
+            });
+          }
         };
 
         pc.onicegatheringstatechange = () => {
