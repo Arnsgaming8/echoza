@@ -61,20 +61,11 @@ async function main() {
     if (turnUrl && turnUsername && turnCredential) {
       const urls = turnUrl.split(',').map(s => s.trim());
       urls.push(...urls.map(u => u + '?transport=tcp'));
-
-      const usernames = turnUsername.split(',').map(s => s.trim());
-      const credentials = turnCredential.split(',').map(s => s.trim());
-      const max = Math.max(urls.length, usernames.length, credentials.length);
-
-      for (let i = 0; i < max; i++) {
-        const entryUrls = [urls[i % urls.length]];
-        entryUrls.push(urls[i % urls.length] + '?transport=tcp');
-        iceServers.push({
-          urls: entryUrls,
-          username: usernames[i % usernames.length],
-          credential: credentials[i % credentials.length],
-        });
-      }
+      iceServers.push({
+        urls,
+        username: turnUsername,
+        credential: turnCredential,
+      });
     }
 
     res.json({ iceServers });
