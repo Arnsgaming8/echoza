@@ -1,9 +1,48 @@
-self.addEventListener('install', () => {
+const CACHE = 'echoza-v1';
+const STATIC_ASSETS = ['/vite.svg'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE).then(cache => cache.addAll(STATIC_ASSETS)).catch(() => {})
+  );
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
+});
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  const url = new URL(request.url);
+
+  // Skip non-GET, API, and WebSocket
+  if (request.method !== 'GET') return;
+  if (url.pathname.startsWith('/api/') || url.protocol === 'ws:' || url.protocol === 'wss:') return;
+
+  // Cache-first for hashed static assets (JS, CSS, fonts, images)
+  if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/i.test(url.pathname)) {
+    event.respondWith(
+      caches.open(CACHE).then(cache =>
+        cache.match(request).then(cached => {
+          const fetchPromise = fetch(request).then(res => {
+            if (res.ok) cache.put(request, res.clone());
+            return res;
+          });
+          return cached || fetchPromise;
+        })
+      )
+    );
+    return;
+  }
+
+  // Network-first for HTML navigation, fallback to cache
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request).catch(() => caches.match(request).then(cached => cached || caches.match('/')))
+    );
+    return;
+  }
 });
 
 self.addEventListener('push', (event) => {
