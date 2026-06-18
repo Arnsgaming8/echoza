@@ -50,24 +50,22 @@ async function main() {
   });
 
   app.get('/api/ice-config', (_req, res) => {
-    const turnUrls = process.env.TURN_URL?.split(',').map(s => s.trim()) || [];
-    const turnUsernames = process.env.TURN_USERNAME?.split(',').map(s => s.trim()) || [];
-    const turnCredentials = process.env.TURN_CREDENTIAL?.split(',').map(s => s.trim()) || [];
+    const turnUrl = process.env.TURN_URL;
+    const turnUsername = process.env.TURN_USERNAME;
+    const turnCredential = process.env.TURN_CREDENTIAL;
 
     const iceServers: RTCIceServer[] = [
       { urls: 'stun:stun.l.google.com:19302' },
     ];
 
-    const max = Math.max(turnUrls.length, turnUsernames.length, turnCredentials.length);
-    for (let i = 0; i < max; i++) {
-      const url = turnUrls[i];
-      const user = turnUsernames[i] || turnUsernames[0];
-      const cred = turnCredentials[i] || turnCredentials[0];
-      if (url && user && cred) {
-        const urls = [url];
-        urls.push(url + '?transport=tcp');
-        iceServers.push({ urls, username: user, credential: cred });
-      }
+    if (turnUrl && turnUsername && turnCredential) {
+      const urls = turnUrl.split(',').map(s => s.trim());
+      urls.push(...urls.map(u => u + '?transport=tcp'));
+      iceServers.push({
+        urls,
+        username: turnUsername,
+        credential: turnCredential,
+      });
     }
 
     res.json({ iceServers });
