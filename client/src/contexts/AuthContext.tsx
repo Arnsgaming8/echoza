@@ -40,6 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     let retries = 0;
+    const MAX_RETRIES = 15;
+    const RETRY_DELAY = 4000;
 
     const check = () => {
       fetch('/api/users/me', {
@@ -59,8 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .catch(() => {
           if (cancelled) return;
           retries++;
-          if (retries < 5) {
-            setTimeout(check, 3000);
+          if (retries < MAX_RETRIES) {
+            setTimeout(check, RETRY_DELAY);
           } else {
             setToken(null);
             localStorage.removeItem('echoza-token');
