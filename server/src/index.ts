@@ -56,15 +56,23 @@ async function main() {
     }
     try {
       const meteredApp = process.env.METERED_APP || 'vanra';
-      const response = await fetch(`https://${meteredApp}.metered.live/api/v1/room?secretKey=${secretKey}`, {
+      console.log('[metered] creating room with app=' + meteredApp + ' key present=' + !!secretKey);
+      const url = `https://${meteredApp}.metered.live/api/v1/room?secretKey=${secretKey}`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      if (!response.ok) throw new Error(`Metered API error: ${response.status}`);
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('[metered] API error status=' + response.status + ' body=' + text);
+        return res.status(500).json({ error: 'Metered API error: ' + response.status + ' ' + text });
+      }
       const data = await response.json();
+      console.log('[metered] room created: ' + data.roomName);
       res.json({ roomName: data.roomName, domain: `${meteredApp}.metered.live` });
     } catch (err: any) {
+      console.error('[metered] create-room failed:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
