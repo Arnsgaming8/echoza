@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
-import { FiShare2, FiPlus, FiX } from 'react-icons/fi';
 
 const slideUp = keyframes`
   from { transform: translateY(100%); }
@@ -23,6 +22,8 @@ const Sheet = styled.div`
   padding: 24px 20px 36px;
   animation: ${slideUp} 0.3s ease;
   width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
 `;
 
 const Handle = styled.div`
@@ -54,17 +55,16 @@ const Step = styled.div`
   margin-bottom: 20px;
 `;
 
-const StepIcon = styled.div`
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: ${({ theme }) => theme.colors.primary.echoBlue}20;
+const StepIconBox = styled.div`
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: ${({ theme }) => theme.colors.bg.hover};
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  color: ${({ theme }) => theme.colors.primary.echoBlue};
   flex-shrink: 0;
+  border: 1px solid ${({ theme }) => theme.colors.border};
 `;
 
 const StepContent = styled.div``;
@@ -92,7 +92,6 @@ const CloseBtn = styled.button`
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   margin-top: 8px;
   transition: opacity 0.2s;
-
   &:hover { opacity: 0.9; }
 `;
 
@@ -116,6 +115,33 @@ function isStandalone(): boolean {
 }
 
 const STORAGE_KEY = 'echoza-pwa-guide-dismissed';
+
+function ShareIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+      <rect x="5" y="14" width="16" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="none" />
+      <path d="M13 2v12M8 7l5-5 5 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26">
+      <rect x="2" y="2" width="22" height="22" rx="4" fill="currentColor" opacity="0.15" />
+      <path d="M13 7v12M7 13h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="26" height="26" viewBox="0 0 26 26">
+      <rect x="2" y="2" width="22" height="22" rx="4" fill="currentColor" opacity="0.15" />
+      <path d="M7 13l4 4 8-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  );
+}
 
 export default function PwaGuide() {
   const [visible, setVisible] = useState(false);
@@ -144,23 +170,23 @@ export default function PwaGuide() {
         <Subtitle>Install Echoza on your iPhone for the best experience — faster loading, push notifications, and full-screen chat.</Subtitle>
 
         <Step>
-          <StepIcon><FiShare2 /></StepIcon>
+          <StepIconBox><ShareIcon /></StepIconBox>
           <StepContent>
             <StepNum>Step 1</StepNum>
-            <StepText>Tap the <strong>Share</strong> icon at the bottom of Safari.</StepText>
+            <StepText>Tap the <strong>Share</strong> icon <ShareIcon /> at the bottom of Safari.</StepText>
           </StepContent>
         </Step>
 
         <Step>
-          <StepIcon><FiPlus /></StepIcon>
+          <StepIconBox><PlusIcon /></StepIconBox>
           <StepContent>
             <StepNum>Step 2</StepNum>
-            <StepText>Scroll down and tap <strong>Add to Home Screen</strong>.</StepText>
+            <StepText>Scroll down and tap <strong>Add to Home Screen</strong> <PlusIcon />.</StepText>
           </StepContent>
         </Step>
 
         <Step>
-          <StepIcon><FiX /></StepIcon>
+          <StepIconBox><CheckIcon /></StepIconBox>
           <StepContent>
             <StepNum>Step 3</StepNum>
             <StepText>Tap <strong>Add</strong> in the top-right corner. Open Echoza from your home screen!</StepText>
