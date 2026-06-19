@@ -107,9 +107,10 @@ async function main() {
 </head>
 <body>
   <h3>ICE / TURN Diagnostic Tool</h3>
-  <button onclick="runTest()">Test TURN Server</button>
+  <button onclick="runTest()">Test (all candidates)</button>
+  <button onclick="runTest(true)">Test (relay only)</button>
   <button onclick="clearLog()">Clear</button>
-  <div id="status">Ready. Click "Test TURN Server" to begin.</div>
+  <div id="status">Ready. Click a test button to begin.</div>
   <hr>
   <pre id="log"></pre>
   <script>
@@ -131,12 +132,17 @@ async function main() {
       return d.iceServers;
     }
 
-    async function runTest() {
+    async function runTest(relayOnly = false) {
       clearLog();
       status.textContent = 'Running...';
       const iceServers = await fetchIceServers();
+      const config: RTCConfiguration = { iceServers };
+      if (relayOnly) {
+        config.iceTransportPolicy = 'relay';
+        addLog('*** RELAY-ONLY MODE ***', 'info');
+      }
       addLog('--- Creating PeerConnection 1 ---', 'info');
-      pc1 = new RTCPeerConnection({ iceServers });
+      pc1 = new RTCPeerConnection(config);
       let pc1Candidates: RTCIceCandidate[] = [];
       let pc2Candidates: RTCIceCandidate[] = [];
 
