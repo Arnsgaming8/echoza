@@ -56,12 +56,7 @@ async function main() {
     try {
       const response = await fetch(`https://${meteredApp}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`);
       if (response.ok) {
-        const all = await response.json() as RTCIceServer[];
-        // Only keep STUN + 1 TURN UDP entry to avoid Chrome warning
-        const iceServers = all.filter(s => {
-          const u = Array.isArray(s.urls) ? s.urls[0] : s.urls;
-          return u === 'stun:stun.relay.metered.ca:80' || u === 'turn:global.relay.metered.ca:80';
-        });
+        const iceServers = await response.json() as RTCIceServer[];
         return res.json({ iceServers });
       }
     } catch {}
