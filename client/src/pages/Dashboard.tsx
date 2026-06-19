@@ -203,15 +203,25 @@ export default function Dashboard() {
     if (navigator.serviceWorker.controller) {
       navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
     } else if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(() => {
+      navigator.serviceWorker.ready.then(reg => {
         if (navigator.serviceWorker.controller) {
           navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
+        } else {
+          reg.showNotification(title, opts);
         }
       });
     }
-    // Always try desktop Notification API as well (permission-dependent)
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    try { new Notification(title, opts); } catch {}
+    // Desktop Notification API — always try, regardless of current permission state
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      try { new Notification(title, opts); } catch {}
+    } else if (Notification.permission === 'default') {
+      Notification.requestPermission().then(perm => {
+        if (perm === 'granted') {
+          try { new Notification(title, opts); } catch {}
+        }
+      });
+    }
   }, []);
 
   useEffect(() => {
@@ -251,17 +261,25 @@ export default function Dashboard() {
     const handleSwUpdate = () => { subscribePush(true); };
     navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
 
-    const onUserGesture = () => {
-      document.removeEventListener('click', onUserGesture, true);
-      document.removeEventListener('touchstart', onUserGesture, true);
+    const requestNotifPermission = () => {
       if ('Notification' in window && Notification.permission === 'default') {
         Notification.requestPermission().then(perm => {
           if (perm === 'granted') subscribePush();
         });
       }
     };
+
+    // Try permission on first gesture
+    const onUserGesture = () => {
+      document.removeEventListener('click', onUserGesture, true);
+      document.removeEventListener('touchstart', onUserGesture, true);
+      requestNotifPermission();
+    };
     document.addEventListener('click', onUserGesture, true);
     document.addEventListener('touchstart', onUserGesture, true);
+
+    // Also try after a short delay in case user never clicks
+    setTimeout(requestNotifPermission, 3000);
 
     const handleSwMessage = (event: MessageEvent) => {
       if (event.data?.type === 'navigate-conversation') {
@@ -404,6 +422,9 @@ export default function Dashboard() {
         roomName: recvRoomName,
       });
 
+      if ('Notification' in window && Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
       notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType: type, callerId: from });
     });
 
