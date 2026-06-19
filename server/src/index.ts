@@ -56,7 +56,12 @@ async function main() {
     try {
       const response = await fetch(`https://${meteredApp}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`);
       if (response.ok) {
-        const iceServers = await response.json();
+        const all = await response.json() as RTCIceServer[];
+        // Only keep STUN + 1 TURN UDP entry to avoid Chrome warning
+        const iceServers = all.filter(s => {
+          const u = Array.isArray(s.urls) ? s.urls[0] : s.urls;
+          return u === 'stun:stun.relay.metered.ca:80' || u === 'turn:global.relay.metered.ca:80';
+        });
         return res.json({ iceServers });
       }
     } catch {}
@@ -132,11 +137,18 @@ async function main() {
       const iceServers = await fetchIceServers();
       addLog('--- Creating PeerConnection 1 ---', 'info');
       pc1 = new RTCPeerConnection({ iceServers });
+      let pc1Candidates: RTCIceCandidate[] = [];
+      let pc2Candidates: RTCIceCandidate[] = [];
+
       pc1.onicecandidate = e => {
         if (e.candidate) {
+          pc1Candidates.push(e.candidate);
           const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
           const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
           addLog('PC1 candidate: ' + e.candidate.candidate, cls);
+          if (pc2.localDescription && pc2.remoteDescription) {
+            pc2.addIceCandidate(e.candidate).catch(() => {});
+          }
         } else {
           addLog('PC1: all candidates gathered', 'info');
         }
@@ -160,9 +172,13 @@ async function main() {
       pc2 = new RTCPeerConnection({ iceServers });
       pc2.onicecandidate = e => {
         if (e.candidate) {
+          pc2Candidates.push(e.candidate);
           const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
           const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
           addLog('PC2 candidate: ' + e.candidate.candidate, cls);
+          if (pc1.localDescription && pc1.remoteDescription) {
+            pc1.addIceCandidate(e.candidate).catch(() => {});
+          }
         } else {
           addLog('PC2: all candidates gathered', 'info');
         }
