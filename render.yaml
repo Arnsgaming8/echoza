@@ -18,4 +18,5 @@ services:
         value: BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
-      # TURN_URL, TURN_USERNAME, TURN_CREDENTIAL set in Render dashboard
+      - key: METERED_SECRET_KEY
+        value: 0BGdqkxDIE0AW4ERUZIwxbz87rCV-mqxey1XkR9VdMIS-t4K
