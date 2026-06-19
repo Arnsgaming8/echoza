@@ -3,7 +3,8 @@ import styled, { keyframes } from 'styled-components';
 import { Avatar } from '../../common';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiVolume2, FiX } from 'react-icons/fi';
-import { getIceServers } from '../../../utils/iceConfig';
+
+const METERED_DOMAIN = 'vanra.metered.live';
 
 const bgAnim = keyframes`
   0% { background-position: 0% 50%; }
@@ -95,18 +96,15 @@ interface AudioCallUIProps {
   onEnd: () => void;
   socket: Socket | null;
   user: { id: string; username: string } | null;
-  isInitiator: boolean;
-  remoteOffer: any;
+  roomName: string;
 }
 
-export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator, remoteOffer }: AudioCallUIProps) {
+export default function AudioCallUI({ contact, onEnd, socket, user, roomName }: AudioCallUIProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [connected, setConnected] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const meetingRef = useRef<MeteredMeeting | null>(null);
   const CALL_TIMEOUT = 120000;
 
   useEffect(() => {
@@ -119,111 +117,25 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
   }, []);
 
   useEffect(() => {
-    if (!socket || !user) return;
+    if (!user || !roomName || !window.Metered) return;
 
-    const receiverId = contact.id;
-    let pc: RTCPeerConnection | null = null;
-    let localStream: MediaStream | null = null;
-    const candidateQueue: RTCIceCandidateInit[] = [];
+    const meeting = new window.Metered.Meeting();
+    meetingRef.current = meeting;
 
-    const handleAnswer = ({ from, answer }: { from: string; answer: any }) => {
-      if (from === receiverId && pc && pc.signalingState === 'have-local-offer') {
-        pc.setRemoteDescription(new RTCSessionDescription(answer));
-      }
-    };
+    meeting.on('remoteTrackStarted', () => {
+      setConnected(true);
+    });
 
-    const handleIceCandidate = ({ from, candidate }: { from: string; candidate: any }) => {
-      if (from !== receiverId || !candidate) return;
-      console.log('Received remote ICE candidate:', candidate.type || candidate.candidate?.substring(0, 60));
-      if (pc && pc.remoteDescription) {
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-      } else {
-        candidateQueue.push(candidate);
-      }
-    };
+    meeting.on('participantLeft', () => {
+      onEnd();
+    });
 
-    if (isInitiator) {
-      socket.on('call:answer', handleAnswer);
-    }
-    socket.on('call:ice-candidate', handleIceCandidate);
-
-    async function setupCall() {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        localStreamRef.current = localStream;
-
-        const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers });
-        pcRef.current = pc;
-
-        localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            console.log(`ICE candidate: type=${e.candidate.type}`, e.candidate.candidate?.substring(0, 100));
-            if (socket) {
-              socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
-            }
-          }
-        };
-
-        pc.onicecandidateerror = (e) => {
-          console.error('ICE candidate error:', e.errorCode, e.errorText);
-        };
-
-        pc.oniceconnectionstatechange = () => {
-          console.log('ICE state:', pc?.iceConnectionState, '- gathering:', pc?.iceGatheringState);
-          if (pc?.iceConnectionState === 'failed') {
-            pc.getStats(null).then(stats => {
-              stats.forEach(s => {
-                if (s.type === 'candidate-pair' && s.state === 'failed') {
-                  console.log('Failed candidate pair:', s.localCandidateId, s.remoteCandidateId, s.nominated);
-                }
-              });
-            });
-          }
-        };
-
-        pc.onicegatheringstatechange = () => {
-          console.log('ICE gathering state:', pc?.iceGatheringState);
-        };
-
-        pc.ontrack = (e) => {
-          console.log('Remote audio track received');
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = e.streams[0];
-            remoteAudioRef.current.play().catch(() => {});
-            setConnected(true);
-          }
-        };
-
-        if (isInitiator) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket!.emit('call:offer', { receiverId, type: 'audio', offer: pc.localDescription!.toJSON() });
-        } else if (remoteOffer) {
-          await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket!.emit('call:answer', { receiverId, answer: pc.localDescription!.toJSON() });
-        }
-
-        while (candidateQueue.length) {
-          const c = candidateQueue.shift()!;
-          try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-        }
-      } catch (err) {
-        console.warn('Audio call setup failed:', err);
-      }
-    }
-
-    setupCall();
+    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
+      meeting.startAudio().catch(console.warn);
+    }).catch(console.warn);
 
     return () => {
-      if (localStream) localStream.getTracks().forEach(t => t.stop());
-      if (pc) pc.close();
-      socket.off('call:answer', handleAnswer);
-      socket.off('call:ice-candidate', handleIceCandidate);
+      meeting.leaveMeeting();
     };
   }, []);
 
@@ -244,10 +156,14 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
   }, [connected]);
 
   const toggleMute = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
-      setIsMuted(!isMuted);
+    const m = meetingRef.current;
+    if (!m) return;
+    if (isMuted) {
+      m.startAudio().catch(console.warn);
+    } else {
+      m.stopAudio().catch(console.warn);
     }
+    setIsMuted(!isMuted);
   };
 
   const handleEnd = () => {
@@ -266,7 +182,6 @@ export default function AudioCallUI({ contact, onEnd, socket, user, isInitiator,
   return (
     <Overlay>
       <GradientBg />
-      <audio ref={remoteAudioRef} autoPlay />
       <Content>
         <Avatar username={contact.username} src={contact.avatar} size={100} />
         <CallingText>{connected ? contact.username : `Calling ${contact.username}...`}</CallingText>

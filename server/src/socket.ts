@@ -478,31 +478,20 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, userId, 'profile:updateResult', { success: true, username: newUsername, avatar });
     });
 
-    socket.on('call:offer', ({ receiverId, type, offer }: { receiverId: string; type?: string; offer: any }) => {
+    socket.on('call:offer', ({ receiverId, type, roomName }: { receiverId: string; type?: string; roomName: string }) => {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
       emitToUser(io, receiverId, 'call:offer', {
         from: userId, username, avatar: userData?.avatar || '',
-        type: type || 'audio', offer,
+        type: type || 'audio', roomName,
       });
-    });
-
-    socket.on('call:answer', ({ receiverId, answer }: { receiverId: string; answer: any }) => {
-      emitToUser(io, receiverId, 'call:answer', { from: userId, answer });
-      // Notify this user's other devices to dismiss incoming call UI
-      emitToUserExcept(io, userId, socket.id, 'call:end', { from: receiverId });
-    });
-
-    socket.on('call:ice-candidate', ({ receiverId, candidate }: { receiverId: string; candidate: any }) => {
-      console.log(`[Server] call:ice-candidate from=${userId} to=${receiverId} candidateType=${candidate?.candidate?.substring(0, 40) || 'unknown'}`);
-      emitToUser(io, receiverId, 'call:ice-candidate', { from: userId, candidate });
     });
 
     socket.on('call:end', ({ receiverId }: { receiverId: string }) => {
       emitToUser(io, receiverId, 'call:end', { from: userId });
     });
 
-    socket.on('call:group-offer', async ({ groupId, type, offer }: { groupId: string; type?: string; offer: any }) => {
+    socket.on('call:group-offer', async ({ groupId, type, roomName }: { groupId: string; type?: string; roomName: string }) => {
       const members = await query(
         `SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?`,
         [groupId, userId]
@@ -513,7 +502,7 @@ export function setupSocket(io: SocketServer): void {
           from: userId,
           username,
           type: type || 'audio',
-          offer,
+          roomName,
         });
       }
     });

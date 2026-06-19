@@ -171,11 +171,11 @@ export default function Dashboard() {
   const [callContact, setCallContact] = useState<Contact | null>(null);
   const [showAudioCall, setShowAudioCall] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
-  const [receivedOffer, setReceivedOffer] = useState<any>(null);
+  const [roomName, setRoomName] = useState<string>('');
   const [incomingCall, setIncomingCall] = useState<{
     caller: { id: string; username: string; avatar: string };
     type: 'audio' | 'video';
-    offer: any;
+    roomName: string;
   } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -397,11 +397,11 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('call:offer', ({ from, username: callerUsername, avatar: callerAvatar, type, offer }: { from: string; username: string; avatar: string; type: 'audio' | 'video'; offer: any }) => {
+    socket.on('call:offer', ({ from, username: callerUsername, avatar: callerAvatar, type, roomName: recvRoomName }: { from: string; username: string; avatar: string; type: 'audio' | 'video'; roomName: string }) => {
       setIncomingCall({
         caller: { id: from, username: callerUsername, avatar: callerAvatar },
         type: type || 'audio',
-        offer,
+        roomName: recvRoomName,
       });
 
       notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType: type, callerId: from });
@@ -413,7 +413,7 @@ export default function Dashboard() {
           setShowAudioCall(false);
           setShowVideoCall(false);
           setCallContact(null);
-          setReceivedOffer(null);
+          setRoomName('');
         }
       } else {
         setIncomingCall(prev => prev?.caller.id === from ? null : prev);
@@ -641,28 +641,50 @@ export default function Dashboard() {
     }
   };
 
-  const handleAudioCall = () => {
+  const handleAudioCall = async () => {
     if (!activeConv) return;
-    setReceivedOffer(null);
-    if (activeConv.isGroup && socket) {
-      socket.emit('call:group-offer', { groupId: activeConv.id, type: 'audio', offer: {} });
+    try {
+      const res = await fetch('/api/metered/create-room', { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to create room');
+      const data = await res.json();
+      setRoomName(data.roomName);
+      setShowAudioCall(true);
+      if (socket) {
+        if (activeConv.isGroup) {
+          socket.emit('call:group-offer', { groupId: activeConv.id, type: 'audio', roomName: data.roomName });
+        } else if (activeConv.contact) {
+          socket.emit('call:offer', { receiverId: activeConv.contact.id, type: 'audio', roomName: data.roomName });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to start audio call:', err);
     }
-    setShowAudioCall(true);
   };
 
-  const handleVideoCall = () => {
+  const handleVideoCall = async () => {
     if (!activeConv) return;
-    setReceivedOffer(null);
-    if (activeConv.isGroup && socket) {
-      socket.emit('call:group-offer', { groupId: activeConv.id, type: 'video', offer: {} });
+    try {
+      const res = await fetch('/api/metered/create-room', { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to create room');
+      const data = await res.json();
+      setRoomName(data.roomName);
+      setShowVideoCall(true);
+      if (socket) {
+        if (activeConv.isGroup) {
+          socket.emit('call:group-offer', { groupId: activeConv.id, type: 'video', roomName: data.roomName });
+        } else if (activeConv.contact) {
+          socket.emit('call:offer', { receiverId: activeConv.contact.id, type: 'video', roomName: data.roomName });
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to start video call:', err);
     }
-    setShowVideoCall(true);
   };
 
   const handleAcceptCall = () => {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
-    setReceivedOffer(incomingCall.offer);
+    setRoomName(incomingCall.roomName);
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {
@@ -768,22 +790,20 @@ export default function Dashboard() {
       {showAudioCall && (activeConv?.contact || callContact) && (
         <AudioCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowAudioCall(false); setCallContact(null); setReceivedOffer(null); }}
+          onEnd={() => { setShowAudioCall(false); setCallContact(null); setRoomName(''); }}
           socket={socket}
           user={user}
-          isInitiator={!receivedOffer}
-          remoteOffer={receivedOffer}
+          roomName={roomName}
         />
       )}
 
       {showVideoCall && (activeConv?.contact || callContact) && (
         <VideoCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowVideoCall(false); setCallContact(null); setReceivedOffer(null); }}
+          onEnd={() => { setShowVideoCall(false); setCallContact(null); setRoomName(''); }}
           socket={socket}
           user={user}
-          isInitiator={!receivedOffer}
-          remoteOffer={receivedOffer}
+          roomName={roomName}
         />
       )}
 

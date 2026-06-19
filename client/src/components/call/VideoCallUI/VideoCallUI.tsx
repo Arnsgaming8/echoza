@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX, FiSettings } from 'react-icons/fi';
-import { getIceServers } from '../../../utils/iceConfig';
+
+const METERED_DOMAIN = 'vanra.metered.live';
 
 const Overlay = styled.div`
   position: fixed;
@@ -150,11 +151,10 @@ interface VideoCallUIProps {
   onEnd: () => void;
   socket: Socket | null;
   user: { id: string; username: string } | null;
-  isInitiator: boolean;
-  remoteOffer: any;
+  roomName: string;
 }
 
-export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator, remoteOffer }: VideoCallUIProps) {
+export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: VideoCallUIProps) {
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connected, setConnected] = useState(false);
@@ -165,140 +165,39 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
   const [selectedOutput, setSelectedOutput] = useState('');
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const meetingRef = useRef<MeteredMeeting | null>(null);
   const CALL_TIMEOUT = 120000;
 
   useEffect(() => {
-    if (!socket || !user) return;
+    if (!user || !roomName || !window.Metered) return;
 
-    const receiverId = contact.id;
-    let pc: RTCPeerConnection | null = null;
-    let localStream: MediaStream | null = null;
-    const candidateQueue: RTCIceCandidateInit[] = [];
+    const meeting = new window.Metered.Meeting();
+    meetingRef.current = meeting;
 
-    const handleAnswer = ({ from, answer }: { from: string; answer: any }) => {
-      if (from === receiverId && pc && pc.signalingState === 'have-local-offer') {
-        pc.setRemoteDescription(new RTCSessionDescription(answer));
+    meeting.on('localTrackStarted', (item: any) => {
+      if (item.type === 'video' && localVideoRef.current) {
+        localVideoRef.current.srcObject = new MediaStream([item.track]);
       }
-    };
+    });
 
-    const handleIceCandidate = ({ from, candidate }: { from: string; candidate: any }) => {
-      if (from !== receiverId || !candidate) return;
-      console.log('Received remote ICE candidate:', candidate.type || candidate.candidate?.substring(0, 60));
-      if (pc && pc.remoteDescription) {
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-      } else {
-        candidateQueue.push(candidate);
+    meeting.on('remoteTrackStarted', (item: any) => {
+      if (item.type === 'video' && remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = new MediaStream([item.track]);
+        setConnected(true);
       }
-    };
+    });
 
-    if (isInitiator) {
-      socket.on('call:answer', handleAnswer);
-    }
-    socket.on('call:ice-candidate', handleIceCandidate);
+    meeting.on('participantLeft', () => {
+      onEnd();
+    });
 
-    async function setupCall() {
-      try {
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              width: { ideal: 640, max: 854 },
-              height: { ideal: 480, max: 480 },
-              frameRate: { ideal: 24, max: 30 },
-            },
-            audio: true,
-          });
-        } catch (mediaErr) {
-          console.warn('Video + audio getUserMedia failed, trying audio only:', mediaErr);
-          localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          setIsCameraOn(false);
-        }
-        localStreamRef.current = localStream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = localStream;
-        }
-
-        const iceServers = await getIceServers();
-        pc = new RTCPeerConnection({ iceServers });
-        pcRef.current = pc;
-
-        localStream.getTracks().forEach(track => pc!.addTrack(track, localStream!));
-
-        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
-        if (videoSender) {
-          videoSender.setParameters({
-            ...videoSender.getParameters() as RTCRtpSendParameters,
-            encodings: [{ maxBitrate: 500000 }],
-          });
-        }
-
-        pc.onicecandidate = (e) => {
-          if (e.candidate) {
-            console.log(`ICE candidate: type=${e.candidate.type}`, e.candidate.candidate?.substring(0, 100));
-            if (socket) {
-              socket.emit('call:ice-candidate', { receiverId, candidate: e.candidate.toJSON() });
-            }
-          }
-        };
-
-        pc.onicecandidateerror = (e) => {
-          console.error('ICE candidate error:', e.errorCode, e.errorText);
-        };
-
-        pc.oniceconnectionstatechange = () => {
-          console.log('ICE state:', pc?.iceConnectionState, '- gathering:', pc?.iceGatheringState);
-          if (pc?.iceConnectionState === 'failed') {
-            pc.getStats(null).then(stats => {
-              stats.forEach(s => {
-                if (s.type === 'candidate-pair' && s.state === 'failed') {
-                  console.log('Failed candidate pair:', s.localCandidateId, s.remoteCandidateId, s.nominated);
-                }
-              });
-            });
-          }
-        };
-
-        pc.onicegatheringstatechange = () => {
-          console.log('ICE gathering state:', pc?.iceGatheringState);
-        };
-
-        pc.ontrack = (e) => {
-          console.log('Remote track received');
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = e.streams[0];
-            remoteVideoRef.current.play().catch(() => {});
-            setConnected(true);
-          }
-        };
-
-        if (isInitiator) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket!.emit('call:offer', { receiverId, type: 'video', offer: pc.localDescription!.toJSON() });
-        } else if (remoteOffer) {
-          await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket!.emit('call:answer', { receiverId, answer: pc.localDescription!.toJSON() });
-        }
-
-        while (candidateQueue.length) {
-          const c = candidateQueue.shift()!;
-          try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-        }
-      } catch (err) {
-        console.warn('Video call setup failed:', err);
-      }
-    }
-
-    setupCall();
+    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
+      meeting.startVideo().catch(console.warn);
+      meeting.startAudio().catch(console.warn);
+    }).catch(console.warn);
 
     return () => {
-      if (localStream) localStream.getTracks().forEach(t => t.stop());
-      if (pc) pc.close();
-      socket.off('call:answer', handleAnswer);
-      socket.off('call:ice-candidate', handleIceCandidate);
+      meeting.leaveMeeting();
     };
   }, []);
 
@@ -322,25 +221,32 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
   }, [connected]);
 
   const toggleMute = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getAudioTracks().forEach(t => { t.enabled = !t.enabled; });
-      setIsMuted(!isMuted);
+    const m = meetingRef.current;
+    if (!m) return;
+    if (isMuted) {
+      m.startAudio().catch(console.warn);
+    } else {
+      m.stopAudio().catch(console.warn);
     }
+    setIsMuted(!isMuted);
   };
 
   const toggleCamera = () => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getVideoTracks().forEach(t => { t.enabled = !t.enabled; });
-      setIsCameraOn(!isCameraOn);
+    const m = meetingRef.current;
+    if (!m) return;
+    if (isCameraOn) {
+      m.stopVideo().catch(console.warn);
+    } else {
+      m.startVideo().catch(console.warn);
     }
+    setIsCameraOn(!isCameraOn);
   };
 
   const handleScreenShare = async () => {
+    const m = meetingRef.current;
+    if (!m) return;
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
+      await m.startScreenShare();
     } catch {
       console.warn('Screen share cancelled');
     }
@@ -355,41 +261,32 @@ export default function VideoCallUI({ contact, onEnd, socket, user, isInitiator,
 
   const openSettings = async () => {
     setShowSettings(true);
+    const m = meetingRef.current;
+    if (!m) return;
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
-      setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
-      if (!selectedInput && devices.find(d => d.kind === 'audioinput')) {
-        setSelectedInput(devices.find(d => d.kind === 'audioinput')!.deviceId);
-      }
-      if (!selectedOutput && devices.find(d => d.kind === 'audiooutput')) {
-        setSelectedOutput(devices.find(d => d.kind === 'audiooutput')!.deviceId);
-      }
+      const inputs = await m.listAudioInputDevices();
+      const outputs = await m.listAudioOutputDevices();
+      setAudioInputs(inputs);
+      setAudioOutputs(outputs);
+      if (!selectedInput && inputs.length) setSelectedInput(inputs[0].deviceId);
+      if (!selectedOutput && outputs.length) setSelectedOutput(outputs[0].deviceId);
     } catch {}
   };
 
   const changeAudioInput = async (deviceId: string) => {
     setSelectedInput(deviceId);
-    if (!localStreamRef.current || !pcRef.current) return;
+    const m = meetingRef.current;
+    if (!m) return;
     try {
-      const newStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
-      const newTrack = newStream.getAudioTracks()[0];
-      const oldTrack = localStreamRef.current.getAudioTracks()[0];
-      if (oldTrack) {
-        localStreamRef.current.removeTrack(oldTrack);
-        oldTrack.stop();
-      }
-      localStreamRef.current.addTrack(newTrack);
-      const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'audio');
-      if (sender) await sender.replaceTrack(newTrack);
+      await m.chooseAudioInputDevice(deviceId);
     } catch {}
   };
 
   const changeAudioOutput = (deviceId: string) => {
     setSelectedOutput(deviceId);
-    if (remoteVideoRef.current && 'setSinkId' in remoteVideoRef.current) {
-      (remoteVideoRef.current as any).setSinkId(deviceId).catch(() => {});
-    }
+    const m = meetingRef.current;
+    if (!m) return;
+    m.chooseAudioOutputDevice(deviceId).catch(() => {});
   };
 
   return (

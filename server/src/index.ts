@@ -49,6 +49,30 @@ async function main() {
     res.json({ status: 'ok' });
   });
 
+  app.post('/api/metered/create-room', async (_req, res) => {
+    const secretKey = process.env.METERED_SECRET_KEY;
+    if (!secretKey) {
+      return res.status(500).json({ error: 'METERED_SECRET_KEY not set' });
+    }
+    try {
+      const meteredApp = process.env.METERED_APP || 'vanra';
+      const response = await fetch(`https://${meteredApp}.metered.live/api/v1/room?secretKey=${secretKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error(`Metered API error: ${response.status}`);
+      const data = await response.json();
+      res.json({ roomName: data.roomName, domain: `${meteredApp}.metered.live` });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/metered/domain', (_req, res) => {
+    res.json({ domain: `${process.env.METERED_APP || 'vanra'}.metered.live` });
+  });
+
   app.get('/api/ice-config', async (_req, res) => {
     const meteredApiKey = process.env.METERED_API_KEY || '7581c01bdaff4eb85ddf4ce70ecc29df7a94';
     const meteredApp = process.env.METERED_APP || 'vanra';
