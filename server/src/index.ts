@@ -131,15 +131,15 @@ async function main() {
       clearLog();
       status.textContent = 'Running...';
       const iceServers = await fetchIceServers();
-      const config: RTCConfiguration = { iceServers };
+      const config = { iceServers };
       if (relayOnly) {
         config.iceTransportPolicy = 'relay';
         addLog('*** RELAY-ONLY MODE ***', 'info');
       }
       addLog('--- Creating PeerConnection 1 ---', 'info');
       pc1 = new RTCPeerConnection(config);
-      let pc1Candidates: RTCIceCandidate[] = [];
-      let pc2Candidates: RTCIceCandidate[] = [];
+      let pc1Candidates = [];
+      let pc2Candidates = [];
 
       pc1.onicecandidate = e => {
         if (e.candidate) {
