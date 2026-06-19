@@ -49,7 +49,19 @@ async function main() {
     res.json({ status: 'ok' });
   });
 
-  app.get('/api/ice-config', (_req, res) => {
+  app.get('/api/ice-config', async (_req, res) => {
+    const meteredApiKey = process.env.METERED_API_KEY || '7581c01bdaff4eb85ddf4ce70ecc29df7a94';
+    const meteredApp = process.env.METERED_APP || 'vanra';
+
+    try {
+      const response = await fetch(`https://${meteredApp}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`);
+      if (response.ok) {
+        const iceServers = await response.json();
+        return res.json({ iceServers });
+      }
+    } catch {}
+
+    // Fallback to manual config if Metered API fails
     const turnUrl = process.env.TURN_URL;
     const turnUsername = process.env.TURN_USERNAME;
     const turnCredential = process.env.TURN_CREDENTIAL;
@@ -60,11 +72,7 @@ async function main() {
 
     if (turnUrl && turnUsername && turnCredential) {
       for (const url of turnUrl.split(',').map(s => s.trim()).filter(Boolean)) {
-        iceServers.push({
-          urls: [url],
-          username: turnUsername,
-          credential: turnCredential,
-        });
+        iceServers.push({ urls: [url], username: turnUsername, credential: turnCredential });
       }
     }
 
