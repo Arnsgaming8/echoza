@@ -211,16 +211,9 @@ export default function Dashboard() {
         }
       });
     }
-    // Desktop Notification API — always try, regardless of current permission state
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted') {
+    // Desktop Notification API — only if already granted
+    if ('Notification' in window && Notification.permission === 'granted') {
       try { new Notification(title, opts); } catch {}
-    } else if (Notification.permission === 'default') {
-      Notification.requestPermission().then(perm => {
-        if (perm === 'granted') {
-          try { new Notification(title, opts); } catch {}
-        }
-      });
     }
   }, []);
 
@@ -422,9 +415,6 @@ export default function Dashboard() {
         roomName: recvRoomName,
       });
 
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission();
-      }
       notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType: type, callerId: from });
     });
 
