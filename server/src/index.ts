@@ -59,16 +59,139 @@ async function main() {
     ];
 
     if (turnUrl && turnUsername && turnCredential) {
-      const urls = turnUrl.split(',').map(s => s.trim());
-      urls.push(...urls.map(u => u + '?transport=tcp'));
-      iceServers.push({
-        urls,
-        username: turnUsername,
-        credential: turnCredential,
-      });
+      for (const url of turnUrl.split(',').map(s => s.trim()).filter(Boolean)) {
+        iceServers.push({
+          urls: [url],
+          username: turnUsername,
+          credential: turnCredential,
+        });
+      }
     }
 
     res.json({ iceServers });
+  });
+
+  // Simple web-based TURN test page
+  app.get('/api/debug/ice-test', (_req, res) => {
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ICE Test</title>
+  <style>
+    body { font-family: monospace; background: #111; color: #0f0; padding: 16px; font-size: 14px; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+    .relay { color: #0ff; }
+    .host { color: #0f0; }
+    .srflx { color: #ff0; }
+    .error { color: #f00; }
+    .info { color: #888; }
+    button { background: #0f0; color: #000; border: none; padding: 8px 16px; cursor: pointer; margin: 4px; }
+    #status { margin: 8px 0; }
+    hr { border-color: #333; }
+  </style>
+</head>
+<body>
+  <h3>ICE / TURN Diagnostic Tool</h3>
+  <button onclick="runTest()">Test TURN Server</button>
+  <button onclick="clearLog()">Clear</button>
+  <div id="status">Ready. Click "Test TURN Server" to begin.</div>
+  <hr>
+  <pre id="log"></pre>
+  <script>
+    let pc1 = null, pc2 = null;
+    const log = document.getElementById('log');
+    const status = document.getElementById('status');
+
+    function addLog(msg, cls = '') {
+      log.innerHTML += '<span class="' + cls + '">' + new Date().toISOString().slice(11,19) + ' ' + msg + '</span>\\n';
+    }
+
+    function clearLog() { log.innerHTML = ''; }
+
+    async function fetchIceServers() {
+      const r = await fetch('/api/ice-config');
+      const d = await r.json();
+      addLog('ICE servers from server:', 'info');
+      d.iceServers.forEach(s => addLog('  ' + JSON.stringify(s.urls) + (s.username ? ' (auth)' : ''), 'info'));
+      return d.iceServers;
+    }
+
+    async function runTest() {
+      clearLog();
+      status.textContent = 'Running...';
+      const iceServers = await fetchIceServers();
+      addLog('--- Creating PeerConnection 1 ---', 'info');
+      pc1 = new RTCPeerConnection({ iceServers });
+      pc1.onicecandidate = e => {
+        if (e.candidate) {
+          const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
+          const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
+          addLog('PC1 candidate: ' + e.candidate.candidate, cls);
+        } else {
+          addLog('PC1: all candidates gathered', 'info');
+        }
+      };
+      pc1.oniceconnectionstatechange = () => {
+        addLog('PC1 state: ' + pc1.iceConnectionState, pc1.iceConnectionState === 'connected' ? 'relay' : pc1.iceConnectionState === 'failed' ? 'error' : 'info');
+        if (pc1.iceConnectionState === 'connected' || pc1.iceConnectionState === 'completed') {
+          status.textContent = 'CONNECTED!';
+          status.style.color = '#0f0';
+        }
+        if (pc1.iceConnectionState === 'failed') {
+          status.textContent = 'FAILED';
+          status.style.color = '#f00';
+        }
+      };
+      pc1.onicecandidateerror = e => {
+        addLog('PC1 candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + e.url, 'error');
+      };
+
+      addLog('--- Creating PeerConnection 2 ---', 'info');
+      pc2 = new RTCPeerConnection({ iceServers });
+      pc2.onicecandidate = e => {
+        if (e.candidate) {
+          const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
+          const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
+          addLog('PC2 candidate: ' + e.candidate.candidate, cls);
+        } else {
+          addLog('PC2: all candidates gathered', 'info');
+        }
+      };
+      pc2.oniceconnectionstatechange = () => {
+        addLog('PC2 state: ' + pc2.iceConnectionState, pc2.iceConnectionState === 'connected' ? 'relay' : pc2.iceConnectionState === 'failed' ? 'error' : 'info');
+      };
+      pc2.onicecandidateerror = e => {
+        addLog('PC2 candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + e.url, 'error');
+      };
+
+      // Trigger ICE by creating a data channel
+      const dc = pc1.createDataChannel('test');
+      pc2.ondatachannel = e => {
+        addLog('PC2: data channel received', 'info');
+      };
+
+      try {
+        addLog('--- Creating offer ---', 'info');
+        const offer = await pc1.createOffer();
+        await pc1.setLocalDescription(offer);
+        addLog('PC1 local description set (type=' + offer.type + ')', 'info');
+        await pc2.setRemoteDescription(offer);
+        const answer = await pc2.createAnswer();
+        await pc2.setLocalDescription(answer);
+        addLog('PC2 local description set (type=' + answer.type + ')', 'info');
+        await pc1.setRemoteDescription(answer);
+        addLog('--- ICE negotiation complete, waiting for connection... ---', 'info');
+      } catch (err) {
+        addLog('ERROR: ' + err.message, 'error');
+        status.textContent = 'Error: ' + err.message;
+        status.style.color = '#f00';
+      }
+    }
+  </script>
+</body>
+</html>`);
   });
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');

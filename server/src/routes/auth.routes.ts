@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import { query, mutate } from '../db.js';
-import { hashPassword, comparePassword, generateToken } from '../auth.js';
+import { hashPassword, comparePassword, generateToken, verifyToken } from '../auth.js';
 
 const router = Router();
 
@@ -69,6 +69,33 @@ router.post('/login', async (req: Request, res: Response) => {
 
   const token = generateToken(id as string);
   res.json({ token, user: { id, username: uname, avatar, online: !!online } });
+});
+
+router.get('/me', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    res.status(401).json({ error: 'No token provided' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  const decoded = verifyToken(token);
+  if (!decoded) {
+    res.status(401).json({ error: 'Invalid token' });
+    return;
+  }
+
+  const result = await query(
+    `SELECT id, username, avatar, online FROM users WHERE id = ?`,
+    [decoded.userId]
+  );
+
+  if (result.length === 0 || result[0].values.length === 0) {
+    res.status(404).json({ error: 'User not found' });
+    return;
+  }
+
+  const row = result[0].values[0];
+  res.json({ id: row[0], username: row[1], avatar: row[2], online: !!row[3] });
 });
 
 export default router;

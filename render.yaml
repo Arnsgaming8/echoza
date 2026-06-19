@@ -18,9 +18,4 @@ services:
         value: BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
-      - key: TURN_URL
-        value: turn:129.146.28.208:3478
-      - key: TURN_USERNAME
-        value: echoza
-      - key: TURN_CREDENTIAL
-        value: changeme123
+      # TURN_URL, TURN_USERNAME, TURN_CREDENTIAL set in Render dashboard
