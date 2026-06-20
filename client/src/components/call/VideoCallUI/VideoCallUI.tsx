@@ -182,12 +182,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
       }
     });
 
-    meeting.on('roomJoined', () => {
-      console.log('[Metered] roomJoined - starting media');
-      meeting.startVideo().catch((e: any) => console.warn('startVideo failed:', e));
-      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
-    });
-
     meeting.on('remoteTrackStarted', (item: any) => {
       console.log('[Metered] remoteTrackStarted type=' + item.type + ' name=' + (item.name || ''));
       setConnected(true);
@@ -210,9 +204,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
       onEnd();
     });
 
-    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username })
-      .then(() => console.log('[Metered] join resolved'))
-      .catch((e: any) => console.warn('Metered join failed:', e));
+    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
+      console.log('[Metered] join resolved - starting media');
+      meeting.startVideo().catch((e: any) => console.warn('startVideo failed:', e));
+      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
+    }).catch((e: any) => console.warn('Metered join failed:', e));
 
     return () => {
       meeting.leaveMeeting();

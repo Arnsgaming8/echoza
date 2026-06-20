@@ -122,11 +122,6 @@ export default function AudioCallUI({ contact, onEnd, socket, user, roomName }: 
     const meeting = new window.Metered.Meeting();
     meetingRef.current = meeting;
 
-    meeting.on('roomJoined', () => {
-      console.log('[Metered] roomJoined - starting audio');
-      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
-    });
-
     meeting.on('remoteTrackStarted', () => {
       console.log('[Metered] remoteTrackStarted');
       setConnected(true);
@@ -142,9 +137,10 @@ export default function AudioCallUI({ contact, onEnd, socket, user, roomName }: 
       onEnd();
     });
 
-    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username })
-      .then(() => console.log('[Metered] join resolved'))
-      .catch((e: any) => console.warn('Metered join failed:', e));
+    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
+      console.log('[Metered] join resolved - starting audio');
+      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
+    }).catch((e: any) => console.warn('Metered join failed:', e));
 
     return () => {
       meeting.leaveMeeting();
