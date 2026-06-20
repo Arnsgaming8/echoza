@@ -1,13 +1,9 @@
-name: Uptime Ping
-
+name: Keep Alive
 on:
   schedule:
     - cron: '*/14 * * * *'
-  workflow_dispatch:
-
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Render app
-        run: curl -sSf https://echoza.onrender.com/api/health -o /dev/null
+      - run: curl -sf https://echoza.onrender.com/api/health > /dev/null
