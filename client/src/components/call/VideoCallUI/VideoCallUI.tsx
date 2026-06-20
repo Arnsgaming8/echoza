@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import styled from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX, FiSettings } from 'react-icons/fi';
+import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiMonitor, FiX, FiSettings, FiRefreshCw } from 'react-icons/fi';
 
 const METERED_DOMAIN = 'vanra.metered.live';
 
@@ -15,11 +15,12 @@ const Overlay = styled.div`
   animation: fadeIn 0.3s ease;
 `;
 
-const RemoteVideo = styled.video`
+const RemoteVideo = styled.video<{ $rotate?: boolean }>`
   flex: 1;
   width: 100%;
   object-fit: contain;
   background: #1a1a1a;
+  ${({ $rotate }) => $rotate ? 'transform: rotate(90deg);' : ''}
 `;
 
 const LocalVideo = styled.video`
@@ -158,6 +159,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connected, setConnected] = useState(false);
+  const [rotateRemote, setRotateRemote] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
   const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
@@ -191,6 +193,10 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
       setConnected(true);
       if (item.type === 'video' && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = new MediaStream([item.track]);
+        const s = item.track.getSettings();
+        if (s.width && s.height && s.width > s.height) {
+          setRotateRemote(true);
+        }
       }
     });
 
@@ -303,7 +309,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
 
   return (
     <Overlay>
-      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
+      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline $rotate={rotateRemote} />
       {isCameraOn && <LocalVideo ref={localVideoRef} autoPlay playsInline muted />}
       <ContactLabel>{connected ? contact.username : `Calling ${contact.username}...`}</ContactLabel>
 
@@ -341,6 +347,9 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
         </ControlBtn>
         <ControlBtn $active onClick={handleScreenShare}>
           <FiMonitor />
+        </ControlBtn>
+        <ControlBtn $active={rotateRemote} onClick={() => setRotateRemote(r => !r)}>
+          <FiRefreshCw />
         </ControlBtn>
         <ControlBtn $active={showSettings} onClick={openSettings}>
           <FiSettings />
