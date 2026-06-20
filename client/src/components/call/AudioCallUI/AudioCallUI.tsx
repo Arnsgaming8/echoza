@@ -126,13 +126,17 @@ export default function AudioCallUI({ contact, onEnd, socket, user, roomName }: 
       setConnected(true);
     });
 
+    meeting.on('participantJoined', () => {
+      setConnected(true);
+    });
+
     meeting.on('participantLeft', () => {
       onEnd();
     });
 
     meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
-      meeting.startAudio().catch(console.warn);
-    }).catch(console.warn);
+      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
+    }).catch((e: any) => console.warn('Metered join failed:', e));
 
     return () => {
       meeting.leaveMeeting();

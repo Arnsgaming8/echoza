@@ -696,6 +696,11 @@ export default function Dashboard() {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
     setRoomName(incomingCall.roomName);
+    // Pre-warm media permission within user gesture (required by iOS Safari)
+    const needsVideo = incomingCall.type === 'video';
+    navigator.mediaDevices.getUserMedia({ audio: true, video: needsVideo })
+      .then(stream => stream.getTracks().forEach(t => t.stop()))
+      .catch(() => {});
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {
