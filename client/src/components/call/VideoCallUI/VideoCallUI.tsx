@@ -206,8 +206,8 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
 
     meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
       console.log('[Metered] join resolved - starting media');
-      meeting.startVideo().catch((e: any) => console.warn('startVideo failed:', e));
-      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
+      try { meeting.startVideo(); } catch (e) { console.warn('startVideo threw:', e); }
+      try { meeting.startAudio(); } catch (e) { console.warn('startAudio threw:', e); }
     }).catch((e: any) => console.warn('Metered join failed:', e));
 
     return () => {

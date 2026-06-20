@@ -139,7 +139,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, roomName }: 
 
     meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
       console.log('[Metered] join resolved - starting audio');
-      meeting.startAudio().catch((e: any) => console.warn('startAudio failed:', e));
+      try { meeting.startAudio(); } catch (e) { console.warn('startAudio threw:', e); }
     }).catch((e: any) => console.warn('Metered join failed:', e));
 
     return () => {
