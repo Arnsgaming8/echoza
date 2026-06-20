@@ -1,9 +1,11 @@
-name: Keep Alive
-on:
-  schedule:
-    - cron: '*/14 * * * *'
-jobs:
-  ping:
-    runs-on: ubuntu-latest
-    steps:
-      - run: curl -sf https://echoza.onrender.com/api/health > /dev/null
+# DISABLED: Kept hitting Render free-tier hourly limit (750 hrs/mo).
+# The service will now sleep after 15 min idle and cold-start on demand.
+# name: Keep Alive
+# on:
+#   schedule:
+#     - cron: '*/14 * * * *'
+# jobs:
+#   ping:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - run: curl -sf https://echoza.onrender.com/api/health > /dev/null
