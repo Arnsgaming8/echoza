@@ -14,6 +14,7 @@ import PwaGuide from '../components/onboarding/PwaGuide';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import { FiMessageSquare } from 'react-icons/fi';
+import { apiUrl } from '../utils/api';
 
 interface Attachment {
   name: string;
@@ -233,7 +234,7 @@ export default function Dashboard() {
             userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
           }).then(sub => {
-            fetch('/api/push/subscribe', {
+            fetch(apiUrl('/api/push/subscribe'), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -655,7 +656,7 @@ export default function Dashboard() {
   const handleAudioCall = async () => {
     if (!activeConv) return;
     try {
-      const res = await fetch('/api/metered/create-room', { method: 'POST' });
+      const res = await fetch(apiUrl('/api/metered/create-room'), { method: 'POST' });
       if (!res.ok) throw new Error('Failed to create room');
       const data = await res.json();
       setRoomName(data.roomName);
@@ -675,7 +676,7 @@ export default function Dashboard() {
   const handleVideoCall = async () => {
     if (!activeConv) return;
     try {
-      const res = await fetch('/api/metered/create-room', { method: 'POST' });
+      const res = await fetch(apiUrl('/api/metered/create-room'), { method: 'POST' });
       if (!res.ok) throw new Error('Failed to create room');
       const data = await res.json();
       setRoomName(data.roomName);

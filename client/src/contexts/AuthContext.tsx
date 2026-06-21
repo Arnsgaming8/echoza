@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { apiUrl } from '../utils/api';
 
 interface User {
   id: string;
@@ -44,7 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const RETRY_DELAY = 4000;
 
     const check = () => {
-      fetch('/api/users/me', {
+      fetch(apiUrl('/api/users/me'), {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(res => {

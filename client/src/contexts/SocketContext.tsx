@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, ReactNode, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
+import { apiUrl } from '../utils/api';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -26,7 +27,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated || !token) return;
 
-    const socket = io('/', {
+    const socket = io(apiUrl('/'), {
       auth: { token },
       transports: ['websocket', 'polling'],
     });

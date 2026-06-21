@@ -1,9 +1,11 @@
+import { apiUrl } from './api';
+
 let cachedIceConfig: RTCIceServer[] | null = null;
 
 export async function getIceServers(): Promise<RTCIceServer[]> {
   if (cachedIceConfig) return cachedIceConfig;
   try {
-    const res = await fetch('/api/ice-config');
+    const res = await fetch(apiUrl('/api/ice-config'));
     const data = await res.json();
     cachedIceConfig = data.iceServers as RTCIceServer[];
     return cachedIceConfig;

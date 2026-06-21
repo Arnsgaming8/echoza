@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { Button, Input } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
+import { apiUrl } from '../utils/api';
 import { FiEye, FiEyeOff } from 'react-icons/fi';
 
 const Wrapper = styled.div`
@@ -121,7 +122,7 @@ export default function Login() {
 
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
