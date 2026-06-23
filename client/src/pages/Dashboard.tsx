@@ -187,6 +187,9 @@ export default function Dashboard() {
   const userRef = useRef(user);
   userRef.current = user;
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const savedScrollTopRef = useRef<number | null>(null);
+  const prevTypingCountRef = useRef(0);
   const activeConvRef = useRef(activeConv);
   activeConvRef.current = activeConv;
   const activeChatRef = useRef(activeChat);
@@ -297,7 +300,15 @@ export default function Dashboard() {
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      const el = messagesContainerRef.current;
+      if (!el) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        return;
+      }
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      if (scrollHeight - scrollTop - clientHeight < 100) {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
     }, 50);
   }, []);
 
@@ -454,6 +465,25 @@ export default function Dashboard() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  useEffect(() => {
+    if (!messagesContainerRef.current || !activeChat) return;
+
+    const currentCount = typingUsers.size;
+    const prevCount = prevTypingCountRef.current;
+    prevTypingCountRef.current = currentCount;
+
+    if (currentCount > 0 && prevCount === 0) {
+      const el = messagesContainerRef.current;
+      savedScrollTopRef.current = el.scrollTop;
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    } else if (currentCount === 0 && prevCount > 0 && savedScrollTopRef.current !== null) {
+      const el = messagesContainerRef.current;
+      const saved = savedScrollTopRef.current;
+      savedScrollTopRef.current = null;
+      el.scrollTo({ top: saved, behavior: 'smooth' });
+    }
+  }, [typingUsers, activeChat]);
+
   const handleSelectChat = (conversationId: string, conv: Conversation) => {
     setActiveChat(conversationId);
     setActiveConv(conv);
@@ -462,6 +492,8 @@ export default function Dashboard() {
     setShowSidebar(false);
     setDeleteMode(false);
     setSelectedMessages(new Set());
+    savedScrollTopRef.current = null;
+    prevTypingCountRef.current = 0;
 
     if (socket) {
       socket.emit('messages:get', { conversationId });
@@ -757,7 +789,7 @@ export default function Dashboard() {
         <ChatArea>
           {activeChat && activeConv ? (
             <>
-              <MessagesContainer>
+              <MessagesContainer ref={messagesContainerRef}>
                 {messages.length === 0 && (
                   <EmptyChat>
                     <FiMessageSquare size={40} />
