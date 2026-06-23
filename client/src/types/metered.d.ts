@@ -16,6 +16,7 @@ interface MeteredMeeting {
   chooseVideoInputDevice(deviceId: string): Promise<void>;
   chooseAudioInputDevice(deviceId: string): Promise<void>;
   chooseAudioOutputDevice(deviceId: string): Promise<void>;
+  switchCamera(): Promise<void>;
 }
 
 interface Window {
