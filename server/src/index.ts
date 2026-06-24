@@ -100,6 +100,8 @@ async function main() {
 
     const iceServers: RTCIceServer[] = [
       { urls: 'stun:stun.l.google.com:19302' },
+      // Local Pion TURN (runs on user's PC via scheduled task)
+      { urls: ['turn:76.155.153.25:3478'], username: 'echoza', credential: 'echoza123' },
     ];
 
     if (turnUrl && turnUsername && turnCredential) {
