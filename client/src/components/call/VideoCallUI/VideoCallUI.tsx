@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiRefreshCw, FiMaximize2, FiMinimize2, FiX, FiSettings } from 'react-icons/fi';
+import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiX, FiSettings } from 'react-icons/fi';
 import { useCall } from '../../../utils/useCall';
 
 const fadeIn = keyframes`
@@ -20,14 +20,13 @@ const Overlay = styled.div`
   touch-action: none;
 `;
 
-const RemoteVideo = styled.video<{ $rotate?: boolean }>`
+const RemoteVideo = styled.video`
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #1a1a1a;
-  ${({ $rotate }) => $rotate ? 'transform: rotate(90deg);' : ''}
 `;
 
 const LocalVideo = styled.video<{ $x: number; $y: number }>`
@@ -263,7 +262,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [rotateRemote, setRotateRemote] = useState(false);
   const [localPos, setLocalPos] = useState(() => getCornerPos('bottom-right'));
   const [showSettings, setShowSettings] = useState(false);
 
@@ -293,15 +291,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   // Attach streams to video elements
   useEffect(() => { if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream; }, [localStream]);
   useEffect(() => { if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream; }, [remoteStream]);
-
-  // Auto-rotate detection
-  useEffect(() => {
-    if (!remoteStream) return;
-    const track = remoteStream.getVideoTracks()[0];
-    if (!track) return;
-    const s = track.getSettings();
-    if (s.width && s.height && s.width > s.height) setRotateRemote(true);
-  }, [remoteStream]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -335,7 +324,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         </CallingOverlay>
       )}
 
-      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline $rotate={rotateRemote} />
+      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
 
       {isCameraOn && localStream && (
         <LocalVideo
@@ -368,9 +357,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         </CtrlBtn>
         <CtrlBtn $active onClick={e => { e.stopPropagation(); flipCamera(); }}>
           <FiRotateCw />
-        </CtrlBtn>
-        <CtrlBtn $active={rotateRemote} onClick={e => { e.stopPropagation(); setRotateRemote(r => !r); }}>
-          <FiRefreshCw />
         </CtrlBtn>
         <CtrlBtn $bg="rgba(255,255,255,0.15)" onClick={e => { e.stopPropagation(); setShowSettings(true); }}>
           <FiSettings />

@@ -28,6 +28,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const CALL_TIMEOUT = 120000;
@@ -132,7 +133,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     };
 
     const handleTrack = (e: RTCTrackEvent) => {
-      setRemoteStream(new MediaStream([e.track]));
+      if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+      remoteStreamRef.current.addTrack(e.track);
+      setRemoteStream(remoteStreamRef.current);
       setConnected(true);
     };
 
