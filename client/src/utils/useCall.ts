@@ -135,7 +135,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     const handleTrack = (e: RTCTrackEvent) => {
       if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
       remoteStreamRef.current.addTrack(e.track);
-      setRemoteStream(remoteStreamRef.current);
+      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
       setConnected(true);
     };
 
