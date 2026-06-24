@@ -5,8 +5,7 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'turn:76.155.153.25:3478', username: 'echoza', credential: 'echoza123' },
-    { urls: 'turn:10.0.0.173:3478', username: 'echoza', credential: 'echoza123' },
-    { urls: ['turn:openrelay.metered.ca:80', 'turns:openrelay.metered.ca:443'], username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
