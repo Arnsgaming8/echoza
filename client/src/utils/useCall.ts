@@ -5,6 +5,7 @@ const ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'turn:76.155.153.25:3478', username: 'echoza', credential: 'echoza123' },
+    { urls: 'turn:10.0.0.173:3478', username: 'echoza', credential: 'echoza123' },
   ],
 };
 
@@ -28,6 +29,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const CALL_TIMEOUT = 120000;
@@ -132,8 +134,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     };
 
     const handleTrack = (e: RTCTrackEvent) => {
-      const stream = e.streams?.[0] || new MediaStream([e.track]);
-      setRemoteStream(stream);
+      if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+      remoteStreamRef.current.addTrack(e.track);
+      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
       setConnected(true);
     };
 
