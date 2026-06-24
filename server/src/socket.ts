@@ -364,6 +364,12 @@ export function setupSocket(io: SocketServer): void {
       if (!conv[0]?.values?.length) return;
       const [isGroup, u1, u2] = conv[0].values[0];
 
+      // Recalculate last_message
+      await mutate(
+        `UPDATE conversations SET last_message = COALESCE((SELECT content FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1), ''), last_time = (SELECT created_at FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1) WHERE id = ?`,
+        [conversationId, conversationId, conversationId]
+      );
+
       const msg = { messageIds, conversationId };
       if (isGroup) {
         const members = await query(`SELECT user_id FROM group_members WHERE group_id = ?`, [conversationId]);
