@@ -811,7 +811,7 @@ export default function Dashboard() {
                     <React.Fragment key={msg.id}>
                       {showDate && (
                         <DateSeparator>
-                          <DateLabel>{new Date(msg.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</DateLabel>
+                          <DateLabel>{new Date(msg.createdAt).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}</DateLabel>
                         </DateSeparator>
                       )}
                       <MessageBubble
