@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import styled, { keyframes } from 'styled-components';
 import Sidebar from '../components/chat/Sidebar/Sidebar';
 import TopBar from '../components/chat/TopBar/TopBar';
@@ -127,6 +127,34 @@ const MessagesContainer = styled.div`
   display: flex;
   flex-direction: column;
   gap: 2px;
+`;
+
+const DateSeparator = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 12px 0;
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: ${({ theme }) => theme.colors.border};
+  }
+`;
+
+const DateLabel = styled.span`
+  background: ${({ theme }) => theme.colors.bg.main};
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  position: relative;
+  z-index: 1;
 `;
 
 const EmptyChat = styled.div`
@@ -775,16 +803,27 @@ export default function Dashboard() {
                     <p>No messages yet. Say hello!</p>
                   </EmptyChat>
                 )}
-                {messages.map(msg => (
-                  <MessageBubble
-                    key={msg.id}
-                    message={msg}
-                    showSenderName={!!activeConv.isGroup}
-                    deleteMode={deleteMode}
-                    isSelected={selectedMessages.has(msg.id)}
-                    onToggleSelect={toggleSelectMessage}
-                  />
-                ))}
+                {messages.map((msg, i) => {
+                  const msgDate = new Date(msg.createdAt).toLocaleDateString();
+                  const prevDate = i > 0 ? new Date(messages[i-1].createdAt).toLocaleDateString() : null;
+                  const showDate = !prevDate || msgDate !== prevDate;
+                  return (
+                    <React.Fragment key={msg.id}>
+                      {showDate && (
+                        <DateSeparator>
+                          <DateLabel>{new Date(msg.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })}</DateLabel>
+                        </DateSeparator>
+                      )}
+                      <MessageBubble
+                        message={msg}
+                        showSenderName={!!activeConv.isGroup}
+                        deleteMode={deleteMode}
+                        isSelected={selectedMessages.has(msg.id)}
+                        onToggleSelect={toggleSelectMessage}
+                      />
+                    </React.Fragment>
+                  );
+                })}
                 {showTyping.map(uid => (
                   <TypingIndicator key={uid} username={
                     activeConv.isGroup
