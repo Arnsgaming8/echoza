@@ -56,13 +56,17 @@ async function main() {
 
     const iceServers: RTCIceServer[] = [
       { urls: 'stun:stun.l.google.com:19302' },
-      { urls: ['turn:76.155.153.25:3478'], username: 'echoza', credential: 'echoza123' },
     ];
 
     if (turnUrl && turnUsername && turnCredential) {
+      const urls: string[] = [];
       for (const url of turnUrl.split(',').map(s => s.trim()).filter(Boolean)) {
-        iceServers.push({ urls: [url], username: turnUsername, credential: turnCredential });
+        urls.push(url);
+        if (!url.includes('transport=')) {
+          urls.push(`${url}?transport=tcp`);
+        }
       }
+      iceServers.push({ urls, username: turnUsername, credential: turnCredential });
     }
 
     res.json({ iceServers });
