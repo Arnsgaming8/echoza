@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiVolume2, FiX, FiSettings } from 'react-icons/fi';
@@ -201,14 +201,20 @@ interface AudioCallUIProps {
 
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
-    isMuted, connected, seconds,
+    remoteStream, isMuted, connected, seconds,
     toggleMute, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    if (audioRef.current && remoteStream) audioRef.current.srcObject = remoteStream;
+  }, [remoteStream]);
 
   return (
     <Overlay>
+      <audio ref={audioRef} autoPlay />
       <AvatarRing $connected={connected}>
         <AvatarCircle>
           {contact.avatar ? (
