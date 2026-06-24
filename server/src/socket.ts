@@ -369,10 +369,13 @@ export function setupSocket(io: SocketServer): void {
         const members = await query(`SELECT user_id FROM group_members WHERE group_id = ?`, [conversationId]);
         for (const row of (members[0]?.values || [])) {
           emitToUser(io, row[0] as string, 'messages:deleted', msg);
+          emitToUser(io, row[0] as string, 'conversation:update', { conversationId });
         }
       } else {
         emitToUser(io, u1 as string, 'messages:deleted', msg);
         emitToUser(io, u2 as string, 'messages:deleted', msg);
+        emitToUser(io, u1 as string, 'conversation:update', { conversationId });
+        emitToUser(io, u2 as string, 'conversation:update', { conversationId });
       }
     });
 
