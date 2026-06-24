@@ -183,6 +183,7 @@ export default function Dashboard() {
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
 
+  const forceScrollNext = useRef(false);
   const userRef = useRef(user);
   userRef.current = user;
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -297,16 +298,20 @@ export default function Dashboard() {
 
 
 
-  const scrollToBottom = useCallback(() => {
+  const scrollToBottom = useCallback((force = false) => {
     setTimeout(() => {
       const el = messagesContainerRef.current;
       if (!el) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        messagesEndRef.current?.scrollIntoView({ behavior: force ? 'auto' : 'smooth' });
         return;
       }
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      if (scrollHeight - scrollTop - clientHeight < 100) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      if (force) {
+        el.scrollTop = el.scrollHeight;
+      } else {
+        const { scrollTop, scrollHeight, clientHeight } = el;
+        if (scrollHeight - scrollTop - clientHeight < 100) {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
       }
     }, 50);
   }, []);
@@ -492,6 +497,7 @@ export default function Dashboard() {
     setSelectedMessages(new Set());
     savedScrollTopRef.current = null;
     prevTypingCountRef.current = 0;
+    forceScrollNext.current = true;
 
     if (socket) {
       socket.emit('messages:get', { conversationId });
@@ -532,7 +538,8 @@ export default function Dashboard() {
 
     const handler = (data: Message[]) => {
       setMessages(data);
-      scrollToBottom();
+      scrollToBottom(forceScrollNext.current);
+      forceScrollNext.current = false;
 
       setConversations(prev => prev.map(c =>
         c.id === activeChat ? { ...c, unread: 0 } : c
