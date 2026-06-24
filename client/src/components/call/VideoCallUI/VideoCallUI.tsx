@@ -1,18 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiRefreshCw, FiMaximize2, FiMinimize2, FiX, FiSettings, FiMonitor } from 'react-icons/fi';
-
-const METERED_DOMAIN = 'vanra.metered.live';
+import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiRefreshCw, FiMaximize2, FiMinimize2, FiX, FiSettings } from 'react-icons/fi';
+import { useCall } from '../../../utils/useCall';
 
 const fadeIn = keyframes`
   from { opacity: 0; }
   to { opacity: 1; }
-`;
-
-const fadeOut = keyframes`
-  from { opacity: 1; }
-  to { opacity: 0; }
 `;
 
 const Overlay = styled.div`
@@ -36,7 +30,7 @@ const RemoteVideo = styled.video<{ $rotate?: boolean }>`
   ${({ $rotate }) => $rotate ? 'transform: rotate(90deg);' : ''}
 `;
 
-const LocalVideo = styled.video<{ $x: number; $y: number; $controlsVisible: boolean }>`
+const LocalVideo = styled.video<{ $x: number; $y: number }>`
   position: absolute;
   width: 160px;
   height: 220px;
@@ -50,24 +44,14 @@ const LocalVideo = styled.video<{ $x: number; $y: number; $controlsVisible: bool
   top: ${({ $y }) => $y}px;
   z-index: 5;
   border: 2px solid rgba(255,255,255,0.15);
-  transition: left 0.2s ease, top 0.2s ease, width 0.2s ease, height 0.2s ease;
+  transition: left 0.2s ease, top 0.2s ease;
 
-  &:active {
-    cursor: grabbing;
-    transition: none;
-  }
-
-  @media (max-width: 768px) {
-    width: ${({ $controlsVisible }) => $controlsVisible ? '120px' : '140px'};
-    height: ${({ $controlsVisible }) => $controlsVisible ? '170px' : '200px'};
-  }
+  &:active { cursor: grabbing; transition: none; }
 `;
 
 const TopStatusBar = styled.div<{ $visible: boolean }>`
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0; left: 0; right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -112,9 +96,7 @@ const StatusDot = styled.span<{ $connected: boolean }>`
 
 const BottomControlsBar = styled.div<{ $visible: boolean }>`
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: 0; left: 0; right: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -142,14 +124,8 @@ const CtrlBtn = styled.button<{ $danger?: boolean; $active?: boolean; $bg?: stri
     $active ? '#34c759' :
     'rgba(255,255,255,0.15)'};
   color: white;
-
-  &:hover {
-    transform: scale(1.08);
-  }
-
-  &:active {
-    transform: scale(0.92);
-  }
+  &:hover { transform: scale(1.08); }
+  &:active { transform: scale(0.92); }
 `;
 
 const EndCallBtn = styled.button`
@@ -162,17 +138,10 @@ const EndCallBtn = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition: transform 0.15s ease;
   box-shadow: 0 4px 20px rgba(255, 59, 48, 0.4);
-
-  &:hover {
-    transform: scale(1.08);
-    background: #d62d20;
-  }
-
-  &:active {
-    transform: scale(0.92);
-  }
+  &:hover { transform: scale(1.08); background: #d62d20; }
+  &:active { transform: scale(0.92); }
 `;
 
 const CallingOverlay = styled.div`
@@ -199,19 +168,6 @@ const CallingTimer = styled.p`
   font-weight: 300;
 `;
 
-const TapHint = styled.div`
-  position: absolute;
-  bottom: 120px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: rgba(255,255,255,0.3);
-  font-size: 13px;
-  z-index: 9;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.5s ease;
-`;
-
 const SettingsPanel = styled.div`
   position: absolute;
   top: 50%;
@@ -233,27 +189,6 @@ const SettingsTitle = styled.h3`
   margin-bottom: 16px;
 `;
 
-const SettingsRow = styled.div`
-  margin-bottom: 14px;
-`;
-
-const SettingsLabel = styled.label`
-  display: block;
-  color: rgba(255,255,255,0.6);
-  font-size: 12px;
-  margin-bottom: 6px;
-`;
-
-const SettingsSelect = styled.select`
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(255,255,255,0.08);
-  color: white;
-  border: 1px solid rgba(255,255,255,0.1);
-  font-size: 14px;
-`;
-
 const CloseBtn = styled.button`
   position: absolute;
   top: 12px;
@@ -266,52 +201,41 @@ const CloseBtn = styled.button`
   border-radius: 50%;
   color: rgba(255,255,255,0.5);
   font-size: 16px;
-
-  &:hover {
-    background: rgba(255,255,255,0.1);
-    color: white;
-  }
+  &:hover { background: rgba(255,255,255,0.1); color: white; }
 `;
 
-interface VideoCallUIProps {
-  contact: { id: string; username: string; avatar: string };
-  onEnd: () => void;
-  socket: Socket | null;
-  user: { id: string; username: string } | null;
-  roomName: string;
-}
+const TapHint = styled.div`
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.3);
+  font-size: 13px;
+  z-index: 9;
+  pointer-events: none;
+`;
 
 type SnapCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
-
 const CORNER_PADDING = 20;
 
-function getCornerPos(corner: SnapCorner, controlsVisible: boolean): { x: number; y: number } {
+function getCornerPos(corner: SnapCorner): { x: number; y: number } {
   const ww = window.innerWidth;
   const wh = window.innerHeight;
-  const pw = controlsVisible ? 130 : 160;
-  const ph = controlsVisible ? 180 : 220;
-
   switch (corner) {
-    case 'bottom-right':
-      return { x: ww - pw - CORNER_PADDING, y: wh - ph - (controlsVisible ? 110 : 40) };
-    case 'bottom-left':
-      return { x: CORNER_PADDING, y: wh - ph - (controlsVisible ? 110 : 40) };
-    case 'top-right':
-      return { x: ww - pw - CORNER_PADDING, y: 80 };
-    case 'top-left':
-      return { x: CORNER_PADDING, y: 80 };
+    case 'bottom-right': return { x: ww - 180, y: wh - 260 };
+    case 'bottom-left': return { x: CORNER_PADDING, y: wh - 260 };
+    case 'top-right': return { x: ww - 180, y: 80 };
+    case 'top-left': return { x: CORNER_PADDING, y: 80 };
   }
 }
 
-function nearestCorner(x: number, y: number, controlsVisible: boolean): SnapCorner {
+function nearestCorner(x: number, y: number): SnapCorner {
   const ww = window.innerWidth;
   const wh = window.innerHeight;
-  const pw = controlsVisible ? 130 : 160;
-  const ph = controlsVisible ? 180 : 220;
   const corners: { key: SnapCorner; x: number; y: number }[] = [
-    { key: 'bottom-right', x: ww - pw - CORNER_PADDING, y: wh - ph - (controlsVisible ? 110 : 40) },
-    { key: 'bottom-left', x: CORNER_PADDING, y: wh - ph - (controlsVisible ? 110 : 40) },
-    { key: 'top-right', x: ww - pw - CORNER_PADDING, y: 80 },
+    { key: 'bottom-right', x: ww - 180, y: wh - 260 },
+    { key: 'bottom-left', x: CORNER_PADDING, y: wh - 260 },
+    { key: 'top-right', x: ww - 180, y: 80 },
     { key: 'top-left', x: CORNER_PADDING, y: 80 },
   ];
   let best = corners[0];
@@ -323,245 +247,87 @@ function nearestCorner(x: number, y: number, controlsVisible: boolean): SnapCorn
   return best.key;
 }
 
-export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: VideoCallUIProps) {
-  const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOn, setIsCameraOn] = useState(true);
-  const [connected, setConnected] = useState(false);
-  const [seconds, setSeconds] = useState(0);
+interface VideoCallUIProps {
+  contact: { id: string; username: string; avatar: string };
+  onEnd: () => void;
+  socket: Socket | null;
+  user: { id: string; username: string } | null;
+  direction: 'outgoing' | 'incoming';
+  initialSdp?: string;
+}
+
+export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
+  const {
+    localStream, remoteStream, isMuted, isCameraOn, connected, seconds,
+    toggleMute, toggleCamera, flipCamera, handleEnd, formatTime,
+  } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
+
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
-  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
-  const [selectedInput, setSelectedInput] = useState('');
-  const [selectedOutput, setSelectedOutput] = useState('');
-  const [pipMode, setPipMode] = useState(false);
   const [rotateRemote, setRotateRemote] = useState(false);
-  const [localPos, setLocalPos] = useState<{ x: number; y: number }>(() =>
-    getCornerPos('bottom-right', true));
-  const snapCornerRef = useRef<SnapCorner>('bottom-right');
+  const [localPos, setLocalPos] = useState(() => getCornerPos('bottom-right'));
+  const [showSettings, setShowSettings] = useState(false);
+
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
-  const meetingRef = useRef<MeteredMeeting | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tapHintRef = useRef<HTMLDivElement>(null);
   const dragStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
-  const CALL_TIMEOUT = 120000;
+  const snapCornerRef = useRef<SnapCorner>('bottom-right');
+  const tapHintRef = useRef<HTMLDivElement>(null);
 
   const hideControlsTimeout = useCallback(() => {
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     if (connected) {
-      controlsTimerRef.current = setTimeout(() => {
-        if (!showSettings) setControlsVisible(false);
-      }, 4000);
+      controlsTimerRef.current = setTimeout(() => setControlsVisible(false), 4000);
     }
-  }, [connected, showSettings]);
+  }, [connected]);
 
-  const showControls = useCallback(() => {
-    setControlsVisible(true);
-    hideControlsTimeout();
-  }, [hideControlsTimeout]);
-
-  useEffect(() => {
-    hideControlsTimeout();
-    return () => {
-      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
-    };
-  }, [connected, hideControlsTimeout]);
+  useEffect(() => { hideControlsTimeout(); return () => { if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current); }; }, [connected, hideControlsTimeout]);
 
   useEffect(() => {
     if (connected && tapHintRef.current) {
       tapHintRef.current.style.opacity = '1';
-      setTimeout(() => {
-        if (tapHintRef.current) tapHintRef.current.style.opacity = '0';
-      }, 3000);
+      setTimeout(() => { if (tapHintRef.current) tapHintRef.current.style.opacity = '0'; }, 3000);
     }
   }, [connected]);
 
-  // Timers
-  const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  // Attach streams to video elements
+  useEffect(() => { if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream; }, [localStream]);
+  useEffect(() => { if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream; }, [remoteStream]);
+
+  // Auto-rotate detection
   useEffect(() => {
-    timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, []);
+    if (!remoteStream) return;
+    const track = remoteStream.getVideoTracks()[0];
+    if (!track) return;
+    const s = track.getSettings();
+    if (s.width && s.height && s.width > s.height) setRotateRemote(true);
+  }, [remoteStream]);
 
-  // Metered
-  useEffect(() => {
-    if (!user || !roomName || !window.Metered) return;
-
-    const meeting = new window.Metered.Meeting();
-    meetingRef.current = meeting;
-
-    meeting.on('localTrackStarted', (item: any) => {
-      if (item.type === 'video' && localVideoRef.current) {
-        localVideoRef.current.srcObject = new MediaStream([item.track]);
-      }
-    });
-
-    meeting.on('remoteTrackStarted', (item: any) => {
-      console.log('[Metered] remoteTrackStarted type=' + item.type);
-      setConnected(true);
-      if (item.type === 'video' && remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = new MediaStream([item.track]);
-        const s = item.track.getSettings();
-        if (s.width && s.height && s.width > s.height) {
-          setRotateRemote(true);
-        }
-      }
-    });
-
-    meeting.on('participantJoined', (p: any) => {
-      console.log('[Metered] participantJoined:', p?.name);
-      setConnected(true);
-    });
-
-    meeting.on('participantLeft', (p: any) => {
-      console.log('[Metered] participantLeft:', p?.name);
-      onEnd();
-    });
-
-    meeting.join({ roomURL: `${METERED_DOMAIN}/${roomName}`, name: user.username }).then(() => {
-      console.log('[Metered] join resolved - starting media');
-      try { meeting.startVideo(); } catch (e) { console.warn('startVideo threw:', e); }
-      try { meeting.startAudio(); } catch (e) { console.warn('startAudio threw:', e); }
-    }).catch((e: any) => console.warn('Metered join failed:', e));
-
-    return () => {
-      meeting.leaveMeeting();
-    };
-  }, []);
-
-  // Ringing timeout
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    timeoutRef.current = setTimeout(() => {
-      if (socket && contact) socket.emit('call:end', { receiverId: contact.id });
-      onEnd();
-    }, CALL_TIMEOUT);
-    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
-  }, []);
-
-  useEffect(() => {
-    if (connected && timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  }, [connected]);
-
-  // Snap local preview when controls visibility changes
-  useEffect(() => {
-    if (!pipMode) {
-      const pos = getCornerPos(snapCornerRef.current, controlsVisible);
-      setLocalPos(pos);
-    }
-  }, [controlsVisible, pipMode]);
-
-  const toggleMute = () => {
-    const m = meetingRef.current;
-    if (!m) return;
-    if (isMuted) { m.startAudio().catch(console.warn); }
-    else { m.stopAudio().catch(console.warn); }
-    setIsMuted(!isMuted);
-    showControls();
-  };
-
-  const toggleCamera = () => {
-    const m = meetingRef.current;
-    if (!m) return;
-    if (isCameraOn) { m.stopVideo().catch(console.warn); }
-    else { m.startVideo().catch(console.warn); }
-    setIsCameraOn(!isCameraOn);
-    showControls();
-  };
-
-  const flipCamera = () => {
-    const m = meetingRef.current;
-    if (!m) return;
-    m.switchCamera().catch(console.warn);
-    showControls();
-  };
-
-  const togglePip = () => {
-    setPipMode(!pipMode);
-    if (!pipMode) {
-      setLocalPos(getCornerPos(snapCornerRef.current, controlsVisible));
-    }
-    showControls();
-  };
-
-  const handleEnd = () => {
-    if (socket && contact) socket.emit('call:end', { receiverId: contact.id });
-    onEnd();
-  };
-
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  };
-
-  // Drag handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      left: localPos.x,
-      top: localPos.y,
-    };
+    dragStartRef.current = { x: e.clientX, y: e.clientY, left: localPos.x, top: localPos.y };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!dragStartRef.current) return;
-    const dx = e.clientX - dragStartRef.current.x;
-    const dy = e.clientY - dragStartRef.current.y;
     setLocalPos({
-      x: dragStartRef.current.left + dx,
-      y: dragStartRef.current.top + dy,
+      x: dragStartRef.current.left + e.clientX - dragStartRef.current.x,
+      y: dragStartRef.current.top + e.clientY - dragStartRef.current.y,
     });
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (!dragStartRef.current) return;
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-    const corner = nearestCorner(localPos.x, localPos.y, controlsVisible);
+    const corner = nearestCorner(localPos.x, localPos.y);
     snapCornerRef.current = corner;
-    const snapped = getCornerPos(corner, controlsVisible);
-    setLocalPos(snapped);
+    setLocalPos(getCornerPos(corner));
     dragStartRef.current = null;
   };
 
-  const openSettings = async () => {
-    setShowSettings(true);
-    const m = meetingRef.current;
-    if (!m) return;
-    try {
-      const inputs = await m.listAudioInputDevices();
-      const outputs = await m.listAudioOutputDevices();
-      setAudioInputs(inputs);
-      setAudioOutputs(outputs);
-      if (!selectedInput && inputs.length) setSelectedInput(inputs[0].deviceId);
-      if (!selectedOutput && outputs.length) setSelectedOutput(outputs[0].deviceId);
-    } catch {}
-    showControls();
-  };
-
-  const changeAudioInput = async (deviceId: string) => {
-    setSelectedInput(deviceId);
-    const m = meetingRef.current;
-    if (!m) return;
-    try { await m.chooseAudioInputDevice(deviceId); } catch {}
-  };
-
-  const changeAudioOutput = (deviceId: string) => {
-    setSelectedOutput(deviceId);
-    const m = meetingRef.current;
-    if (!m) return;
-    m.chooseAudioOutputDevice(deviceId).catch(() => {});
-  };
-
   return (
-    <Overlay onClick={showControls}>
+    <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
       {!connected && (
         <CallingOverlay>
           <CallingText>Calling {contact.username}...</CallingText>
@@ -571,14 +337,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
 
       <RemoteVideo ref={remoteVideoRef} autoPlay playsInline $rotate={rotateRemote} />
 
-      {isCameraOn && (
+      {isCameraOn && localStream && (
         <LocalVideo
           ref={localVideoRef}
-          autoPlay playsInline
-          muted
-          $x={localPos.x}
-          $y={localPos.y}
-          $controlsVisible={controlsVisible}
+          autoPlay playsInline muted
+          $x={localPos.x} $y={localPos.y}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
@@ -594,9 +357,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
         </StatusPill>
       </TopStatusBar>
 
-      <div ref={tapHintRef}>
-        <TapHint>Tap anywhere for controls</TapHint>
-      </div>
+      <div ref={tapHintRef}><TapHint>Tap anywhere for controls</TapHint></div>
 
       <BottomControlsBar $visible={controlsVisible}>
         <CtrlBtn $active={!isMuted} onClick={e => { e.stopPropagation(); toggleMute(); }}>
@@ -611,10 +372,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
         <CtrlBtn $active={rotateRemote} onClick={e => { e.stopPropagation(); setRotateRemote(r => !r); }}>
           <FiRefreshCw />
         </CtrlBtn>
-        <CtrlBtn $active={pipMode} onClick={e => { e.stopPropagation(); togglePip(); }}>
-          {pipMode ? <FiMaximize2 /> : <FiMinimize2 />}
-        </CtrlBtn>
-        <CtrlBtn $bg="rgba(255,255,255,0.15)" onClick={e => { e.stopPropagation(); openSettings(); }}>
+        <CtrlBtn $bg="rgba(255,255,255,0.15)" onClick={e => { e.stopPropagation(); setShowSettings(true); }}>
           <FiSettings />
         </CtrlBtn>
         <EndCallBtn onClick={e => { e.stopPropagation(); handleEnd(); }}>
@@ -624,26 +382,9 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
 
       {showSettings && (
         <SettingsPanel onClick={e => e.stopPropagation()}>
-          <CloseBtn onClick={() => setShowSettings(false)}>
-            <FiX />
-          </CloseBtn>
+          <CloseBtn onClick={() => setShowSettings(false)}><FiX /></CloseBtn>
           <SettingsTitle>Audio Settings</SettingsTitle>
-          <SettingsRow>
-            <SettingsLabel>Microphone</SettingsLabel>
-            <SettingsSelect value={selectedInput} onChange={e => changeAudioInput(e.target.value)}>
-              {audioInputs.map(d => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0, 8)}`}</option>
-              ))}
-            </SettingsSelect>
-          </SettingsRow>
-          <SettingsRow>
-            <SettingsLabel>Speaker</SettingsLabel>
-            <SettingsSelect value={selectedOutput} onChange={e => changeAudioOutput(e.target.value)}>
-              {audioOutputs.map(d => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0, 8)}`}</option>
-              ))}
-            </SettingsSelect>
-          </SettingsRow>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>Audio device selection is handled by your browser.</p>
         </SettingsPanel>
       )}
     </Overlay>

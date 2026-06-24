@@ -49,58 +49,13 @@ async function main() {
     res.json({ status: 'ok' });
   });
 
-  app.post('/api/metered/create-room', async (_req, res) => {
-    const secretKey = process.env.METERED_SECRET_KEY;
-    if (!secretKey) {
-      return res.status(500).json({ error: 'METERED_SECRET_KEY not set' });
-    }
-    try {
-      const meteredApp = process.env.METERED_APP || 'vanra';
-      console.log('[metered] creating room with app=' + meteredApp + ' key present=' + !!secretKey);
-      const url = `https://${meteredApp}.metered.live/api/v1/room?secretKey=${secretKey}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('[metered] API error status=' + response.status + ' body=' + text);
-        return res.status(500).json({ error: 'Metered API error: ' + response.status + ' ' + text });
-      }
-      const data = await response.json();
-      console.log('[metered] room created: ' + data.roomName);
-      res.json({ roomName: data.roomName, domain: `${meteredApp}.metered.live` });
-    } catch (err: any) {
-      console.error('[metered] create-room failed:', err.message);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.get('/api/metered/domain', (_req, res) => {
-    res.json({ domain: `${process.env.METERED_APP || 'vanra'}.metered.live` });
-  });
-
-  app.get('/api/ice-config', async (_req, res) => {
-    const meteredApiKey = process.env.METERED_API_KEY || '7581c01bdaff4eb85ddf4ce70ecc29df7a94';
-    const meteredApp = process.env.METERED_APP || 'vanra';
-
-    try {
-      const response = await fetch(`https://${meteredApp}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`);
-      if (response.ok) {
-        const iceServers = await response.json() as RTCIceServer[];
-        return res.json({ iceServers });
-      }
-    } catch {}
-
-    // Fallback to manual config if Metered API fails
+  app.get('/api/ice-config', (_req, res) => {
     const turnUrl = process.env.TURN_URL;
     const turnUsername = process.env.TURN_USERNAME;
     const turnCredential = process.env.TURN_CREDENTIAL;
 
     const iceServers: RTCIceServer[] = [
       { urls: 'stun:stun.l.google.com:19302' },
-      // Local Pion TURN (runs on user's PC via scheduled task)
       { urls: ['turn:76.155.153.25:3478'], username: 'echoza', credential: 'echoza123' },
     ];
 

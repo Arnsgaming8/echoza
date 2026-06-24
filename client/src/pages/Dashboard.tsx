@@ -172,11 +172,10 @@ export default function Dashboard() {
   const [callContact, setCallContact] = useState<Contact | null>(null);
   const [showAudioCall, setShowAudioCall] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
-  const [roomName, setRoomName] = useState<string>('');
   const [incomingCall, setIncomingCall] = useState<{
     caller: { id: string; username: string; avatar: string };
     type: 'audio' | 'video';
-    roomName: string;
+    sdp: string;
   } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
@@ -420,14 +419,14 @@ export default function Dashboard() {
       }
     });
 
-    socket.on('call:offer', ({ from, username: callerUsername, avatar: callerAvatar, type, roomName: recvRoomName }: { from: string; username: string; avatar: string; type: 'audio' | 'video'; roomName: string }) => {
+    socket.on('call:offer', ({ from, username: callerUsername, avatar: callerAvatar, type: callType, sdp }: { from: string; username: string; avatar: string; type: 'audio' | 'video'; sdp: string }) => {
       setIncomingCall({
         caller: { id: from, username: callerUsername, avatar: callerAvatar },
-        type: type || 'audio',
-        roomName: recvRoomName,
+        type: callType || 'audio',
+        sdp,
       });
 
-      notify('Echoza', (type === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType: type, callerId: from });
+      notify('Echoza', (callType === 'video' ? 'Video call' : 'Audio call') + ' from ' + callerUsername, 'call-' + from, { url: '/', callType, callerId: from });
     });
 
     socket.on('call:end', ({ from }: { from: string }) => {
@@ -436,7 +435,6 @@ export default function Dashboard() {
           setShowAudioCall(false);
           setShowVideoCall(false);
           setCallContact(null);
-          setRoomName('');
         }
       } else {
         setIncomingCall(prev => prev?.caller.id === from ? null : prev);
@@ -685,50 +683,24 @@ export default function Dashboard() {
     }
   };
 
-  const handleAudioCall = async () => {
+  const handleAudioCall = () => {
     if (!activeConv) return;
-    try {
-      const res = await fetch(apiUrl('/api/metered/create-room'), { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to create room');
-      const data = await res.json();
-      setRoomName(data.roomName);
-      setShowAudioCall(true);
-      if (socket) {
-        if (activeConv.isGroup) {
-          socket.emit('call:group-offer', { groupId: activeConv.id, type: 'audio', roomName: data.roomName });
-        } else if (activeConv.contact) {
-          socket.emit('call:offer', { receiverId: activeConv.contact.id, type: 'audio', roomName: data.roomName });
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to start audio call:', err);
-    }
+    setCallContact(activeConv.contact || null);
+    setShowAudioCall(true);
   };
 
-  const handleVideoCall = async () => {
+  const handleVideoCall = () => {
     if (!activeConv) return;
-    try {
-      const res = await fetch(apiUrl('/api/metered/create-room'), { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to create room');
-      const data = await res.json();
-      setRoomName(data.roomName);
-      setShowVideoCall(true);
-      if (socket) {
-        if (activeConv.isGroup) {
-          socket.emit('call:group-offer', { groupId: activeConv.id, type: 'video', roomName: data.roomName });
-        } else if (activeConv.contact) {
-          socket.emit('call:offer', { receiverId: activeConv.contact.id, type: 'video', roomName: data.roomName });
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to start video call:', err);
-    }
+    setCallContact(activeConv.contact || null);
+    setShowVideoCall(true);
   };
+
+  const [incomingSdp, setIncomingSdp] = useState<string | undefined>();
 
   const handleAcceptCall = () => {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
-    setRoomName(incomingCall.roomName);
+    setIncomingSdp(incomingCall.sdp);
     // Pre-warm media permission within user gesture (required by iOS Safari)
     const needsVideo = incomingCall.type === 'video';
     navigator.mediaDevices.getUserMedia({ audio: true, video: needsVideo })
@@ -839,20 +811,22 @@ export default function Dashboard() {
       {showAudioCall && (activeConv?.contact || callContact) && (
         <AudioCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowAudioCall(false); setCallContact(null); setRoomName(''); }}
+          onEnd={() => { setShowAudioCall(false); setCallContact(null); setIncomingSdp(undefined); }}
           socket={socket}
           user={user}
-          roomName={roomName}
+          direction={incomingSdp ? 'incoming' : 'outgoing'}
+          initialSdp={incomingSdp}
         />
       )}
 
       {showVideoCall && (activeConv?.contact || callContact) && (
         <VideoCallUI
           contact={callContact || activeConv!.contact!}
-          onEnd={() => { setShowVideoCall(false); setCallContact(null); setRoomName(''); }}
+          onEnd={() => { setShowVideoCall(false); setCallContact(null); setIncomingSdp(undefined); }}
           socket={socket}
           user={user}
-          roomName={roomName}
+          direction={incomingSdp ? 'incoming' : 'outgoing'}
+          initialSdp={incomingSdp}
         />
       )}
 

@@ -478,20 +478,28 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, userId, 'profile:updateResult', { success: true, username: newUsername, avatar });
     });
 
-    socket.on('call:offer', ({ receiverId, type, roomName }: { receiverId: string; type?: string; roomName: string }) => {
+    socket.on('call:offer', ({ receiverId, type, sdp }: { receiverId: string; type?: string; sdp: string }) => {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
       emitToUser(io, receiverId, 'call:offer', {
         from: userId, username, avatar: userData?.avatar || '',
-        type: type || 'audio', roomName,
+        type: type || 'audio', sdp,
       });
+    });
+
+    socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
+      emitToUser(io, receiverId, 'call:answer', { from: userId, sdp });
+    });
+
+    socket.on('call:ice-candidate', ({ receiverId, candidate }: { receiverId: string; candidate: any }) => {
+      emitToUser(io, receiverId, 'call:ice-candidate', { from: userId, candidate });
     });
 
     socket.on('call:end', ({ receiverId }: { receiverId: string }) => {
       emitToUser(io, receiverId, 'call:end', { from: userId });
     });
 
-    socket.on('call:group-offer', async ({ groupId, type, roomName }: { groupId: string; type?: string; roomName: string }) => {
+    socket.on('call:group-offer', async ({ groupId, type }: { groupId: string; type?: string }) => {
       const members = await query(
         `SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?`,
         [groupId, userId]
@@ -499,10 +507,9 @@ export function setupSocket(io: SocketServer): void {
       for (const row of (members[0]?.values || [])) {
         const memberId = row[0] as string;
         emitToUser(io, memberId, 'call:offer', {
-          from: userId,
-          username,
+          from: userId, username,
           type: type || 'audio',
-          roomName,
+          sdp: '', // group calls would need mesh signaling
         });
       }
     });
