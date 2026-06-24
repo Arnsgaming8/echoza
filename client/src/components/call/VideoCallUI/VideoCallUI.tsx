@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiMaximize2, FiMinimize2, FiX, FiSettings, FiMonitor } from 'react-icons/fi';
+import { FiMic, FiMicOff, FiCamera, FiCameraOff, FiRotateCw, FiRefreshCw, FiMaximize2, FiMinimize2, FiX, FiSettings, FiMonitor } from 'react-icons/fi';
 
 const METERED_DOMAIN = 'vanra.metered.live';
 
@@ -26,13 +26,14 @@ const Overlay = styled.div`
   touch-action: none;
 `;
 
-const RemoteVideo = styled.video`
+const RemoteVideo = styled.video<{ $rotate?: boolean }>`
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
   background: #1a1a1a;
+  ${({ $rotate }) => $rotate ? 'transform: rotate(90deg);' : ''}
 `;
 
 const LocalVideo = styled.video<{ $x: number; $y: number; $controlsVisible: boolean }>`
@@ -334,6 +335,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
   const [selectedInput, setSelectedInput] = useState('');
   const [selectedOutput, setSelectedOutput] = useState('');
   const [pipMode, setPipMode] = useState(false);
+  const [rotateRemote, setRotateRemote] = useState(false);
   const [localPos, setLocalPos] = useState<{ x: number; y: number }>(() =>
     getCornerPos('bottom-right', true));
   const snapCornerRef = useRef<SnapCorner>('bottom-right');
@@ -400,6 +402,10 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
       setConnected(true);
       if (item.type === 'video' && remoteVideoRef.current) {
         remoteVideoRef.current.srcObject = new MediaStream([item.track]);
+        const s = item.track.getSettings();
+        if (s.width && s.height && s.width > s.height) {
+          setRotateRemote(true);
+        }
       }
     });
 
@@ -563,7 +569,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
         </CallingOverlay>
       )}
 
-      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
+      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline $rotate={rotateRemote} />
 
       {isCameraOn && (
         <LocalVideo
@@ -601,6 +607,9 @@ export default function VideoCallUI({ contact, onEnd, socket, user, roomName }: 
         </CtrlBtn>
         <CtrlBtn $active onClick={e => { e.stopPropagation(); flipCamera(); }}>
           <FiRotateCw />
+        </CtrlBtn>
+        <CtrlBtn $active={rotateRemote} onClick={e => { e.stopPropagation(); setRotateRemote(r => !r); }}>
+          <FiRefreshCw />
         </CtrlBtn>
         <CtrlBtn $active={pipMode} onClick={e => { e.stopPropagation(); togglePip(); }}>
           {pipMode ? <FiMaximize2 /> : <FiMinimize2 />}
