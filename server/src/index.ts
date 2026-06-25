@@ -6,6 +6,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import { initDb, getPool } from './db.js';
+import { sendDiscordNotification } from './discord.js';
 import { setupSocket } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -47,6 +48,11 @@ async function main() {
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
+  });
+
+  app.get('/api/test-discord', async (_req, res) => {
+    await sendDiscordNotification('Test from Echoza server');
+    res.json({ sent: true });
   });
 
   app.get('/api/ice-config', (_req, res) => {
