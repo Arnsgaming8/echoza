@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
+import { apiUrl } from './api';
 
-const ICE_CONFIG: RTCConfiguration = {
+const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'turn:76.155.153.25:3478', username: 'echoza', credential: 'echoza123' },
+    { urls: ['turn:76.155.153.25:3478', 'turn:76.155.153.25:3478?transport=tcp'], username: 'echoza', credential: 'echoza123' },
   ],
 };
 
@@ -31,6 +32,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cleanupRef = useRef<(() => void) | null>(null);
   const CALL_TIMEOUT = 120000;
 
   const toggleMute = useCallback(() => {
@@ -106,76 +108,87 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   useEffect(() => {
     if (!user || !socket) return;
 
-    const pc = new RTCPeerConnection(ICE_CONFIG);
-    pcRef.current = pc;
-    let cleanupStream: MediaStream | null = null;
+    let cancelled = false;
 
-    const setupLocalMedia = async () => {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: type === 'video',
-      });
-      setLocalStream(stream);
-      localStreamRef.current = stream;
-      cleanupStream = stream;
-      stream.getTracks().forEach(track => {
-        pc.addTrack(track, stream);
-      });
-    };
+    const run = async () => {
+      let config: RTCConfiguration = FALLBACK_ICE_CONFIG;
+      try {
+        const res = await fetch(apiUrl('/api/ice-config'));
+        const data = await res.json();
+        if (data.iceServers) config = { iceServers: data.iceServers };
+      } catch {}
 
-    const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
-      if (e.candidate && socket) {
-        socket.emit('call:ice-candidate', {
-          receiverId: contact.id,
-          candidate: e.candidate.toJSON(),
+      if (cancelled) return;
+
+      const pc = new RTCPeerConnection(config);
+      pcRef.current = pc;
+      let cleanupStream: MediaStream | null = null;
+
+      const setupLocalMedia = async () => {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: type === 'video',
         });
+        setLocalStream(stream);
+        localStreamRef.current = stream;
+        cleanupStream = stream;
+        stream.getTracks().forEach(track => {
+          pc.addTrack(track, stream);
+        });
+      };
+
+      const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
+        if (e.candidate && socket) {
+          socket.emit('call:ice-candidate', {
+            receiverId: contact.id,
+            candidate: e.candidate.toJSON(),
+          });
+        }
+      };
+
+      const handleTrack = (e: RTCTrackEvent) => {
+        if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
+        remoteStreamRef.current.addTrack(e.track);
+        setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+        setConnected(true);
+      };
+
+      pc.onicecandidate = handleIceCandidate;
+      pc.ontrack = handleTrack;
+
+      if (direction === 'outgoing') {
+        setupLocalMedia().then(() => {
+          return pc.createOffer();
+        }).then(offer => {
+          return pc.setLocalDescription(offer);
+        }).then(() => {
+          socket.emit('call:offer', {
+            receiverId: contact.id,
+            type,
+            sdp: pc.localDescription?.sdp || '',
+          });
+        }).catch(err => console.warn('Outgoing call setup failed:', err));
+
+        const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
+          if (from !== contact.id) return;
+          pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+          socket.off('call:answer', onAnswer);
+        };
+        socket.on('call:answer', onAnswer);
+
+        const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
+          if (from !== contact.id) return;
+          pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        };
+        socket.on('call:ice-candidate', onIce);
+
+        cleanupRef.current = () => {
+          socket.off('call:answer', onAnswer);
+          socket.off('call:ice-candidate', onIce);
+        };
+        return;
       }
-    };
 
-    const handleTrack = (e: RTCTrackEvent) => {
-      if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
-      remoteStreamRef.current.addTrack(e.track);
-      setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-      setConnected(true);
-    };
-
-    pc.onicecandidate = handleIceCandidate;
-    pc.ontrack = handleTrack;
-
-    if (direction === 'outgoing') {
-      setupLocalMedia().then(() => {
-        return pc.createOffer();
-      }).then(offer => {
-        return pc.setLocalDescription(offer);
-      }).then(() => {
-        socket.emit('call:offer', {
-          receiverId: contact.id,
-          type,
-          sdp: pc.localDescription?.sdp || '',
-        });
-      }).catch(err => console.warn('Outgoing call setup failed:', err));
-
-      const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
-        if (from !== contact.id) return;
-        pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
-        socket.off('call:answer', onAnswer);
-      };
-      socket.on('call:answer', onAnswer);
-
-      const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
-        if (from !== contact.id) return;
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
-      };
-      socket.on('call:ice-candidate', onIce);
-
-      return () => {
-        socket.off('call:answer', onAnswer);
-        socket.off('call:ice-candidate', onIce);
-        pc.close();
-        pcRef.current = null;
-        cleanupStream?.getTracks().forEach(t => t.stop());
-      };
-    } else {
       if (!initialSdp) return;
 
       const offer = new RTCSessionDescription({ type: 'offer', sdp: initialSdp });
@@ -200,13 +213,21 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       };
       socket.on('call:ice-candidate', onIce);
 
-      return () => {
+      cleanupRef.current = () => {
         socket.off('call:ice-candidate', onIce);
-        pc.close();
-        pcRef.current = null;
-        cleanupStream?.getTracks().forEach(t => t.stop());
       };
-    }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+      cleanupRef.current?.();
+      const pc = pcRef.current;
+      if (pc) { pc.close(); pcRef.current = null; }
+      const cleanup = localStreamRef.current;
+      if (cleanup) cleanup.getTracks().forEach(t => t.stop());
+    };
   }, []);
 
   const formatTime = (s: number) => {
