@@ -584,7 +584,7 @@ export function setupSocket(io: SocketServer): void {
         await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
       } catch {}
       io.emit('user:online', { userId, username });
-      if (await isContactOfMonitored(userId)) sendDiscordNotification(`**${username}** is now online`);
+      if (username !== MONITORED_USERNAME && await isContactOfMonitored(userId)) sendDiscordNotification(`**${username}** is now online`);
     }
   });
 }
