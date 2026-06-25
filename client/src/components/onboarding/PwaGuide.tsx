@@ -95,15 +95,6 @@ const CloseBtn = styled.button`
   &:hover { opacity: 0.9; }
 `;
 
-const DismissText = styled.button`
-  display: block;
-  margin: 12px auto 0;
-  font-size: ${({ theme }) => theme.font.size.xs};
-  color: ${({ theme }) => theme.colors.text.secondary};
-  text-decoration: underline;
-  opacity: 0.6;
-`;
-
 function isIOS(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent;
@@ -113,8 +104,6 @@ function isIOS(): boolean {
 function isStandalone(): boolean {
   return window.matchMedia('(display-mode: standalone)').matches;
 }
-
-const STORAGE_KEY = 'echoza-pwa-guide-dismissed';
 
 function ShareIcon() {
   return (
@@ -147,18 +136,13 @@ export default function PwaGuide() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem(STORAGE_KEY);
-    if (dismissed) return;
     if (!isIOS()) return;
     if (isStandalone()) return;
     const timer = setTimeout(() => setVisible(true), 2000);
     return () => clearTimeout(timer);
   }, []);
 
-  const dismiss = () => {
-    localStorage.setItem(STORAGE_KEY, '1');
-    setVisible(false);
-  };
+  const dismiss = () => setVisible(false);
 
   if (!visible) return null;
 
@@ -194,7 +178,6 @@ export default function PwaGuide() {
         </Step>
 
         <CloseBtn onClick={dismiss}>Got it!</CloseBtn>
-        <DismissText onClick={dismiss}>Don't show again</DismissText>
       </Sheet>
     </Overlay>
   );
