@@ -13,17 +13,28 @@ interface AuthSocket extends Socket {
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 const MONITORED_USERNAME = 'Arnav_The_Dev';
 let monitoredUserId: string | null = null;
+let userIdPromise: Promise<string | null> | null = null;
 
-function isMonitoredSocket(socket: AuthSocket): boolean {
-  return socket.username === MONITORED_USERNAME;
+async function getMonitoredUserId(): Promise<string | null> {
+  if (monitoredUserId) return monitoredUserId;
+  if (userIdPromise) return userIdPromise;
+  userIdPromise = (async () => {
+    try {
+      const result = await query(`SELECT id FROM users WHERE username = ?`, [MONITORED_USERNAME]);
+      if (result[0]?.values?.[0]?.[0]) monitoredUserId = result[0].values[0][0] as string;
+    } catch {}
+    return monitoredUserId;
+  })();
+  return userIdPromise;
 }
 
 async function isContactOfMonitored(userId: string): Promise<boolean> {
-  if (!monitoredUserId || userId === monitoredUserId) return false;
+  const mid = await getMonitoredUserId();
+  if (!mid || userId === mid) return false;
   try {
     const result = await query(
       `SELECT id FROM conversations WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))`,
-      [monitoredUserId, userId, userId, monitoredUserId]
+      [mid, userId, userId, mid]
     );
     return result[0]?.values?.length > 0;
   } catch { return false; }
@@ -63,6 +74,7 @@ async function emitToGroupMembers(io: SocketServer, groupId: string, event: stri
 }
 
 export function setupSocket(io: SocketServer): void {
+  getMonitoredUserId(); // eagerly init so Discord conditions work before Arnav connects
   io.use(async (socket: AuthSocket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
@@ -356,7 +368,7 @@ export function setupSocket(io: SocketServer): void {
           '/',
           conversationId
         );
-        if (receiverId === monitoredUserId) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+        if (receiverId === await getMonitoredUserId()) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }
     });
 
@@ -515,7 +527,7 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', sdp,
       });
-      if (receiverId === monitoredUserId) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
+      if (receiverId === await getMonitoredUserId()) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
