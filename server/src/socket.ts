@@ -11,6 +11,31 @@ interface AuthSocket extends Socket {
 }
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
+const MONITORED_USERNAME = 'Arnav_The_Dev';
+let monitoredUserId: string | null = null;
+
+async function getMonitoredUserId(): Promise<string | null> {
+  if (monitoredUserId) return monitoredUserId;
+  try {
+    const result = await query(`SELECT id FROM users WHERE username = ?`, [MONITORED_USERNAME]);
+    if (result[0]?.values?.[0]?.[0]) {
+      monitoredUserId = result[0].values[0][0] as string;
+    }
+  } catch {}
+  return monitoredUserId;
+}
+
+async function isContactOfMonitored(userId: string): Promise<boolean> {
+  const mid = await getMonitoredUserId();
+  if (!mid || userId === mid) return false;
+  try {
+    const result = await query(
+      `SELECT id FROM conversations WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))`,
+      [mid, userId, userId, mid]
+    );
+    return result[0]?.values?.length > 0;
+  } catch { return false; }
+}
 
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
   const sockets = onlineUsers.get(userId);
@@ -337,7 +362,8 @@ export function setupSocket(io: SocketServer): void {
           '/',
           conversationId
         );
-        sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+        const mid = await getMonitoredUserId();
+        if (receiverId === mid) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }
     });
 
@@ -489,14 +515,15 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, userId, 'profile:updateResult', { success: true, username: newUsername, avatar });
     });
 
-    socket.on('call:offer', ({ receiverId, type, sdp }: { receiverId: string; type?: string; sdp: string }) => {
+    socket.on('call:offer', async ({ receiverId, type, sdp }: { receiverId: string; type?: string; sdp: string }) => {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
       emitToUser(io, receiverId, 'call:offer', {
         from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', sdp,
       });
-      sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
+      const mid = await getMonitoredUserId();
+      if (receiverId === mid) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
@@ -557,7 +584,7 @@ export function setupSocket(io: SocketServer): void {
         await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
       } catch {}
       io.emit('user:online', { userId, username });
-      sendDiscordNotification(`**${username}** is now online`);
+      if (await isContactOfMonitored(userId)) sendDiscordNotification(`**${username}** is now online`);
     }
   });
 }
