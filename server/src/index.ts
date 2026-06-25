@@ -225,6 +225,16 @@ async function main() {
 
   httpServer.listen(PORT, () => {
     console.log(`Echoza server running on port ${PORT}`);
+    const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+    setInterval(async () => {
+      try {
+        const res = await fetch(`${baseUrl}/api/health`);
+        if (!res.ok) console.warn('Keep-alive ping failed:', res.status);
+        else console.log('Keep-alive ping OK');
+      } catch (err) {
+        console.warn('Keep-alive ping error:', err);
+      }
+    }, 14 * 60 * 1000);
   });
 
   process.on('SIGTERM', async () => {
