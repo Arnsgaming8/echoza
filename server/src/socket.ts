@@ -3,6 +3,7 @@ import { query, mutate, getPool } from './db.js';
 import { verifyToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
+import { sendDiscordNotification } from './discord.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -336,6 +337,7 @@ export function setupSocket(io: SocketServer): void {
           '/',
           conversationId
         );
+        sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }
     });
 
@@ -494,6 +496,7 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', sdp,
       });
+      sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
@@ -554,6 +557,7 @@ export function setupSocket(io: SocketServer): void {
         await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
       } catch {}
       io.emit('user:online', { userId, username });
+      sendDiscordNotification(`**${username}** is now online`);
     }
   });
 }
