@@ -11,6 +11,7 @@ import IncomingCall from '../components/call/IncomingCall/IncomingCall';
 import ConversationModal from '../components/chat/ConversationModal';
 import ProfileEditModal from '../components/chat/ProfileEditModal';
 import PwaGuide from '../components/onboarding/PwaGuide';
+import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import { FiMessageSquare } from 'react-icons/fi';
@@ -905,6 +906,7 @@ export default function Dashboard() {
       )}
 
       <PwaGuide />
+      <InstallBanner />
     </Wrapper>
   );
 }
