@@ -16,13 +16,15 @@ let monitoredUserId: string | null = null;
 let userIdPromise: Promise<string | null> | null = null;
 
 async function getMonitoredUserId(): Promise<string | null> {
-  if (monitoredUserId) return monitoredUserId;
-  if (userIdPromise) return userIdPromise;
+  if (monitoredUserId) { console.log(`[Discord] getMonitoredUserId: cached ${monitoredUserId}`); return monitoredUserId; }
+  if (userIdPromise) { console.log(`[Discord] getMonitoredUserId: waiting for promise`); return userIdPromise; }
   userIdPromise = (async () => {
     try {
       const result = await query(`SELECT id FROM users WHERE username = ?`, [MONITORED_USERNAME]);
+      console.log(`[Discord] getMonitoredUserId: query result=`, JSON.stringify(result));
       if (result[0]?.values?.[0]?.[0]) monitoredUserId = result[0].values[0][0] as string;
-    } catch {}
+    } catch (err) { console.error(`[Discord] getMonitoredUserId: error`, err); }
+    console.log(`[Discord] getMonitoredUserId: returning ${monitoredUserId}`);
     return monitoredUserId;
   })();
   return userIdPromise;
@@ -368,7 +370,9 @@ export function setupSocket(io: SocketServer): void {
           '/',
           conversationId
         );
-        if (receiverId === await getMonitoredUserId()) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+        const _mid = await getMonitoredUserId();
+        console.log(`[Discord] message send: receiverId=${receiverId} monitoredUserId=${_mid} match=${receiverId === _mid}`);
+        if (receiverId === _mid) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }
     });
 
