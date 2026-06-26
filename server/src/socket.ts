@@ -11,36 +11,6 @@ interface AuthSocket extends Socket {
 }
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
-const MONITORED_USERNAME = 'Arnav_The_Dev';
-let monitoredUserId: string | null = null;
-let userIdPromise: Promise<string | null> | null = null;
-
-async function getMonitoredUserId(): Promise<string | null> {
-  if (monitoredUserId) { console.log(`[Discord] getMonitoredUserId: cached ${monitoredUserId}`); return monitoredUserId; }
-  if (userIdPromise) { console.log(`[Discord] getMonitoredUserId: waiting for promise`); return userIdPromise; }
-  userIdPromise = (async () => {
-    try {
-      const result = await query(`SELECT id FROM users WHERE username = ?`, [MONITORED_USERNAME]);
-      console.log(`[Discord] getMonitoredUserId: query result=`, JSON.stringify(result));
-      if (result[0]?.values?.[0]?.[0]) monitoredUserId = result[0].values[0][0] as string;
-    } catch (err) { console.error(`[Discord] getMonitoredUserId: error`, err); }
-    console.log(`[Discord] getMonitoredUserId: returning ${monitoredUserId}`);
-    return monitoredUserId;
-  })();
-  return userIdPromise;
-}
-
-async function isContactOfMonitored(userId: string): Promise<boolean> {
-  const mid = await getMonitoredUserId();
-  if (!mid || userId === mid) return false;
-  try {
-    const result = await query(
-      `SELECT id FROM conversations WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))`,
-      [mid, userId, userId, mid]
-    );
-    return result[0]?.values?.length > 0;
-  } catch { return false; }
-}
 
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
   const sockets = onlineUsers.get(userId);
@@ -76,7 +46,6 @@ async function emitToGroupMembers(io: SocketServer, groupId: string, event: stri
 }
 
 export function setupSocket(io: SocketServer): void {
-  getMonitoredUserId(); // eagerly init so Discord conditions work before Arnav connects
   io.use(async (socket: AuthSocket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
@@ -108,8 +77,6 @@ export function setupSocket(io: SocketServer): void {
   io.on('connection', async (socket: AuthSocket) => {
     const userId = socket.userId!;
     const username = socket.username!;
-
-    if (username === MONITORED_USERNAME) monitoredUserId = userId;
 
     // Must add to onlineUsers BEFORE any await to avoid race with user:getOnline
     const isFirstConnection = !onlineUsers.has(userId) || onlineUsers.get(userId)!.size === 0;
@@ -370,9 +337,8 @@ export function setupSocket(io: SocketServer): void {
           '/',
           conversationId
         );
-        const _mid = await getMonitoredUserId();
-        console.log(`[Discord] message send: receiverId=${receiverId} monitoredUserId=${_mid} match=${receiverId === _mid}`);
-        if (receiverId === _mid) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+        console.log(`[Discord] message send: receiverId=${receiverId}`);
+        sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }
     });
 
@@ -531,7 +497,7 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', sdp,
       });
-      if (receiverId === await getMonitoredUserId()) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
+      sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
@@ -592,7 +558,7 @@ export function setupSocket(io: SocketServer): void {
         await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
       } catch {}
       io.emit('user:online', { userId, username });
-      if (username !== MONITORED_USERNAME && await isContactOfMonitored(userId)) sendDiscordNotification(`**${username}** is now online`);
+      sendDiscordNotification(`**${username}** is now online`);
     }
   });
 }
