@@ -747,6 +747,18 @@ export default function Dashboard() {
   };
 
   const [incomingSdp, setIncomingSdp] = useState<string | undefined>();
+  const incomingTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  useEffect(() => {
+    if (incomingCall) {
+      incomingTimerRef.current = setTimeout(() => {
+        handleDeclineCall();
+      }, 60000);
+    }
+    return () => {
+      if (incomingTimerRef.current) clearTimeout(incomingTimerRef.current);
+    };
+  }, [incomingCall]);
 
   const handleAcceptCall = () => {
     if (!incomingCall) return;

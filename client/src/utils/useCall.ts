@@ -33,7 +33,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const CALL_TIMEOUT = 120000;
+  const CALL_TIMEOUT = 60000;
 
   const toggleMute = useCallback(() => {
     const pc = pcRef.current;
