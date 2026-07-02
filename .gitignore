@@ -1,6 +1,1 @@
-node_modules/
-dist/
-*.db
-.env
-.DS_Store
-*.log
+*.exe
