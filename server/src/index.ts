@@ -5,9 +5,10 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb, getPool } from './db.js';
+import { initDb, getPool, mutate } from './db.js';
+import { verifyToken } from './auth.js';
 import { sendDiscordNotification } from './discord.js';
-import { setupSocket } from './socket.js';
+import { setupSocket, recordHeartbeat } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -53,6 +54,16 @@ async function main() {
   app.get('/api/test-discord', async (_req, res) => {
     await sendDiscordNotification('Test from Echoza server');
     res.json({ sent: true });
+  });
+
+  app.post('/api/heartbeat', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const decoded = verifyToken(authHeader.slice(7));
+    if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
+    recordHeartbeat(decoded.userId);
+    await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [decoded.userId]).catch(() => {});
+    res.json({ ok: true });
   });
 
   app.get('/api/ice-config', (_req, res) => {

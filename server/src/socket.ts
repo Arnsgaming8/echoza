@@ -11,7 +11,11 @@ interface AuthSocket extends Socket {
 }
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
+const lastHeartbeat = new Map<string, number>();
+const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MONITORED_USERNAME = 'Arnav_The_Dev';
+const HEARTBEAT_TIMEOUT = 30000; // 30s without heartbeat → offline
+const CLEANUP_INTERVAL = 10000;   // check every 10s
 
 async function isContactOfMonitored(userId: string): Promise<boolean> {
   try {
@@ -66,7 +70,23 @@ async function emitToGroupMembers(io: SocketServer, groupId: string, event: stri
   }
 }
 
+export function recordHeartbeat(userId: string) {
+  lastHeartbeat.set(userId, Date.now());
+}
+
 export function setupSocket(io: SocketServer): void {
+  // Periodic cleanup: mark users offline if no heartbeat within timeout
+  setInterval(() => {
+    const now = Date.now();
+    for (const [userId, last] of lastHeartbeat) {
+      if (now - last > HEARTBEAT_TIMEOUT && !onlineUsers.has(userId)) {
+        lastHeartbeat.delete(userId);
+        mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
+        io.emit('user:offline', { userId });
+      }
+    }
+  }, CLEANUP_INTERVAL);
+
   io.use(async (socket: AuthSocket, next) => {
     const token = socket.handshake.auth.token;
     if (!token) {
@@ -548,14 +568,29 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
+    socket.on('user:heartbeat', () => {
+      lastHeartbeat.set(userId, Date.now());
+    });
+
     socket.on('disconnect', () => {
       const sockets = onlineUsers.get(userId);
       if (sockets) {
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           onlineUsers.delete(userId);
-          mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]);
-          io.emit('user:offline', { userId });
+          // Grace period: wait 30s before marking offline (cancelled on reconnect)
+          const timer = setTimeout(() => {
+            if (!onlineUsers.has(userId)) {
+              const lastHb = lastHeartbeat.get(userId);
+              if (!lastHb || Date.now() - lastHb > HEARTBEAT_TIMEOUT) {
+                lastHeartbeat.delete(userId);
+                mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
+                io.emit('user:offline', { userId });
+              }
+            }
+            offlineTimers.delete(userId);
+          }, HEARTBEAT_TIMEOUT);
+          offlineTimers.set(userId, timer);
         }
       }
     });
@@ -575,6 +610,10 @@ export function setupSocket(io: SocketServer): void {
     }
 
     if (isFirstConnection) {
+      // Cancel any pending offline timer (reconnect within grace period)
+      const timer = offlineTimers.get(userId);
+      if (timer) { clearTimeout(timer); offlineTimers.delete(userId); }
+      lastHeartbeat.set(userId, Date.now());
       try {
         await mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]);
       } catch {}

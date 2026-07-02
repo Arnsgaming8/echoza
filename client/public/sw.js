@@ -1,5 +1,7 @@
 const CACHE = 'echoza-v1';
 const STATIC_ASSETS = ['/vite.svg'];
+let HEARTBEAT_TOKEN = '';
+let HEARTBEAT_INTERVAL = null;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -12,15 +14,28 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
+function startHeartbeat() {
+  if (HEARTBEAT_INTERVAL) clearInterval(HEARTBEAT_INTERVAL);
+  HEARTBEAT_INTERVAL = setInterval(() => {
+    if (!HEARTBEAT_TOKEN) return;
+    fetch('/api/heartbeat', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + HEARTBEAT_TOKEN, 'Content-Type': 'application/json' },
+    }).catch(() => {});
+  }, 1000);
+}
+
+function stopHeartbeat() {
+  if (HEARTBEAT_INTERVAL) { clearInterval(HEARTBEAT_INTERVAL); HEARTBEAT_INTERVAL = null; }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET, API, and WebSocket
   if (request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') || url.protocol === 'ws:' || url.protocol === 'wss:') return;
 
-  // Cache-first for hashed static assets (JS, CSS, fonts, images)
   if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/i.test(url.pathname)) {
     event.respondWith(
       caches.open(CACHE).then(cache =>
@@ -36,7 +51,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network-first for HTML navigation, fallback to cache
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(() => caches.match(request).then(cached => cached || caches.match('/')))
@@ -90,7 +104,16 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'show-notification') {
+  const data = event.data;
+  if (data?.type === 'heartbeat-token') {
+    HEARTBEAT_TOKEN = data.token || '';
+    if (HEARTBEAT_TOKEN) {
+      startHeartbeat();
+    } else {
+      stopHeartbeat();
+    }
+  }
+  if (data?.type === 'show-notification') {
     self.registration.showNotification(event.data.title, {
       body: event.data.body,
       icon: event.data.icon || '/vite.svg',

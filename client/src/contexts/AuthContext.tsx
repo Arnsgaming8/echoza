@@ -83,6 +83,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('echoza-token', newToken);
   };
 
+  // Send token to service worker for background heartbeat
+  useEffect(() => {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'heartbeat-token',
+        token: token || '',
+      });
+    }
+  }, [token]);
+
   const logout = () => {
     setToken(null);
     setUser(null);
