@@ -240,7 +240,7 @@ async function main() {
       } catch (err) {
         console.warn('Keep-alive ping error:', err);
       }
-    }, 14 * 60 * 1000);
+    }, 10 * 60 * 1000);
   });
 
   process.on('SIGTERM', async () => {

@@ -41,8 +41,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     let retries = 0;
-    const MAX_RETRIES = 15;
-    const RETRY_DELAY = 4000;
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000;
 
     const check = () => {
       fetch(apiUrl('/api/users/me'), {
