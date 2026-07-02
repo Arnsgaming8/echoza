@@ -257,7 +257,7 @@ interface VideoCallUIProps {
 
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
-    localStream, remoteStream, isMuted, isCameraOn, connected, seconds,
+    localStream, remoteStream, isMuted, isCameraOn, connected, callStatus, seconds,
     toggleMute, toggleCamera, flipCamera, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
@@ -317,10 +317,20 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
 
   return (
     <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
-      {!connected && (
+      {callStatus === 'ringing' && (
         <CallingOverlay>
           <CallingText>Calling {contact.username}...</CallingText>
           <CallingTimer>{formatTime(seconds)}</CallingTimer>
+        </CallingOverlay>
+      )}
+      {callStatus === 'missed' && (
+        <CallingOverlay>
+          <CallingText>{contact.username} is not available</CallingText>
+        </CallingOverlay>
+      )}
+      {callStatus === 'declined' && (
+        <CallingOverlay>
+          <CallingText>{contact.username} declined</CallingText>
         </CallingOverlay>
       )}
 

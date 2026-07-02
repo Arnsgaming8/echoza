@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Avatar } from '../../common';
 import { FiPhone, FiPhoneOff, FiChevronDown, FiMessageSquare, FiBell } from 'react-icons/fi';
@@ -201,6 +201,31 @@ interface IncomingCallProps {
 }
 
 export default function IncomingCall({ caller, type, onAccept, onDecline }: IncomingCallProps) {
+  const ringtoneRef = useRef<{ stop: () => void } | null>(null);
+
+  useEffect(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      gain.gain.value = 0;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      const now = ctx.currentTime;
+      for (let i = 0; i < 300; i++) {
+        const t = now + i * 0.5;
+        const on = i % 2 === 0;
+        gain.gain.setValueAtTime(on ? 0.3 : 0, t);
+        gain.gain.linearRampToValueAtTime(on ? 0.3 : 0, t + 0.45);
+        osc.frequency.setValueAtTime(on ? 440 : 0, t);
+      }
+      ringtoneRef.current = { stop: () => { try { osc.stop(); gain.disconnect(); ctx.close(); } catch {} } };
+    } catch {}
+    return () => { ringtoneRef.current?.stop(); };
+  }, []);
+
   return (
     <Overlay>
       <TopSpacer />

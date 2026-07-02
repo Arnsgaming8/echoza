@@ -26,14 +26,19 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connected, setConnected] = useState(false);
   const [seconds, setSeconds] = useState(0);
+  const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected'>('ringing');
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const missedRef = useRef(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscRef = useRef<OscillatorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
   const CALL_TIMEOUT = 60000;
 
   const toggleMute = useCallback(() => {
@@ -81,7 +86,44 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     }).catch(() => {});
   }, []);
 
+  const startRingtone = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      audioCtxRef.current = ctx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      gain.gain.value = 0;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      oscRef.current = osc;
+      gainRef.current = gain;
+      const now = ctx.currentTime;
+      for (let i = 0; i < 300; i++) {
+        const t = now + i * 0.5;
+        const on = i % 2 === 0;
+        gain.gain.setValueAtTime(on ? 0.3 : 0, t);
+        gain.gain.linearRampToValueAtTime(on ? 0.3 : 0, t + 0.45);
+        osc.frequency.setValueAtTime(on ? 440 : 0, t);
+      }
+    } catch {}
+  }, []);
+
+  const stopRingtone = useCallback(() => {
+    try {
+      oscRef.current?.stop();
+      gainRef.current?.disconnect();
+      audioCtxRef.current?.close();
+      oscRef.current = null;
+      gainRef.current = null;
+      audioCtxRef.current = null;
+    } catch {}
+  }, []);
+
   const handleEnd = useCallback(() => {
+    stopRingtone();
+    if (endTimerRef.current) { clearTimeout(endTimerRef.current); endTimerRef.current = null; }
     const pc = pcRef.current;
     if (pc) { pc.close(); pcRef.current = null; }
     localStreamRef.current?.getTracks().forEach(t => t.stop());
@@ -89,7 +131,12 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       socket.emit('call:end', { receiverId: contact.id });
     }
     onEnd();
-  }, [socket, contact, onEnd]);
+  }, [socket, contact, onEnd, stopRingtone]);
+
+  const delayedEnd = useCallback((status: 'missed' | 'declined') => {
+    setCallStatus(status);
+    endTimerRef.current = setTimeout(() => handleEnd(), 2000);
+  }, [handleEnd]);
 
   // Timer
   useEffect(() => {
@@ -99,17 +146,24 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
   // Ringing timeout
   useEffect(() => {
+    if (callStatus !== 'ringing') return;
     ringingRef.current = setTimeout(() => {
       if (!connected && !missedRef.current) {
         missedRef.current = true;
         if (socket && contact) {
           socket.emit('call:missed', { receiverId: contact.id, type });
         }
-        handleEnd();
+        delayedEnd('missed');
       }
     }, CALL_TIMEOUT);
     return () => { if (ringingRef.current) clearTimeout(ringingRef.current); };
-  }, [connected, handleEnd, socket, contact, type]);
+  }, [connected, callStatus, socket, contact, type, delayedEnd]);
+
+  // Ringtone
+  useEffect(() => {
+    if (callStatus === 'ringing') startRingtone();
+    else stopRingtone();
+  }, [callStatus, startRingtone, stopRingtone]);
 
   // Setup peer connection + media
   useEffect(() => {
@@ -191,11 +245,14 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
         const onEnd = ({ from }: { from: string }) => {
           if (from !== contact.id) return;
+          if (endTimerRef.current) return;
           if (!missedRef.current && !remoteStreamRef.current) {
             missedRef.current = true;
             socket.emit('call:missed', { receiverId: contact.id, type });
+            delayedEnd('declined');
+          } else {
+            handleEnd();
           }
-          handleEnd();
         };
         socket.on('call:end', onEnd);
 
@@ -260,6 +317,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     isMuted,
     isCameraOn,
     connected,
+    callStatus,
     seconds,
     toggleMute,
     toggleCamera,

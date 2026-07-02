@@ -201,7 +201,7 @@ interface AudioCallUIProps {
 
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
-    remoteStream, isMuted, connected, seconds,
+    remoteStream, isMuted, connected, callStatus, seconds,
     toggleMute, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
@@ -227,11 +227,15 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
 
       <ContactName>{contact.username}</ContactName>
 
-      {!connected ? (
+      {callStatus === 'ringing' ? (
         <>
           <StatusText>Calling...</StatusText>
           <CallingTimer>{formatTime(seconds)}</CallingTimer>
         </>
+      ) : callStatus === 'missed' ? (
+        <StatusText>{contact.username} is not available</StatusText>
+      ) : callStatus === 'declined' ? (
+        <StatusText>{contact.username} declined</StatusText>
       ) : (
         <>
           <TimerText>{formatTime(seconds)}</TimerText>
