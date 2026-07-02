@@ -553,6 +553,40 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, receiverId, 'call:end', { from: userId });
     });
 
+    socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
+      const participants = [userId, receiverId].sort();
+      let convResult = await query(`
+        SELECT id FROM conversations
+        WHERE is_group = 0 AND ((user1_id = ? AND user2_id = ?) OR (user1_id = ? AND user2_id = ?))
+      `, [...participants, ...participants]);
+      let conversationId: string;
+      if (convResult.length === 0 || convResult[0].values.length === 0) {
+        conversationId = uuidv4();
+        await mutate(
+          `INSERT INTO conversations (id, user1_id, user2_id, is_group) VALUES (?, ?, ?, 0)`,
+          [conversationId, participants[0], participants[1]]
+        );
+      } else {
+        conversationId = convResult[0].values[0][0] as string;
+      }
+      const messageId = uuidv4();
+      const createdAt = new Date().toISOString();
+      const content = `Missed ${type} call`;
+      await mutate(
+        `INSERT INTO messages (id, conversation_id, sender_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
+        [messageId, conversationId, userId, content, createdAt]
+      );
+      await mutate(
+        `UPDATE conversations SET last_message = ?, last_time = ? WHERE id = ?`,
+        [content, createdAt, conversationId]
+      );
+      const message = { id: messageId, conversationId, senderId: userId, senderUsername: username, content, attachments: [], read: false, createdAt, isGroup: false };
+      emitToUser(io, userId, 'message:sent', message);
+      emitToUser(io, receiverId, 'message:new', message);
+      emitToUser(io, receiverId, 'conversation:update', { conversationId });
+      if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** called but **${receiverId}** missed the **${type}** call`);
+    });
+
     socket.on('call:group-offer', async ({ groupId, type }: { groupId: string; type?: string }) => {
       const members = await query(
         `SELECT user_id FROM group_members WHERE group_id = ? AND user_id != ?`,

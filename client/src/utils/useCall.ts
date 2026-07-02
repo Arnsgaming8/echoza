@@ -33,6 +33,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const timerRef = useRef<ReturnType<typeof setInterval>>(undefined);
   const ringingRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const missedRef = useRef(false);
   const CALL_TIMEOUT = 60000;
 
   const toggleMute = useCallback(() => {
@@ -99,10 +100,16 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   // Ringing timeout
   useEffect(() => {
     ringingRef.current = setTimeout(() => {
-      if (!connected) handleEnd();
+      if (!connected && !missedRef.current) {
+        missedRef.current = true;
+        if (socket && contact) {
+          socket.emit('call:missed', { receiverId: contact.id, type });
+        }
+        handleEnd();
+      }
     }, CALL_TIMEOUT);
     return () => { if (ringingRef.current) clearTimeout(ringingRef.current); };
-  }, [connected, handleEnd]);
+  }, [connected, handleEnd, socket, contact, type]);
 
   // Setup peer connection + media
   useEffect(() => {
@@ -182,9 +189,20 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         };
         socket.on('call:ice-candidate', onIce);
 
+        const onEnd = ({ from }: { from: string }) => {
+          if (from !== contact.id) return;
+          if (!missedRef.current && !remoteStreamRef.current) {
+            missedRef.current = true;
+            socket.emit('call:missed', { receiverId: contact.id, type });
+          }
+          handleEnd();
+        };
+        socket.on('call:end', onEnd);
+
         cleanupRef.current = () => {
           socket.off('call:answer', onAnswer);
           socket.off('call:ice-candidate', onIce);
+          socket.off('call:end', onEnd);
         };
         return;
       }
