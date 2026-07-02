@@ -128,7 +128,7 @@ const TextInput = styled.textarea`
   border: none;
   outline: none;
   color: ${({ theme }) => theme.colors.text.primary};
-  font-size: ${({ theme }) => theme.font.size.sm};
+  font-size: 16px;
   resize: none;
   max-height: 120px;
   padding: 8px 0;
@@ -136,6 +136,7 @@ const TextInput = styled.textarea`
 
   &::placeholder {
     color: ${({ theme }) => theme.colors.secondary.warmGray};
+    font-size: 16px;
   }
 
   &::-webkit-scrollbar {

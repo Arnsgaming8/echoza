@@ -21,6 +21,7 @@ const GlobalStyles = createGlobalStyle<{ theme: Theme }>`
                 color ${({ theme }) => theme.transition};
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    touch-action: manipulation;
   }
 
   ::-webkit-scrollbar {
