@@ -170,7 +170,20 @@ const EmptyChat = styled.div`
 `;
 
 const MessagesEnd = styled.div`
-  height: 1px;
+  height: 8px;
+`;
+
+const Footer = styled.footer`
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  text-align: center;
+  padding: 8px;
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  background: ${({ theme }) => theme.colors.bg.main};
+  z-index: 5;
 `;
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -907,6 +920,9 @@ export default function Dashboard() {
 
       <PwaGuide />
       <InstallBanner />
+      {!showAudioCall && !showVideoCall && !incomingCall && (
+        <Footer>Programmed and Designed by Arnav Jugessur</Footer>
+      )}
     </Wrapper>
   );
 }
