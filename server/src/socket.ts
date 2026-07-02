@@ -571,7 +571,8 @@ export function setupSocket(io: SocketServer): void {
       }
       const messageId = uuidv4();
       const createdAt = new Date().toISOString();
-      const content = `Missed ${type} call`;
+      const icon = type === 'video' ? '\uD83D\uDCF9' : '\uD83D\uDCDE';
+      const content = `${icon} Missed ${type} call`;
       await mutate(
         `INSERT INTO messages (id, conversation_id, sender_id, content, created_at) VALUES (?, ?, ?, ?, ?)`,
         [messageId, conversationId, userId, content, createdAt]

@@ -129,6 +129,25 @@ const FileSize = styled.div`
 
 const BubbleText = styled.div``;
 
+const MissedBubble = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0;
+`;
+
+const MissedIcon = styled.div`
+  font-size: 28px;
+`;
+
+const MissedLabel = styled.div`
+  font-size: 15px;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0.85;
+`;
+
 const MetaRow = styled.div<{ $isSent: boolean }>`
   display: flex;
   align-items: center;
@@ -247,7 +266,16 @@ export default function MessageBubble({ message, showSenderName, deleteMode, isS
               ))}
             </AttachmentGrid>
           )}
-          {message.content && <BubbleText>{linkify(message.content)}</BubbleText>}
+          {message.content && (
+            message.content.startsWith('\uD83D\uDCDE') || message.content.startsWith('\uD83D\uDCF9') ? (
+              <MissedBubble>
+                <MissedIcon>{message.content.slice(0, 2)}</MissedIcon>
+                <MissedLabel>{message.content.slice(2)}</MissedLabel>
+              </MissedBubble>
+            ) : (
+              <BubbleText>{linkify(message.content)}</BubbleText>
+            )
+          )}
         </Bubble>
         <MetaRow $isSent={isSent}>
           <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
