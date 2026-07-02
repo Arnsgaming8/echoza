@@ -33,7 +33,7 @@ interface MessageBubbleProps {
 
 const Wrapper = styled.div<{ $isSent: boolean }>`
   display: flex;
-  justify-content: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
+  justify-content: ${({ $isSent }) => ($isSent ? 'flex-start' : 'flex-end')};
   animation: fadeIn 0.3s ease;
   margin-bottom: 4px;
   align-items: flex-start;
@@ -44,7 +44,7 @@ const BubbleWrapper = styled.div<{ $isSent: boolean }>`
   max-width: 70%;
   display: flex;
   flex-direction: column;
-  align-items: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
+  align-items: ${({ $isSent }) => ($isSent ? 'flex-start' : 'flex-end')};
 
   @media (max-width: 768px) {
     max-width: 85%;
@@ -66,7 +66,7 @@ const Bubble = styled.div<{ $isSent: boolean }>`
     $isSent ? theme.colors.bubble.sent : theme.colors.bubble.received};
   color: ${({ $isSent, theme }) =>
     $isSent ? theme.colors.text.white : theme.colors.text.primary};
-  border-bottom-${({ $isSent }) => ($isSent ? 'right' : 'left')}-radius: 4px;
+  border-bottom-${({ $isSent }) => ($isSent ? 'left' : 'right')}-radius: 4px;
   word-wrap: break-word;
   white-space: pre-wrap;
   line-height: 1.4;
@@ -134,7 +134,7 @@ const MetaRow = styled.div<{ $isSent: boolean }>`
   align-items: center;
   gap: 6px;
   margin-top: 4px;
-  justify-content: ${({ $isSent }) => ($isSent ? 'flex-end' : 'flex-start')};
+  justify-content: ${({ $isSent }) => ($isSent ? 'flex-start' : 'flex-end')};
   padding: 0 4px;
 `;
 
