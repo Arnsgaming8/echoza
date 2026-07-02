@@ -1,0 +1,5 @@
+TURN server running on 0.0.0.0:3478 (UDP + TCP)
+Public IP: 76.155.153.25
+Realm: echoza.local
+Users: echoza=echoza123
+Relay port: 50000

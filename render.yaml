@@ -19,7 +19,7 @@ services:
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
       - key: DATABASE_URL
-        value: postgres://rv_0iq4yezh:-_H9hWuv-dYas93Xg8CLyvRqL_osd391aDan9s2JYyQ=@rivescb.us-east.db.rivestack.io:5432/rv_0iq4yezh?sslmode=require
+        value: postgres://rv_h7pmb4ur:bH-OCuI_i6X67iHbaoIGWtOyV_9SBU-b9do8jghZO6Y=@rivescb.us-east.db.rivestack.io:5432/rv_h7pmb4ur?sslmode=require
       - key: TURN_URL
         value: turn:76.155.153.25:3478
       - key: TURN_USERNAME
