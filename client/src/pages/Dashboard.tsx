@@ -125,6 +125,7 @@ const MessagesContainer = styled.div`
   flex: 1;
   overflow-y: auto;
   padding: ${({ theme }) => theme.spacing.md};
+  padding-bottom: 40px;
   display: flex;
   flex-direction: column;
   gap: 2px;
