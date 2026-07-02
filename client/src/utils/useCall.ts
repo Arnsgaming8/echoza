@@ -101,11 +101,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       gainRef.current = gain;
       const now = ctx.currentTime;
       for (let i = 0; i < 300; i++) {
-        const t = now + i * 0.5;
-        const on = i % 2 === 0;
-        gain.gain.setValueAtTime(on ? 0.3 : 0, t);
-        gain.gain.linearRampToValueAtTime(on ? 0.3 : 0, t + 0.45);
-        osc.frequency.setValueAtTime(on ? 440 : 0, t);
+        const cycle = Math.floor(i / 3);
+        const step = i % 3;
+        const t = now + i * 0.2;
+        const on = step < 2;
+        gain.gain.setValueAtTime(on ? 0.25 : 0, t);
+        gain.gain.linearRampToValueAtTime(on ? 0.25 : 0, t + 0.18);
+        osc.frequency.setValueAtTime(on ? (step === 0 ? 523 : 659) : 0, t);
       }
     } catch {}
   }, []);
