@@ -128,6 +128,47 @@ const EndCallBtn = styled.button`
   &:active { transform: scale(0.92); }
 `;
 
+const BottomContent = styled.div`
+  position: fixed;
+  bottom: 80px;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: ${fadeIn} 0.3s ease;
+`;
+
+const AvatarBottom = styled.div`
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #2d2d44;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 28px;
+  font-weight: 600;
+  color: white;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+`;
+
+const AvatarImgBottom = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const MissedText = styled.p`
+  color: rgba(255,255,255,0.7);
+  font-size: 16px;
+  font-weight: 400;
+  margin: 0;
+  text-align: center;
+`;
+
 const WaveformContainer = styled.div`
   display: flex;
   align-items: center;
@@ -212,20 +253,24 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
     if (audioRef.current && remoteStream) audioRef.current.srcObject = remoteStream;
   }, [remoteStream]);
 
+  const ended = callStatus === 'missed' || callStatus === 'declined';
+
   return (
     <Overlay>
       <audio ref={audioRef} autoPlay />
-      <AvatarRing $connected={connected}>
-        <AvatarCircle>
-          {contact.avatar ? (
-            <AvatarImg src={contact.avatar} alt={contact.username} />
-          ) : (
-            contact.username[0].toUpperCase()
-          )}
-        </AvatarCircle>
-      </AvatarRing>
+      {!ended && (
+        <AvatarRing $connected={connected}>
+          <AvatarCircle>
+            {contact.avatar ? (
+              <AvatarImg src={contact.avatar} alt={contact.username} />
+            ) : (
+              contact.username[0].toUpperCase()
+            )}
+          </AvatarCircle>
+        </AvatarRing>
+      )}
 
-      <ContactName>{contact.username}</ContactName>
+      {!ended && <ContactName>{contact.username}</ContactName>}
 
       {callStatus === 'ringing' ? (
         <>
@@ -233,9 +278,27 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
           <CallingTimer>{formatTime(seconds)}</CallingTimer>
         </>
       ) : callStatus === 'missed' ? (
-        <StatusText>{contact.username} is not available</StatusText>
+        <BottomContent>
+          <AvatarBottom>
+            {contact.avatar ? (
+              <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+            ) : (
+              contact.username[0].toUpperCase()
+            )}
+          </AvatarBottom>
+          <MissedText>{contact.username} is not available</MissedText>
+        </BottomContent>
       ) : callStatus === 'declined' ? (
-        <StatusText>{contact.username} declined</StatusText>
+        <BottomContent>
+          <AvatarBottom>
+            {contact.avatar ? (
+              <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+            ) : (
+              contact.username[0].toUpperCase()
+            )}
+          </AvatarBottom>
+          <MissedText>{contact.username} declined</MissedText>
+        </BottomContent>
       ) : (
         <>
           <TimerText>{formatTime(seconds)}</TimerText>
@@ -247,21 +310,25 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
         </>
       )}
 
-      <ControlsRow>
-        <CtrlBtn $active={!isMuted} onClick={toggleMute}>
-          {isMuted ? <FiMicOff /> : <FiMic />}
-        </CtrlBtn>
-        <CtrlBtn onClick={() => setShowSettings(true)}>
-          <FiSettings />
-        </CtrlBtn>
-        <CtrlBtn $bg="rgba(255,255,255,0.12)">
-          <FiVolume2 />
-        </CtrlBtn>
-      </ControlsRow>
+      {!ended && (
+        <>
+          <ControlsRow>
+            <CtrlBtn $active={!isMuted} onClick={toggleMute}>
+              {isMuted ? <FiMicOff /> : <FiMic />}
+            </CtrlBtn>
+            <CtrlBtn onClick={() => setShowSettings(true)}>
+              <FiSettings />
+            </CtrlBtn>
+            <CtrlBtn $bg="rgba(255,255,255,0.12)">
+              <FiVolume2 />
+            </CtrlBtn>
+          </ControlsRow>
 
-      <EndCallBtn onClick={handleEnd}>
-        <FiX />
-      </EndCallBtn>
+          <EndCallBtn onClick={handleEnd}>
+            <FiX />
+          </EndCallBtn>
+        </>
+      )}
 
       {showSettings && (
         <SettingsPanel onClick={e => e.stopPropagation()}>

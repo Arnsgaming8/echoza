@@ -167,6 +167,43 @@ const CallingTimer = styled.p`
   font-weight: 300;
 `;
 
+const BottomContent = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: ${fadeIn} 0.3s ease;
+`;
+
+const AvatarBottom = styled.div`
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #2d2d44;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 28px;
+  font-weight: 600;
+  color: white;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.3);
+`;
+
+const AvatarImgBottom = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const MissedText = styled.p`
+  color: rgba(255,255,255,0.7);
+  font-size: 16px;
+  font-weight: 400;
+  margin: 0;
+  text-align: center;
+`;
+
 const SettingsPanel = styled.div`
   position: absolute;
   top: 50%;
@@ -315,6 +352,8 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     dragStartRef.current = null;
   };
 
+  const ended = callStatus === 'missed' || callStatus === 'declined';
+
   return (
     <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
       {callStatus === 'ringing' && (
@@ -325,18 +364,36 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
       )}
       {callStatus === 'missed' && (
         <CallingOverlay>
-          <CallingText>{contact.username} is not available</CallingText>
+          <BottomContent>
+            <AvatarBottom>
+              {contact.avatar ? (
+                <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+              ) : (
+                contact.username[0].toUpperCase()
+              )}
+            </AvatarBottom>
+            <MissedText>{contact.username} is not available</MissedText>
+          </BottomContent>
         </CallingOverlay>
       )}
       {callStatus === 'declined' && (
         <CallingOverlay>
-          <CallingText>{contact.username} declined</CallingText>
+          <BottomContent>
+            <AvatarBottom>
+              {contact.avatar ? (
+                <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+              ) : (
+                contact.username[0].toUpperCase()
+              )}
+            </AvatarBottom>
+            <MissedText>{contact.username} declined</MissedText>
+          </BottomContent>
         </CallingOverlay>
       )}
 
-      <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
+      {!ended && <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />}
 
-      {isCameraOn && localStream && (
+      {!ended && isCameraOn && localStream && (
         <LocalVideo
           ref={localVideoRef}
           autoPlay playsInline muted
@@ -348,33 +405,37 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         />
       )}
 
-      <TopStatusBar $visible={controlsVisible && connected}>
-        <StatusPill>
-          <StatusDot $connected={connected} />
-          <StatusName>{contact.username}</StatusName>
-          <StatusTimer>{formatTime(seconds)}</StatusTimer>
-        </StatusPill>
-      </TopStatusBar>
+      {!ended && (
+        <TopStatusBar $visible={controlsVisible && connected}>
+          <StatusPill>
+            <StatusDot $connected={connected} />
+            <StatusName>{contact.username}</StatusName>
+            <StatusTimer>{formatTime(seconds)}</StatusTimer>
+          </StatusPill>
+        </TopStatusBar>
+      )}
 
-      <div ref={tapHintRef}><TapHint>Tap anywhere for controls</TapHint></div>
+      {!ended && <div ref={tapHintRef}><TapHint>Tap anywhere for controls</TapHint></div>}
 
-      <BottomControlsBar $visible={controlsVisible}>
-        <CtrlBtn $active={!isMuted} onClick={e => { e.stopPropagation(); toggleMute(); }}>
-          {isMuted ? <FiMicOff /> : <FiMic />}
-        </CtrlBtn>
-        <CtrlBtn $active={isCameraOn} onClick={e => { e.stopPropagation(); toggleCamera(); }}>
-          {isCameraOn ? <FiCamera /> : <FiCameraOff />}
-        </CtrlBtn>
-        <CtrlBtn $active onClick={e => { e.stopPropagation(); flipCamera(); }}>
-          <FiRotateCw />
-        </CtrlBtn>
-        <CtrlBtn $bg="rgba(255,255,255,0.15)" onClick={e => { e.stopPropagation(); setShowSettings(true); }}>
-          <FiSettings />
-        </CtrlBtn>
-        <EndCallBtn onClick={e => { e.stopPropagation(); handleEnd(); }}>
-          <FiX />
-        </EndCallBtn>
-      </BottomControlsBar>
+      {!ended && (
+        <BottomControlsBar $visible={controlsVisible}>
+          <CtrlBtn $active={!isMuted} onClick={e => { e.stopPropagation(); toggleMute(); }}>
+            {isMuted ? <FiMicOff /> : <FiMic />}
+          </CtrlBtn>
+          <CtrlBtn $active={isCameraOn} onClick={e => { e.stopPropagation(); toggleCamera(); }}>
+            {isCameraOn ? <FiCamera /> : <FiCameraOff />}
+          </CtrlBtn>
+          <CtrlBtn $active onClick={e => { e.stopPropagation(); flipCamera(); }}>
+            <FiRotateCw />
+          </CtrlBtn>
+          <CtrlBtn $bg="rgba(255,255,255,0.15)" onClick={e => { e.stopPropagation(); setShowSettings(true); }}>
+            <FiSettings />
+          </CtrlBtn>
+          <EndCallBtn onClick={e => { e.stopPropagation(); handleEnd(); }}>
+            <FiX />
+          </EndCallBtn>
+        </BottomControlsBar>
+      )}
 
       {showSettings && (
         <SettingsPanel onClick={e => e.stopPropagation()}>
