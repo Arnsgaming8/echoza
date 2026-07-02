@@ -41,6 +41,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const gainRef = useRef<GainNode | null>(null);
   const CALL_TIMEOUT = 60000;
 
+  const onEndRef = useRef(onEnd);
+  onEndRef.current = onEnd;
+
   const toggleMute = useCallback(() => {
     const pc = pcRef.current;
     if (!pc) return;
@@ -132,8 +135,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     if (socket && contact) {
       socket.emit('call:end', { receiverId: contact.id });
     }
-    onEnd();
-  }, [socket, contact, onEnd, stopRingtone]);
+    onEndRef.current();
+  }, [socket, contact, stopRingtone]);
 
   const delayedEnd = useCallback((status: 'missed' | 'declined') => {
     setCallStatus(status);
@@ -214,6 +217,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
         setConnected(true);
+        setCallStatus('connected');
       };
 
       pc.onicecandidate = handleIceCandidate;
@@ -300,6 +304,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     return () => {
       cancelled = true;
       cleanupRef.current?.();
+      if (endTimerRef.current) { clearTimeout(endTimerRef.current); endTimerRef.current = null; }
       const pc = pcRef.current;
       if (pc) { pc.close(); pcRef.current = null; }
       const cleanup = localStreamRef.current;
