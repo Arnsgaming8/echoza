@@ -119,6 +119,7 @@ const ChatArea = styled.div`
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-bottom: 22px;
 `;
 
 const MessagesContainer = styled.div`
@@ -180,8 +181,8 @@ const Footer = styled.footer`
   left: 0;
   right: 0;
   text-align: center;
-  padding: 8px;
-  font-size: 12px;
+  padding: 4px 8px;
+  font-size: 10px;
   color: ${({ theme }) => theme.colors.secondary.warmGray};
   background: ${({ theme }) => theme.colors.bg.main};
   z-index: 5;
