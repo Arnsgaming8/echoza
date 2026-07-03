@@ -208,20 +208,30 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
+      osc.type = 'triangle';
       gain.gain.value = 0;
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start();
       const now = ctx.currentTime;
-      for (let i = 0; i < 300; i++) {
-        const cycle = Math.floor(i / 3);
-        const step = i % 3;
-        const t = now + i * 0.2;
-        const on = step < 2;
-        gain.gain.setValueAtTime(on ? 0.12 : 0, t);
-        gain.gain.linearRampToValueAtTime(on ? 0.12 : 0, t + 0.18);
-        osc.frequency.setValueAtTime(on ? (step === 0 ? 523 : 659) : 0, t);
+      const step = 0.25;
+      const vol = 0.08;
+      for (let i = 0; i < 200; i++) {
+        const p = i % 10;
+        const t = now + i * step;
+        if (p === 0) {
+          gain.gain.setValueAtTime(0, t);
+          gain.gain.linearRampToValueAtTime(vol, t + 0.05);
+          osc.frequency.setValueAtTime(523, t);
+        } else if (p === 1) {
+          gain.gain.linearRampToValueAtTime(0, t + 0.05);
+        } else if (p === 4) {
+          gain.gain.setValueAtTime(0, t);
+          gain.gain.linearRampToValueAtTime(vol, t + 0.05);
+          osc.frequency.setValueAtTime(659, t);
+        } else if (p === 5) {
+          gain.gain.linearRampToValueAtTime(0, t + 0.05);
+        }
       }
       ringtoneRef.current = { stop: () => { try { osc.stop(); gain.disconnect(); ctx.close(); } catch {} } };
     } catch {}
