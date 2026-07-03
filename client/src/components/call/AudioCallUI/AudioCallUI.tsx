@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import styled, { keyframes } from 'styled-components';
+import styled, { keyframes, css } from 'styled-components';
 import { Socket } from 'socket.io-client';
 import { FiMic, FiMicOff, FiVolume2, FiX, FiSettings, FiChevronDown } from 'react-icons/fi';
 import { useCall } from '../../../utils/useCall';
@@ -55,7 +55,9 @@ const RingPulse = styled.div<{ $index: number; $active: boolean; $level: number 
   inset: -${({ $index }) => $index * 6}px;
   border-radius: 50%;
   border: 2px solid rgba(79, 70, 229, 0.5);
-  animation: ${({ $active, $level }) => $active && $level > 0.05 ? `${ringExpand} ${Math.max(0.4, 1 - $level * 0.6)}s ease-out infinite` : 'none'};
+  animation: ${({ $active, $level }) => $active && $level > 0.05
+    ? css`${ringExpand} ${Math.max(0.4, 1 - $level * 0.6)}s ease-out infinite`
+    : 'none'};
   animation-delay: ${({ $index }) => $index * 0.15}s;
   pointer-events: none;
 `;
