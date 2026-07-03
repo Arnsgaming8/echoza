@@ -5,7 +5,7 @@ import { apiUrl } from './api';
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: ['turn:76.155.153.25:3478', 'turn:76.155.153.25:3478?transport=tcp'], username: 'echoza', credential: 'echoza123' },
+    { urls: ['turn:161.153.65.53:3478', 'turn:161.153.65.53:3478?transport=tcp'], username: 'echoza', credential: 'echoza123' },
   ],
 };
 

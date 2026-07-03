@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../../../contexts/AuthContext';
-import { FiFile, FiImage, FiVideo, FiDownload, FiCheckCircle, FiCircle } from 'react-icons/fi';
+import { FiFile, FiImage, FiVideo, FiPhone, FiDownload, FiCheckCircle, FiCircle } from 'react-icons/fi';
 
 interface Attachment {
   name: string;
@@ -269,7 +269,9 @@ export default function MessageBubble({ message, showSenderName, deleteMode, isS
           {message.content && (
             message.content.startsWith('\uD83D\uDCDE') || message.content.startsWith('\uD83D\uDCF9') ? (
               <MissedBubble>
-                <MissedIcon>{message.content.slice(0, 2)}</MissedIcon>
+                <MissedIcon>
+                  {message.content.startsWith('\uD83D\uDCDE') ? <FiPhone /> : <FiVideo />}
+                </MissedIcon>
                 <MissedLabel>{message.content.slice(2)}</MissedLabel>
               </MissedBubble>
             ) : (
