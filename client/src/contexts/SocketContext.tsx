@@ -20,7 +20,6 @@ const SocketContext = createContext<SocketContextType>({
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { token, user, isAuthenticated } = useAuth();
   const socketRef = useRef<Socket | null>(null);
-  const offlineTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [selfOnline, setSelfOnline] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -34,10 +33,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('connect', () => {
-      if (offlineTimerRef.current) {
-        clearTimeout(offlineTimerRef.current);
-        offlineTimerRef.current = undefined;
-      }
       setConnected(true);
       setSelfOnline(true);
       socket.emit('user:getOnline');
@@ -46,9 +41,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     socket.on('disconnect', () => {
       setConnected(false);
-      offlineTimerRef.current = setTimeout(() => {
-        setSelfOnline(false);
-      }, 2000);
+      setSelfOnline(false);
     });
 
     socket.on('user:onlineList', (users: { userId: string }[]) => {
@@ -65,24 +58,47 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     socketRef.current = socket;
 
-    const hbInterval = setInterval(() => {
-      socket.emit('user:heartbeat');
-    }, 3000);
+    let hbInterval: ReturnType<typeof setInterval> | undefined;
+    let onlinePoll: ReturnType<typeof setInterval> | undefined;
 
-    const onlinePoll = setInterval(() => {
-      socket.emit('user:getOnline');
-    }, 15000);
+    const startIntervals = () => {
+      clearInterval(hbInterval);
+      clearInterval(onlinePoll);
+      hbInterval = setInterval(() => socket.emit('user:heartbeat'), 3000);
+      onlinePoll = setInterval(() => socket.emit('user:getOnline'), 15000);
+    };
+
+    const stopIntervals = () => {
+      clearInterval(hbInterval);
+      clearInterval(onlinePoll);
+      hbInterval = undefined;
+      onlinePoll = undefined;
+    };
+
+    startIntervals();
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopIntervals();
+        socket.emit('user:going-offline');
+      } else {
+        socket.emit('user:getOnline');
+        socket.emit('user:heartbeat');
+        startIntervals();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const handleBeforeUnload = () => {
+      stopIntervals();
       socket.emit('user:going-offline');
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      clearInterval(hbInterval);
-      clearInterval(onlinePoll);
-      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
+      stopIntervals();
       socket.disconnect();
       socketRef.current = null;
       setConnected(false);
