@@ -105,7 +105,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       const now = ctx.currentTime;
       const step = 0.25;
       const vol = 0.08;
-      for (let i = 0; i < 200; i++) {
+      for (let i = 0; i < 240; i++) {
         const p = i % 10;
         const t = now + i * step;
         if (p === 0) {
