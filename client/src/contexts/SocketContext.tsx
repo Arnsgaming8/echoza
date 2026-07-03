@@ -20,6 +20,7 @@ const SocketContext = createContext<SocketContextType>({
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { token, user, isAuthenticated } = useAuth();
   const socketRef = useRef<Socket | null>(null);
+  const offlineTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [selfOnline, setSelfOnline] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -33,14 +34,21 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('connect', () => {
-      console.log('[SocketContext] socket connected');
+      if (offlineTimerRef.current) {
+        clearTimeout(offlineTimerRef.current);
+        offlineTimerRef.current = undefined;
+      }
       setConnected(true);
       setSelfOnline(true);
       socket.emit('user:getOnline');
+      socket.emit('conversations:list');
     });
 
     socket.on('disconnect', () => {
-      setSelfOnline(false);
+      setConnected(false);
+      offlineTimerRef.current = setTimeout(() => {
+        setSelfOnline(false);
+      }, 2000);
     });
 
     socket.on('user:onlineList', (users: { userId: string }[]) => {
@@ -57,7 +65,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     socketRef.current = socket;
 
+    const hbInterval = setInterval(() => {
+      socket.emit('user:heartbeat');
+    }, 3000);
+
+    const handleBeforeUnload = () => {
+      socket.emit('user:going-offline');
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      clearInterval(hbInterval);
+      if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       socket.disconnect();
       socketRef.current = null;
       setConnected(false);

@@ -219,8 +219,8 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
         const step = i % 3;
         const t = now + i * 0.2;
         const on = step < 2;
-        gain.gain.setValueAtTime(on ? 0.25 : 0, t);
-        gain.gain.linearRampToValueAtTime(on ? 0.25 : 0, t + 0.18);
+        gain.gain.setValueAtTime(on ? 0.12 : 0, t);
+        gain.gain.linearRampToValueAtTime(on ? 0.12 : 0, t + 0.18);
         osc.frequency.setValueAtTime(on ? (step === 0 ? 523 : 659) : 0, t);
       }
       ringtoneRef.current = { stop: () => { try { osc.stop(); gain.disconnect(); ctx.close(); } catch {} } };

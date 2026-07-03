@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Socket } from 'socket.io-client';
-import { FiMic, FiMicOff, FiVolume2, FiX, FiSettings } from 'react-icons/fi';
+import { FiMic, FiMicOff, FiVolume2, FiX, FiSettings, FiChevronDown } from 'react-icons/fi';
 import { useCall } from '../../../utils/useCall';
 
 const fadeIn = keyframes`
@@ -33,6 +33,7 @@ const Overlay = styled.div`
 `;
 
 const AvatarRing = styled.div<{ $connected: boolean }>`
+  position: relative;
   width: 160px;
   height: 160px;
   border-radius: 50%;
@@ -42,6 +43,21 @@ const AvatarRing = styled.div<{ $connected: boolean }>`
   justify-content: center;
   animation: ${({ $connected }) => $connected ? 'none' : pulse} 1.5s ease infinite;
   box-shadow: 0 0 60px rgba(79, 70, 229, 0.3);
+`;
+
+const ringExpand = keyframes`
+  from { transform: scale(1); opacity: 0.6; }
+  to { transform: scale(1.8); opacity: 0; }
+`;
+
+const RingPulse = styled.div<{ $index: number; $active: boolean; $level: number }>`
+  position: absolute;
+  inset: -${({ $index }) => $index * 6}px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 70, 229, 0.5);
+  animation: ${({ $active, $level }) => $active && $level > 0.05 ? `${ringExpand} ${Math.max(0.4, 1 - $level * 0.6)}s ease-out infinite` : 'none'};
+  animation-delay: ${({ $index }) => $index * 0.15}s;
+  pointer-events: none;
 `;
 
 const AvatarCircle = styled.div`
@@ -211,6 +227,52 @@ const SettingsTitle = styled.h3`
   margin-bottom: 16px;
 `;
 
+const SettingRow = styled.div`
+  margin-bottom: 14px;
+`;
+
+const SettingLabel = styled.label`
+  display: block;
+  color: rgba(255,255,255,0.6);
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const Select = styled.select`
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  &:focus { border-color: ${({ theme }) => theme.colors.primary.echoBlue}; }
+  option { background: #222; color: white; }
+`;
+
+const VolumeSlider = styled.input`
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  outline: none;
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.primary.echoBlue};
+    cursor: pointer;
+  }
+`;
+
 const CloseBtn = styled.button`
   position: absolute;
   top: 12px;
@@ -243,23 +305,92 @@ interface AudioCallUIProps {
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
     remoteStream, isMuted, connected, callStatus, seconds,
-    toggleMute, handleEnd, formatTime,
+    toggleMute, switchAudioDevice, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMic, setSelectedMic] = useState('');
+  const [selectedSpeaker, setSelectedSpeaker] = useState('');
+  const [volume, setVolume] = useState(1);
+
+  const [audioLevel, setAudioLevel] = useState(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number>(0);
 
   useEffect(() => {
-    if (audioRef.current && remoteStream) audioRef.current.srcObject = remoteStream;
+    if (audioRef.current && remoteStream) {
+      audioRef.current.srcObject = remoteStream;
+      audioRef.current.play().catch(() => {});
+    }
   }, [remoteStream]);
+
+  useEffect(() => {
+    if (!remoteStream || !connected) return;
+    try {
+      const ctx = new AudioContext();
+      ctxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
+      const src = ctx.createMediaStreamSource(remoteStream);
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
+        setAudioLevel(avg);
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {}
+    return () => { cancelAnimationFrame(rafRef.current); ctxRef.current?.close(); };
+  }, [remoteStream, connected]);
+
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
+      setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
+      const savedMic = localStorage.getItem('echoza-mic');
+      const savedSpeaker = localStorage.getItem('echoza-speaker');
+      if (savedMic && devices.some(d => d.deviceId === savedMic)) setSelectedMic(savedMic);
+      if (savedSpeaker && devices.some(d => d.deviceId === savedSpeaker)) setSelectedSpeaker(savedSpeaker);
+    });
+  }, []);
+
+  const handleMicChange = useCallback((deviceId: string) => {
+    setSelectedMic(deviceId);
+    localStorage.setItem('echoza-mic', deviceId);
+    switchAudioDevice(deviceId);
+  }, [switchAudioDevice]);
+
+  const handleSpeakerChange = useCallback((deviceId: string) => {
+    setSelectedSpeaker(deviceId);
+    localStorage.setItem('echoza-speaker', deviceId);
+    if (audioRef.current && 'setSinkId' in audioRef.current) {
+      (audioRef.current as any).setSinkId(deviceId).catch(() => {});
+    }
+  }, []);
+
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    setVolume(v);
+    if (audioRef.current) audioRef.current.volume = v;
+  }, []);
 
   const ended = callStatus === 'missed' || callStatus === 'declined';
 
   return (
     <Overlay>
-      <audio ref={audioRef} autoPlay />
+      <audio ref={audioRef} autoPlay playsInline />
       {!ended && (
         <AvatarRing $connected={connected}>
+          {(connected || callStatus === 'ringing') && [0, 1, 2].map(i => (
+            <RingPulse key={i} $index={i} $active={connected || callStatus === 'ringing'} $level={callStatus === 'ringing' ? 0.5 : audioLevel} />
+          ))}
           <AvatarCircle>
             {contact.avatar ? (
               <AvatarImg src={contact.avatar} alt={contact.username} />
@@ -334,7 +465,26 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
         <SettingsPanel onClick={e => e.stopPropagation()}>
           <CloseBtn onClick={() => setShowSettings(false)}><FiX /></CloseBtn>
           <SettingsTitle>Audio Settings</SettingsTitle>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>Audio device selection is handled by your browser.</p>
+          <SettingRow>
+            <SettingLabel>Microphone</SettingLabel>
+            <Select value={selectedMic} onChange={e => handleMicChange(e.target.value)}>
+              {audioInputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </Select>
+          </SettingRow>
+          <SettingRow>
+            <SettingLabel>Speaker</SettingLabel>
+            <Select value={selectedSpeaker} onChange={e => handleSpeakerChange(e.target.value)}>
+              {audioOutputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </Select>
+          </SettingRow>
+          <SettingRow>
+            <SettingLabel>Volume</SettingLabel>
+            <VolumeSlider type="range" min="0" max="1" step="0.05" value={volume} onChange={handleVolumeChange} />
+          </SettingRow>
         </SettingsPanel>
       )}
     </Overlay>

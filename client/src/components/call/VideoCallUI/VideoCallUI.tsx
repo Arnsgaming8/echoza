@@ -225,6 +225,52 @@ const SettingsTitle = styled.h3`
   margin-bottom: 16px;
 `;
 
+const SettingRow = styled.div`
+  margin-bottom: 14px;
+`;
+
+const SettingLabel = styled.label`
+  display: block;
+  color: rgba(255,255,255,0.6);
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+`;
+
+const Select = styled.select`
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08);
+  color: white;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  &:focus { border-color: ${({ theme }) => theme.colors.primary.echoBlue}; }
+  option { background: #222; color: white; }
+`;
+
+const VolumeSlider = styled.input`
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  outline: none;
+  &::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: ${({ theme }) => theme.colors.primary.echoBlue};
+    cursor: pointer;
+  }
+`;
+
 const CloseBtn = styled.button`
   position: absolute;
   top: 12px;
@@ -249,6 +295,70 @@ const TapHint = styled.div`
   font-size: 13px;
   z-index: 9;
   pointer-events: none;
+`;
+
+const RemoteAvatarOverlay = styled.div`
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a1a;
+  z-index: 2;
+  gap: 16px;
+`;
+
+const CameraOffAvatar = styled.div`
+  position: relative;
+  width: 160px;
+  height: 160px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-size: 56px;
+  font-weight: 600;
+  color: white;
+`;
+
+const CameraOffImg = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`;
+
+const CameraOffInitial = styled.div`
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`;
+
+const ringExpandVideo = keyframes`
+  from { transform: scale(1); opacity: 0.6; }
+  to { transform: scale(1.8); opacity: 0; }
+`;
+
+const CameraOffRing = styled.div<{ $index: number; $active: boolean; $level: number }>`
+  position: absolute;
+  inset: -${({ $index }) => $index * 6}px;
+  border-radius: 50%;
+  border: 2px solid rgba(79, 70, 229, 0.5);
+  animation: ${({ $active, $level }) => $active && $level > 0.05 ? `${ringExpandVideo} ${Math.max(0.4, 1 - $level * 0.6)}s ease-out infinite` : 'none'};
+  animation-delay: ${({ $index }) => $index * 0.15}s;
+  pointer-events: none;
+`;
+
+const CameraOffLabel = styled.p`
+  color: rgba(255,255,255,0.5);
+  font-size: 14px;
+  font-weight: 400;
+  margin: 0;
 `;
 
 type SnapCorner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
@@ -295,12 +405,19 @@ interface VideoCallUIProps {
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
     localStream, remoteStream, isMuted, isCameraOn, connected, callStatus, seconds,
-    toggleMute, toggleCamera, flipCamera, handleEnd, formatTime,
+    toggleMute, toggleCamera, flipCamera, switchAudioDevice, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [localPos, setLocalPos] = useState(() => getCornerPos('bottom-right'));
   const [showSettings, setShowSettings] = useState(false);
+  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
+  const [selectedMic, setSelectedMic] = useState('');
+  const [selectedSpeaker, setSelectedSpeaker] = useState('');
+  const [volume, setVolume] = useState(1);
+  const [remoteCameraOff, setRemoteCameraOff] = useState(false);
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -308,6 +425,9 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const dragStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const snapCornerRef = useRef<SnapCorner>('bottom-right');
   const tapHintRef = useRef<HTMLDivElement>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const ctxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number>(0);
 
   const hideControlsTimeout = useCallback(() => {
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
@@ -327,7 +447,84 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
 
   // Attach streams to video elements
   useEffect(() => { if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream; }, [localStream]);
-  useEffect(() => { if (remoteVideoRef.current && remoteStream) remoteVideoRef.current.srcObject = remoteStream; }, [remoteStream]);
+  useEffect(() => { if (remoteVideoRef.current && remoteStream) { remoteVideoRef.current.srcObject = remoteStream; remoteVideoRef.current.play().catch(() => {}); } }, [remoteStream]);
+
+  // Track if remote camera is off
+  useEffect(() => {
+    if (!remoteStream) return;
+    const videoTracks = remoteStream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      setRemoteCameraOff(true);
+      return;
+    }
+    const track = videoTracks[0];
+    setRemoteCameraOff(!track.enabled);
+    const handleMute = () => setRemoteCameraOff(true);
+    const handleUnmute = () => setRemoteCameraOff(false);
+    const handleEnd = () => setRemoteCameraOff(true);
+    track.addEventListener('mute', handleMute);
+    track.addEventListener('unmute', handleUnmute);
+    track.addEventListener('ended', handleEnd);
+    return () => {
+      track.removeEventListener('mute', handleMute);
+      track.removeEventListener('unmute', handleUnmute);
+      track.removeEventListener('ended', handleEnd);
+    };
+  }, [remoteStream]);
+
+  // Audio analyser for speaking detection
+  useEffect(() => {
+    if (!remoteStream || !connected) return;
+    try {
+      const ctx = new AudioContext();
+      ctxRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      analyserRef.current = analyser;
+      const src = ctx.createMediaStreamSource(remoteStream);
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
+        setAudioLevel(avg);
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      tick();
+    } catch {}
+    return () => { cancelAnimationFrame(rafRef.current); ctxRef.current?.close(); };
+  }, [remoteStream, connected]);
+
+  useEffect(() => {
+    navigator.mediaDevices.enumerateDevices().then(devices => {
+      setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
+      setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
+      const savedMic = localStorage.getItem('echoza-mic');
+      const savedSpeaker = localStorage.getItem('echoza-speaker');
+      if (savedMic && devices.some(d => d.deviceId === savedMic)) setSelectedMic(savedMic);
+      if (savedSpeaker && devices.some(d => d.deviceId === savedSpeaker)) setSelectedSpeaker(savedSpeaker);
+    });
+  }, []);
+
+  const handleMicChange = useCallback((deviceId: string) => {
+    setSelectedMic(deviceId);
+    localStorage.setItem('echoza-mic', deviceId);
+    switchAudioDevice(deviceId);
+  }, [switchAudioDevice]);
+
+  const handleSpeakerChange = useCallback((deviceId: string) => {
+    setSelectedSpeaker(deviceId);
+    localStorage.setItem('echoza-speaker', deviceId);
+    if (remoteVideoRef.current && 'setSinkId' in remoteVideoRef.current) {
+      (remoteVideoRef.current as any).setSinkId(deviceId).catch(() => {});
+    }
+  }, []);
+
+  const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = parseFloat(e.target.value);
+    setVolume(v);
+    if (remoteVideoRef.current) remoteVideoRef.current.volume = v;
+  }, []);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -358,6 +555,16 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
       {callStatus === 'ringing' && (
         <CallingOverlay>
+          <CameraOffAvatar style={{ marginBottom: 8 }}>
+            {[0, 1, 2].map(i => (
+              <CameraOffRing key={i} $index={i} $active $level={0.5} />
+            ))}
+            {contact.avatar ? (
+              <CameraOffImg src={contact.avatar} alt={contact.username} />
+            ) : (
+              <CameraOffInitial>{contact.username[0].toUpperCase()}</CameraOffInitial>
+            )}
+          </CameraOffAvatar>
           <CallingText>Calling {contact.username}...</CallingText>
           <CallingTimer>{formatTime(seconds)}</CallingTimer>
         </CallingOverlay>
@@ -391,7 +598,26 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         </CallingOverlay>
       )}
 
-      {!ended && <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />}
+      {!ended && (
+        <>
+          <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
+          {remoteCameraOff && connected && (
+            <RemoteAvatarOverlay>
+              <CameraOffAvatar>
+                {[0, 1, 2].map(i => (
+                  <CameraOffRing key={i} $index={i} $active={connected} $level={audioLevel} />
+                ))}
+                {contact.avatar ? (
+                  <CameraOffImg src={contact.avatar} alt={contact.username} />
+                ) : (
+                  <CameraOffInitial>{contact.username[0].toUpperCase()}</CameraOffInitial>
+                )}
+              </CameraOffAvatar>
+              <CameraOffLabel>Camera off</CameraOffLabel>
+            </RemoteAvatarOverlay>
+          )}
+        </>
+      )}
 
       {!ended && isCameraOn && localStream && (
         <LocalVideo
@@ -441,7 +667,26 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         <SettingsPanel onClick={e => e.stopPropagation()}>
           <CloseBtn onClick={() => setShowSettings(false)}><FiX /></CloseBtn>
           <SettingsTitle>Audio Settings</SettingsTitle>
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 13 }}>Audio device selection is handled by your browser.</p>
+          <SettingRow>
+            <SettingLabel>Microphone</SettingLabel>
+            <Select value={selectedMic} onChange={e => handleMicChange(e.target.value)}>
+              {audioInputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </Select>
+          </SettingRow>
+          <SettingRow>
+            <SettingLabel>Speaker</SettingLabel>
+            <Select value={selectedSpeaker} onChange={e => handleSpeakerChange(e.target.value)}>
+              {audioOutputs.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Speaker ${d.deviceId.slice(0, 8)}`}</option>
+              ))}
+            </Select>
+          </SettingRow>
+          <SettingRow>
+            <SettingLabel>Volume</SettingLabel>
+            <VolumeSlider type="range" min="0" max="1" step="0.05" value={volume} onChange={handleVolumeChange} />
+          </SettingRow>
         </SettingsPanel>
       )}
     </Overlay>

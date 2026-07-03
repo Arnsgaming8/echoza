@@ -14,8 +14,8 @@ const onlineUsers = new Map<string, Map<string, { username: string; avatar: stri
 const lastHeartbeat = new Map<string, number>();
 const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const MONITORED_USERNAME = 'Arnav_The_Dev';
-const HEARTBEAT_TIMEOUT = 30000; // 30s without heartbeat → offline
-const CLEANUP_INTERVAL = 10000;   // check every 10s
+const HEARTBEAT_TIMEOUT = 5000;  // 5s without heartbeat → offline
+const CLEANUP_INTERVAL = 3000;   // check every 3s
 
 async function isContactOfMonitored(userId: string): Promise<boolean> {
   try {
@@ -345,9 +345,20 @@ export function setupSocket(io: SocketServer): void {
         [messageId, conversationId, userId, content, attachmentsJson, createdAt]
       );
 
+      const preview = content.trim()
+        ? content
+        : attachments?.length === 1
+          ? (attachments[0].type === 'video' ? 'Video'
+            : attachments[0].type === 'image' ? 'Image'
+            : attachments[0].type === 'audio' ? 'Audio'
+            : 'File')
+          : attachments?.length
+            ? 'Attachments'
+            : '';
+
       await mutate(
         `UPDATE conversations SET last_message = ?, last_time = ? WHERE id = ?`,
-        [content, createdAt, conversationId]
+        [preview, createdAt, conversationId]
       );
 
       const parsedAttachments = attachments ? attachments : [];
@@ -607,21 +618,31 @@ export function setupSocket(io: SocketServer): void {
       lastHeartbeat.set(userId, Date.now());
     });
 
+    socket.on('user:going-offline', () => {
+      // Immediate offline — bypass grace period (tab closed)
+      const sockets = onlineUsers.get(userId);
+      if (sockets) {
+        sockets.delete(socket.id);
+        if (sockets.size === 0) {
+          onlineUsers.delete(userId);
+          lastHeartbeat.delete(userId);
+          mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
+          io.emit('user:offline', { userId });
+        }
+      }
+    });
+
     socket.on('disconnect', () => {
       const sockets = onlineUsers.get(userId);
       if (sockets) {
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           onlineUsers.delete(userId);
-          // Grace period: wait 30s before marking offline (cancelled on reconnect)
           const timer = setTimeout(() => {
             if (!onlineUsers.has(userId)) {
-              const lastHb = lastHeartbeat.get(userId);
-              if (!lastHb || Date.now() - lastHb > HEARTBEAT_TIMEOUT) {
-                lastHeartbeat.delete(userId);
-                mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
-                io.emit('user:offline', { userId });
-              }
+              lastHeartbeat.delete(userId);
+              mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
+              io.emit('user:offline', { userId });
             }
             offlineTimers.delete(userId);
           }, HEARTBEAT_TIMEOUT);

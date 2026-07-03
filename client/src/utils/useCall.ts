@@ -108,8 +108,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         const step = i % 3;
         const t = now + i * 0.2;
         const on = step < 2;
-        gain.gain.setValueAtTime(on ? 0.25 : 0, t);
-        gain.gain.linearRampToValueAtTime(on ? 0.25 : 0, t + 0.18);
+        gain.gain.setValueAtTime(on ? 0.12 : 0, t);
+        gain.gain.linearRampToValueAtTime(on ? 0.12 : 0, t + 0.18);
         osc.frequency.setValueAtTime(on ? (step === 0 ? 523 : 659) : 0, t);
       }
     } catch {}
@@ -205,9 +205,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
       const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
         if (e.candidate && socket) {
+          const c = e.candidate;
           socket.emit('call:ice-candidate', {
             receiverId: contact.id,
-            candidate: e.candidate.toJSON(),
+            candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
           });
         }
       };
@@ -312,6 +313,24 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     };
   }, []);
 
+  const switchAudioDevice = useCallback(async (deviceId: string) => {
+    const pc = pcRef.current;
+    if (!pc) return;
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: deviceId } } });
+      const newTrack = newStream.getAudioTracks()[0];
+      const sender = pc.getSenders().find(s => s.track?.kind === 'audio');
+      if (sender) {
+        await sender.replaceTrack(newTrack);
+      }
+      const old = localStreamRef.current;
+      if (old) old.getAudioTracks().forEach(t => { t.stop(); old.removeTrack(t); });
+      if (old) old.addTrack(newTrack);
+      setLocalStream(new URL(''));
+      setLocalStream(old);
+    } catch {}
+  }, []);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -329,6 +348,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     toggleMute,
     toggleCamera,
     flipCamera,
+    switchAudioDevice,
     handleEnd,
     formatTime,
   };

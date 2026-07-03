@@ -69,7 +69,7 @@ self.addEventListener('push', (event) => {
       body: data.body || '',
       icon: '/vite.svg',
       badge: '/vite.svg',
-      data: { url: data.url || '/' },
+      data: { url: data.url || '/', conversationId: data.conversationId },
     };
     event.waitUntil(self.registration.showNotification(title, options));
   } catch {

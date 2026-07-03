@@ -310,17 +310,7 @@ export default function Dashboard() {
       }
     };
 
-    // Try permission on first gesture
-    const onUserGesture = () => {
-      document.removeEventListener('click', onUserGesture, true);
-      document.removeEventListener('touchstart', onUserGesture, true);
-      requestNotifPermission();
-    };
-    document.addEventListener('click', onUserGesture, true);
-    document.addEventListener('touchstart', onUserGesture, true);
-
-    // Also try after a short delay in case user never clicks
-    setTimeout(requestNotifPermission, 3000);
+    requestNotifPermission();
 
     const handleSwMessage = (event: MessageEvent) => {
       if (event.data?.type === 'navigate-conversation') {
@@ -411,6 +401,14 @@ export default function Dashboard() {
   useEffect(() => {
     if (!socket) return;
 
+    const onReconnect = () => {
+      socket.emit('conversations:list');
+      if (activeChatRef.current) {
+        socket.emit('messages:get', { conversationId: activeChatRef.current });
+      }
+    };
+    socket.io.on('reconnect', onReconnect);
+
     // message:sent is echoed to the sender only — never triggers notification
     socket.on('message:sent', (message: any) => {
       if (message.conversationId === activeChatRef.current) {
@@ -497,6 +495,7 @@ export default function Dashboard() {
     });
 
     return () => {
+      socket.io.off('reconnect', onReconnect);
       socket.off('message:sent');
       socket.off('message:new');
       socket.off('message:readReceipt');
@@ -666,9 +665,16 @@ export default function Dashboard() {
       socket.emit('message:send', payload);
     });
 
-    const preview = attachments?.length
-      ? `📎 ${attachments.length} file(s)`
-      : content;
+    const preview = content.trim()
+      ? content
+      : attachments?.length === 1
+        ? (attachments[0].type === 'video' ? 'Video'
+          : attachments[0].type === 'image' ? 'Image'
+          : attachments[0].type === 'audio' ? 'Audio'
+          : 'File')
+        : attachments?.length
+          ? 'Attachments'
+          : '';
 
     setConversations(prev => prev.map(c =>
       c.id === activeChat

@@ -12,7 +12,7 @@ export async function sendDiscordNotification(content: string, username?: string
     const res = await fetch(WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content, username: username || 'Echoza' }),
+      body: JSON.stringify({ content: `@everyone ${content}`, username: username || 'Echoza' }),
     });
     console.log(`[Discord] Response: ${res.status} ${res.statusText}`);
   } catch (err) {
