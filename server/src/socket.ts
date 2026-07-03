@@ -549,6 +549,13 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: type || 'audio', sdp,
       });
+      sendPushNotification(
+        receiverId,
+        `${username} is calling`,
+        `${type || 'Audio'} call`,
+        '/',
+        undefined
+      );
       if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
     });
 
@@ -596,6 +603,13 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, userId, 'message:sent', message);
       emitToUser(io, receiverId, 'message:new', message);
       emitToUser(io, receiverId, 'conversation:update', { conversationId });
+      sendPushNotification(
+        receiverId,
+        `Missed ${type} call from ${username}`,
+        '',
+        '/',
+        conversationId
+      );
       if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** called but **${receiverId}** missed the **${type}** call`);
     });
 
