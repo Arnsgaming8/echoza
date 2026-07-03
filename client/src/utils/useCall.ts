@@ -326,7 +326,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       const old = localStreamRef.current;
       if (old) old.getAudioTracks().forEach(t => { t.stop(); old.removeTrack(t); });
       if (old) old.addTrack(newTrack);
-      setLocalStream(new URL(''));
+      setLocalStream(null);
       setLocalStream(old);
     } catch {}
   }, []);

@@ -325,8 +325,6 @@ export default function Dashboard() {
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
-      document.removeEventListener('click', onUserGesture, true);
-      document.removeEventListener('touchstart', onUserGesture, true);
     };
   }, [user]);
 
