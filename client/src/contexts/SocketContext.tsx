@@ -69,6 +69,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socket.emit('user:heartbeat');
     }, 3000);
 
+    const onlinePoll = setInterval(() => {
+      socket.emit('user:getOnline');
+    }, 15000);
+
     const handleBeforeUnload = () => {
       socket.emit('user:going-offline');
     };
@@ -77,6 +81,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
       clearInterval(hbInterval);
+      clearInterval(onlinePoll);
       if (offlineTimerRef.current) clearTimeout(offlineTimerRef.current);
       socket.disconnect();
       socketRef.current = null;
