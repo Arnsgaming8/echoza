@@ -568,8 +568,12 @@ export default function Dashboard() {
 
   const handleDeleteSelected = () => {
     if (!socket || !activeChat || selectedMessages.size === 0) return;
+    const ids = Array.from(selectedMessages);
+    setMessages(prev => prev.filter(m => !ids.includes(m.id)));
+    setDeleteMode(false);
+    setSelectedMessages(new Set());
     socket.emit('messages:delete', {
-      messageIds: Array.from(selectedMessages),
+      messageIds: ids,
       conversationId: activeChat,
     });
   };
