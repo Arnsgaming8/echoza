@@ -157,7 +157,7 @@ const IconBtn = styled.button<{ $active?: boolean }>`
 export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
   const { onlineUsers } = useSocket();
-  const contactOnline = conversation?.contact ? (onlineUsers.includes(conversation.contact.id) || !!conversation.contact.online) : false;
+  const contactOnline = conversation?.contact ? onlineUsers.includes(conversation.contact.id) : false;
 
   const showCallButtons = !!conversation;
 

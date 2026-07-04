@@ -65,7 +65,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       clearInterval(hbInterval);
       clearInterval(onlinePoll);
       hbInterval = setInterval(() => socket.emit('user:heartbeat'), 3000);
-      onlinePoll = setInterval(() => socket.emit('user:getOnline'), 15000);
+      onlinePoll = setInterval(() => socket.emit('user:getOnline'), 10000);
     };
 
     const stopIntervals = () => {

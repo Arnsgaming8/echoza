@@ -439,7 +439,7 @@ export default function Sidebar({
                     username={conv.contact?.username}
                     src={conv.contact?.avatar}
                     size={40}
-                    online={conv.contact ? (onlineUsers.includes(conv.contact.id) || !!conv.contact.online) : false}
+                    online={conv.contact ? onlineUsers.includes(conv.contact.id) : false}
                   />
                 )}
                 <ChatInfo>
