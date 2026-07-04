@@ -27,6 +27,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const [connected, setConnected] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected'>('ringing');
+  const [audioLevel, setAudioLevel] = useState(0);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -39,6 +40,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const playbackGainRef = useRef<GainNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const rafRef = useRef<number>(0);
   const oscRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const CALL_TIMEOUT = 60000;
@@ -230,10 +233,11 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-        if (playbackCtxRef.current) {
+        if (playbackCtxRef.current && analyserRef.current) {
           try {
             const src = playbackCtxRef.current.createMediaStreamSource(new MediaStream([e.track]));
-            src.connect(playbackGainRef.current!);
+            src.connect(analyserRef.current);
+            analyserRef.current.connect(playbackGainRef.current!);
           } catch {}
         }
         setConnected(true);
@@ -332,6 +336,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       playbackCtxRef.current?.close();
       playbackCtxRef.current = null;
       playbackGainRef.current = null;
+      analyserRef.current = null;
+      cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -361,9 +367,20 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       if (!playbackCtxRef.current) {
         const ctx = new AudioContext();
         const gain = ctx.createGain();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 64;
         gain.connect(ctx.destination);
         playbackCtxRef.current = ctx;
         playbackGainRef.current = gain;
+        analyserRef.current = analyser;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const tick = () => {
+          analyser.getByteFrequencyData(data);
+          const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
+          setAudioLevel(avg);
+          rafRef.current = requestAnimationFrame(tick);
+        };
+        tick();
       }
     } catch {}
   }, []);
@@ -379,6 +396,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     remoteStream,
     isMuted,
     isCameraOn,
+    audioLevel,
     connected,
     callStatus,
     seconds,

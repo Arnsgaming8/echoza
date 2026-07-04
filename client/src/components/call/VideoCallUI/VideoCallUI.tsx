@@ -406,7 +406,7 @@ interface VideoCallUIProps {
 
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
-    localStream, remoteStream, isMuted, isCameraOn, connected, callStatus, seconds,
+    localStream, remoteStream, isMuted, isCameraOn, audioLevel, connected, callStatus, seconds,
     toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
@@ -419,7 +419,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const [selectedSpeaker, setSelectedSpeaker] = useState('');
   const [volume, setVolume] = useState(1);
   const [remoteCameraOff, setRemoteCameraOff] = useState(false);
-  const [audioLevel, setAudioLevel] = useState(0);
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -427,9 +426,10 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const dragStartRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
   const snapCornerRef = useRef<SnapCorner>('bottom-right');
   const tapHintRef = useRef<HTMLDivElement>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    resumePlayback();
+  }, [resumePlayback]);
 
   useEffect(() => {
     resumePlayback();
@@ -478,29 +478,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     };
   }, [remoteStream]);
 
-  // Audio analyser for speaking detection
-  useEffect(() => {
-    if (!remoteStream || !connected) return;
-    try {
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      analyserRef.current = analyser;
-      const src = ctx.createMediaStreamSource(remoteStream);
-      src.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
-        setAudioLevel(avg);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
-    } catch {}
-    return () => { cancelAnimationFrame(rafRef.current); ctxRef.current?.close(); };
-  }, [remoteStream, connected]);
-
+  // Track if remote camera is off
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then(devices => {
       setAudioInputs(devices.filter(d => d.kind === 'audioinput'));

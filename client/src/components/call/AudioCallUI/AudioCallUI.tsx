@@ -306,7 +306,7 @@ interface AudioCallUIProps {
 
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
-    remoteStream, isMuted, connected, callStatus, seconds,
+    remoteStream, isMuted, audioLevel, connected, callStatus, seconds,
     toggleMute, switchAudioDevice, resumePlayback, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
@@ -318,10 +318,9 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
   const [selectedSpeaker, setSelectedSpeaker] = useState('');
   const [volume, setVolume] = useState(1);
 
-  const [audioLevel, setAudioLevel] = useState(0);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const ctxRef = useRef<AudioContext | null>(null);
-  const rafRef = useRef<number>(0);
+  useEffect(() => {
+    resumePlayback();
+  }, [resumePlayback]);
 
   useEffect(() => {
     resumePlayback();
@@ -333,28 +332,6 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
       audioRef.current.play().catch(() => {});
     }
   }, [remoteStream]);
-
-  useEffect(() => {
-    if (!remoteStream || !connected) return;
-    try {
-      const ctx = new AudioContext();
-      ctxRef.current = ctx;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      analyserRef.current = analyser;
-      const src = ctx.createMediaStreamSource(remoteStream);
-      src.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length / 255;
-        setAudioLevel(avg);
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
-    } catch {}
-    return () => { cancelAnimationFrame(rafRef.current); ctxRef.current?.close(); };
-  }, [remoteStream, connected]);
 
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then(devices => {
