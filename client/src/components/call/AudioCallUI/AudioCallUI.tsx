@@ -307,7 +307,7 @@ interface AudioCallUIProps {
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
     remoteStream, isMuted, connected, callStatus, seconds,
-    toggleMute, switchAudioDevice, handleEnd, formatTime,
+    toggleMute, switchAudioDevice, resumePlayback, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -322,6 +322,10 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
   const analyserRef = useRef<AnalyserNode | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    resumePlayback();
+  }, [resumePlayback]);
 
   useEffect(() => {
     if (audioRef.current && remoteStream) {

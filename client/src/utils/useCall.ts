@@ -37,6 +37,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const cleanupRef = useRef<(() => void) | null>(null);
   const missedRef = useRef(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const playbackCtxRef = useRef<AudioContext | null>(null);
+  const playbackGainRef = useRef<GainNode | null>(null);
   const oscRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
   const CALL_TIMEOUT = 60000;
@@ -224,9 +226,16 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       };
 
       const handleTrack = (e: RTCTrackEvent) => {
+        if (e.track.kind !== 'audio') return;
         if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+        if (playbackCtxRef.current) {
+          try {
+            const src = playbackCtxRef.current.createMediaStreamSource(new MediaStream([e.track]));
+            src.connect(playbackGainRef.current!);
+          } catch {}
+        }
         setConnected(true);
         setCallStatus('connected');
       };
@@ -320,6 +329,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       if (pc) { pc.close(); pcRef.current = null; }
       const cleanup = localStreamRef.current;
       if (cleanup) cleanup.getTracks().forEach(t => t.stop());
+      playbackCtxRef.current?.close();
+      playbackCtxRef.current = null;
+      playbackGainRef.current = null;
     };
   }, []);
 
@@ -341,6 +353,21 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     } catch {}
   }, []);
 
+  const resumePlayback = useCallback(() => {
+    try {
+      if (playbackCtxRef.current?.state === 'suspended') {
+        playbackCtxRef.current.resume();
+      }
+      if (!playbackCtxRef.current) {
+        const ctx = new AudioContext();
+        const gain = ctx.createGain();
+        gain.connect(ctx.destination);
+        playbackCtxRef.current = ctx;
+        playbackGainRef.current = gain;
+      }
+    } catch {}
+  }, []);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -359,6 +386,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     toggleCamera,
     flipCamera,
     switchAudioDevice,
+    resumePlayback,
     handleEnd,
     formatTime,
   };

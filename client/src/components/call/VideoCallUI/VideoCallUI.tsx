@@ -407,7 +407,7 @@ interface VideoCallUIProps {
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
     localStream, remoteStream, isMuted, isCameraOn, connected, callStatus, seconds,
-    toggleMute, toggleCamera, flipCamera, switchAudioDevice, handleEnd, formatTime,
+    toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -430,6 +430,10 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const analyserRef = useRef<AnalyserNode | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number>(0);
+
+  useEffect(() => {
+    resumePlayback();
+  }, [resumePlayback]);
 
   const hideControlsTimeout = useCallback(() => {
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
