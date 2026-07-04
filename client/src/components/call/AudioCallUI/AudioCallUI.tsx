@@ -307,7 +307,7 @@ interface AudioCallUIProps {
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
     remoteStream, isMuted, audioLevel, connected, callStatus, seconds,
-    toggleMute, switchAudioDevice, resumePlayback, handleEnd, formatTime,
+    toggleMute, switchAudioDevice, resumePlayback, setPlaybackVolume, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -361,14 +361,14 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
     setVolume(v);
-    if (audioRef.current) audioRef.current.volume = v;
-  }, []);
+    setPlaybackVolume(v);
+  }, [setPlaybackVolume]);
 
   const ended = callStatus === 'missed' || callStatus === 'declined';
 
   return (
     <Overlay>
-      <audio ref={audioRef} autoPlay playsInline />
+      <audio ref={audioRef} autoPlay playsInline muted />
       {!ended && (
         <AvatarRing $connected={connected}>
           {(connected || callStatus === 'ringing') && [0, 1, 2].map(i => (

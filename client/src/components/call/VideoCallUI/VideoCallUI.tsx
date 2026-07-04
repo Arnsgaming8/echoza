@@ -407,7 +407,7 @@ interface VideoCallUIProps {
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
     localStream, remoteStream, isMuted, isCameraOn, audioLevel, connected, callStatus, seconds,
-    toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, handleEnd, formatTime,
+    toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, setPlaybackVolume, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -507,8 +507,8 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const v = parseFloat(e.target.value);
     setVolume(v);
-    if (remoteVideoRef.current) remoteVideoRef.current.volume = v;
-  }, []);
+    setPlaybackVolume(v);
+  }, [setPlaybackVolume]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -584,7 +584,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
 
       {!ended && (
         <>
-          <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
+          <RemoteVideo ref={remoteVideoRef} autoPlay playsInline muted />
           {remoteCameraOff && connected && (
             <RemoteAvatarOverlay>
               <CameraOffAvatar>

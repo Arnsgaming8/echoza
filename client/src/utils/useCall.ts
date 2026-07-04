@@ -229,11 +229,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       };
 
       const handleTrack = (e: RTCTrackEvent) => {
-        if (e.track.kind !== 'audio') return;
         if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-        if (playbackCtxRef.current && analyserRef.current) {
+        if (e.track.kind === 'audio' && playbackCtxRef.current && analyserRef.current) {
           try {
             const src = playbackCtxRef.current.createMediaStreamSource(new MediaStream([e.track]));
             src.connect(analyserRef.current);
@@ -385,6 +384,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     } catch {}
   }, []);
 
+  const setPlaybackVolume = useCallback((v: number) => {
+    if (playbackGainRef.current) playbackGainRef.current.gain.value = v;
+  }, []);
+
   const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
@@ -405,6 +408,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     flipCamera,
     switchAudioDevice,
     resumePlayback,
+    setPlaybackVolume,
     handleEnd,
     formatTime,
   };
