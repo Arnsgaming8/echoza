@@ -629,21 +629,20 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('user:heartbeat', () => {
+      const wasOffline = !lastHeartbeat.has(userId);
       lastHeartbeat.set(userId, Date.now());
+      if (wasOffline && onlineUsers.has(userId)) {
+        mutate(`UPDATE users SET online = 1 WHERE id = ?`, [userId]).catch(() => {});
+        io.emit('user:online', { userId, username });
+      }
     });
 
     socket.on('user:going-offline', () => {
-      // Immediate offline — bypass grace period (tab closed)
-      const sockets = onlineUsers.get(userId);
-      if (sockets) {
-        sockets.delete(socket.id);
-        if (sockets.size === 0) {
-          onlineUsers.delete(userId);
-          lastHeartbeat.delete(userId);
-          mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
-          io.emit('user:offline', { userId });
-        }
-      }
+      // Mark offline for other users but keep socket in onlineUsers
+      // so emitToUser still delivers messages when tab comes back.
+      lastHeartbeat.delete(userId);
+      mutate(`UPDATE users SET online = 0 WHERE id = ?`, [userId]).catch(() => {});
+      io.emit('user:offline', { userId });
     });
 
     socket.on('disconnect', () => {
