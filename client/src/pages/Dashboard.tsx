@@ -492,6 +492,18 @@ export default function Dashboard() {
       }
     });
 
+    const isDesktop = !/Mobi|Android|iPad|iPhone|iPod|Tablet/i.test(navigator.userAgent);
+
+    socket.on('user:online', ({ userId, username: onlineUsername }: { userId: string; username: string }) => {
+      if (!isDesktop || userId === userRef.current?.id) return;
+      const isContact = conversationsRef.current.some(c =>
+        !c.isGroup && c.contact?.id === userId
+      );
+      if (isContact) {
+        notify('Echoza', `${onlineUsername} is now online`, 'online-' + userId);
+      }
+    });
+
     return () => {
       socket.io.off('reconnect', onReconnect);
       socket.off('message:sent');
@@ -502,6 +514,7 @@ export default function Dashboard() {
       socket.off('call:offer');
       socket.off('call:end');
       socket.off('profile:updateResult');
+      socket.off('user:online');
     };
   }, [socket]);
 
