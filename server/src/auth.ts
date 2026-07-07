@@ -62,7 +62,24 @@ async function migrateToSupabaseAuth(userId: string, username: string, password:
   });
   if (createError || !authData.user) return null;
 
-  await supabase.from('users').update({ password: '' }).eq('id', userId);
+  const newId = authData.user.id;
+  if (newId !== userId) {
+    await supabase.from('messages').update({ sender_id: newId }).eq('sender_id', userId);
+    await supabase.from('conversations').update({ user1_id: newId }).eq('user1_id', userId);
+    await supabase.from('conversations').update({ user2_id: newId }).eq('user2_id', userId);
+    await supabase.from('group_members').update({ user_id: newId }).eq('user_id', userId);
+    await supabase.from('push_subscriptions').update({ user_id: newId }).eq('user_id', userId);
+
+    const { data: oldUser } = await supabase.from('users').select('*').eq('id', userId).single();
+    if (oldUser) {
+      await supabase.from('users').insert({
+        id: newId, username: oldUser.username, password: '', avatar: oldUser.avatar, online: oldUser.online,
+      });
+      await supabase.from('users').delete().eq('id', userId);
+    }
+  } else {
+    await supabase.from('users').update({ password: '' }).eq('id', userId);
+  }
   return authData;
 }
 
@@ -91,16 +108,21 @@ export async function loginUser(username: string, password: string) {
 
   // Fall back to bcrypt (legacy users migrated from RiveStack)
   if (userData.password && comparePassword(password, userData.password)) {
-    const authData = await migrateToSupabaseAuth(userData.id, username, password);
-    if (!authData) throw new Error('Migration failed');
+    await migrateToSupabaseAuth(userData.id, username, password);
 
     const { data: newSession } = await anonSupabase.auth.signInWithPassword({ email, password });
     if (!newSession?.session) throw new Error('Invalid credentials');
 
+    const { data: migratedUser } = await supabase
+      .from('users')
+      .select('id, username, avatar, online')
+      .eq('id', newSession.user.id)
+      .single();
+
     return {
       access_token: newSession.session.access_token,
       refresh_token: newSession.session.refresh_token || '',
-      user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
+      user: { id: migratedUser?.id || userData.id, username: migratedUser?.username || userData.username, avatar: migratedUser?.avatar || userData.avatar, online: !!migratedUser?.online || !!userData.online },
     };
   }
 
