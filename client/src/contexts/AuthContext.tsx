@@ -11,7 +11,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   token: string | null;
-  login: (token: string, user: User) => void;
+  login: (token: string, refreshToken: string, user: User) => void;
   logout: () => void;
   updateUser: (updates: Partial<User>) => void;
   isAuthenticated: boolean;
@@ -27,6 +27,8 @@ const AuthContext = createContext<AuthContextType>({
   isAuthenticated: false,
   authLoading: true,
 });
+
+const REFRESH_TOKEN_KEY = 'echoza-refresh-token';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -44,43 +46,72 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000;
 
-    const check = () => {
-      fetch(apiUrl('/api/users/me'), {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(res => {
-          if (!res.ok) throw new Error('Invalid token');
-          return res.json();
-        })
-        .then(data => {
-          if (!cancelled) {
-            setUser(data);
-            setAuthLoading(false);
-            localStorage.setItem('echoza-token', token);
+    const refreshThenCheck = async () => {
+      const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
+      if (storedRefresh) {
+        try {
+          const refreshRes = await fetch(apiUrl('/api/auth/refresh'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: storedRefresh }),
+          });
+          if (refreshRes.ok) {
+            const refreshData = await refreshRes.json();
+            if (!cancelled) {
+              localStorage.setItem('echoza-token', refreshData.token);
+              localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
+              setToken(refreshData.token);
+              setUser(refreshData.user);
+              setAuthLoading(false);
+              return;
+            }
           }
+        } catch {}
+      }
+
+      // Refresh failed or no refresh token — try original token
+      const check = () => {
+        fetch(apiUrl('/api/users/me'), {
+          headers: { Authorization: `Bearer ${token}` },
         })
-        .catch(() => {
-          if (cancelled) return;
-          retries++;
-          if (retries < MAX_RETRIES) {
-            setTimeout(check, RETRY_DELAY);
-          } else {
-            setToken(null);
-            localStorage.removeItem('echoza-token');
-            setAuthLoading(false);
-          }
-        });
+          .then(res => {
+            if (!res.ok) throw new Error('Invalid token');
+            return res.json();
+          })
+          .then(data => {
+            if (!cancelled) {
+              setUser(data);
+              setAuthLoading(false);
+              localStorage.setItem('echoza-token', token);
+            }
+          })
+          .catch(() => {
+            if (cancelled) return;
+            retries++;
+            if (retries < MAX_RETRIES) {
+              setTimeout(check, RETRY_DELAY);
+            } else {
+              setToken(null);
+              localStorage.removeItem('echoza-token');
+              localStorage.removeItem(REFRESH_TOKEN_KEY);
+              setAuthLoading(false);
+            }
+          });
+      };
+
+      check();
     };
 
-    check();
+    refreshThenCheck();
     return () => { cancelled = true; };
   }, [token]);
 
-  const login = (newToken: string, newUser: User) => {
+  const login = (newToken: string, newRefreshToken: string, newUser: User) => {
     setToken(newToken);
     setUser(newUser);
     setAuthLoading(false);
     localStorage.setItem('echoza-token', newToken);
+    localStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
   };
 
   // Send token to service worker for background heartbeat
@@ -98,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setAuthLoading(false);
     localStorage.removeItem('echoza-token');
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   };
 
   const updateUser = (updates: Partial<User>) => {

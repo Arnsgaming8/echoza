@@ -34,7 +34,7 @@ router.post('/register', async (req: Request, res: Response) => {
 
   try {
     const result = await registerUser(username, password);
-    res.status(201).json({ token: result.access_token, user: result.user });
+    res.status(201).json({ token: result.access_token, refresh_token: result.refresh_token, user: result.user });
   } catch (err: any) {
     console.error('[Auth] register error:', err);
     res.status(500).json({ error: err.message || 'Registration failed' });
@@ -51,7 +51,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     const result = await loginUser(username, password);
-    res.json({ token: result.access_token, user: result.user });
+    res.json({ token: result.access_token, refresh_token: result.refresh_token, user: result.user });
   } catch (err: any) {
     res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -83,6 +83,36 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 
   res.json(user);
+});
+
+router.post('/refresh', async (req: Request, res: Response) => {
+  const { refresh_token } = req.body;
+  if (!refresh_token) {
+    res.status(400).json({ error: 'Refresh token required' });
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase.auth.refreshSession({ refresh_token });
+    if (error || !data.session) {
+      res.status(401).json({ error: 'Invalid refresh token' });
+      return;
+    }
+
+    const { data: user } = await supabase
+      .from('users')
+      .select('id, username, avatar, online')
+      .eq('id', data.user.id)
+      .single();
+
+    res.json({
+      token: data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      user: user || null,
+    });
+  } catch {
+    res.status(500).json({ error: 'Refresh failed' });
+  }
 });
 
 export default router;

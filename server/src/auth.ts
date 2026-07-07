@@ -42,6 +42,7 @@ export async function registerUser(username: string, password: string) {
 
   return {
     access_token: sessionData.session?.access_token || '',
+    refresh_token: sessionData.session?.refresh_token || '',
     user: {
       id: authData.user.id,
       username,
@@ -83,6 +84,7 @@ export async function loginUser(username: string, password: string) {
   if (!signInError && sessionData?.session) {
     return {
       access_token: sessionData.session.access_token,
+      refresh_token: sessionData.session.refresh_token || '',
       user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
     };
   }
@@ -97,6 +99,7 @@ export async function loginUser(username: string, password: string) {
 
     return {
       access_token: newSession.session.access_token,
+      refresh_token: newSession.session.refresh_token || '',
       user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
     };
   }

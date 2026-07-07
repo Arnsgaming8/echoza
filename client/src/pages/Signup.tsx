@@ -155,7 +155,7 @@ export default function Signup() {
         return;
       }
 
-      login(data.token, data.user);
+      login(data.token, data.refresh_token, data.user);
       navigate('/dashboard');
     } catch {
       setServerError('Connection error. Please try again.');
