@@ -98,6 +98,7 @@ export async function loginUser(username: string, password: string) {
 
   // Try Supabase Auth first (for users registered via Supabase)
   const { data: sessionData, error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
+  if (signInError) console.error('[Login] signInError:', signInError?.message, signInError?.status, signInError?.code);
   if (!signInError && sessionData?.session) {
     return {
       access_token: sessionData.session.access_token,
