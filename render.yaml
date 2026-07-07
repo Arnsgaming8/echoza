@@ -18,8 +18,16 @@ services:
         value: BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
-      - key: DATABASE_URL
-        value: postgres://rv_h7pmb4ur:bH-OCuI_i6X67iHbaoIGWtOyV_9SBU-b9do8jghZO6Y=@rivescb.us-east.db.rivestack.io:5432/rv_h7pmb4ur?sslmode=require
+      - key: SUPABASE_URL
+        value: https://kwoxlnoyggzhiiczlqaw.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b3hsbm95Z2d6aGlpY3pscWF3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzM2Njk4OSwiZXhwIjoyMDk4OTQyOTg5fQ.nO9W2tzFphYyfcfJkUntwdwyDnp_J4AqC1WltxwO8m0
+      - key: SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b3hsbm95Z2d6aGlpY3pscWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNjY5ODksImV4cCI6MjA5ODk0Mjk4OX0.E63KFC4FY2vY8fR-sEXPbjse1FJjEAKtTZir8LRXmfA
+      - key: VITE_SUPABASE_URL
+        value: https://kwoxlnoyggzhiiczlqaw.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b3hsbm95Z2d6aGlpY3pscWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNjY5ODksImV4cCI6MjA5ODk0Mjk4OX0.E63KFC4FY2vY8fR-sEXPbjse1FJjEAKtTZir8LRXmfA
       - key: TURN_URL
         value: turn:161.153.65.53:3478
       - key: TURN_USERNAME

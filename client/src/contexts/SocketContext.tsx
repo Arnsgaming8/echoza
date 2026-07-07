@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useRef, ReactNode, useState } fro
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { apiUrl } from '../utils/api';
+import { supabase } from '../utils/supabase';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -20,13 +22,15 @@ const SocketContext = createContext<SocketContextType>({
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { token, user, isAuthenticated } = useAuth();
   const socketRef = useRef<Socket | null>(null);
+  const presenceRef = useRef<RealtimeChannel | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [selfOnline, setSelfOnline] = useState(false);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    if (!isAuthenticated || !token) return;
+    if (!isAuthenticated || !token || !user) return;
 
+    // Socket.IO for calls, typing, messages
     const socket = io(apiUrl('/'), {
       auth: { token },
       transports: ['websocket', 'polling'],
@@ -35,7 +39,6 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     socket.on('connect', () => {
       setConnected(true);
       setSelfOnline(true);
-      socket.emit('user:getOnline');
       socket.emit('conversations:list');
     });
 
@@ -44,67 +47,60 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setSelfOnline(false);
     });
 
-    socket.on('user:onlineList', (users: { userId: string }[]) => {
-      setOnlineUsers(users.map(u => u.userId));
-    });
-
-    socket.on('user:online', ({ userId }: { userId: string }) => {
-      setOnlineUsers(prev => [...new Set([...prev, userId])]);
-    });
-
-    socket.on('user:offline', ({ userId }: { userId: string }) => {
-      setOnlineUsers(prev => prev.filter(id => id !== userId));
-    });
-
     socketRef.current = socket;
 
-    let hbInterval: ReturnType<typeof setInterval> | undefined;
-    let onlinePoll: ReturnType<typeof setInterval> | undefined;
+    // Supabase Realtime presence for online tracking
+    const channel = supabase.channel('online-users');
+    presenceRef.current = channel;
 
-    const startIntervals = () => {
-      clearInterval(hbInterval);
-      clearInterval(onlinePoll);
-      hbInterval = setInterval(() => socket.emit('user:heartbeat'), 3000);
-      onlinePoll = setInterval(() => socket.emit('user:getOnline'), 10000);
-    };
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+        setOnlineUsers(Object.keys(state));
+      })
+      .on('presence', { event: 'join' }, ({ key }) => {
+        setOnlineUsers(prev => [...new Set([...prev, key])]);
+      })
+      .on('presence', { event: 'leave' }, ({ key }) => {
+        setOnlineUsers(prev => prev.filter(id => id !== key));
+      });
 
-    const stopIntervals = () => {
-      clearInterval(hbInterval);
-      clearInterval(onlinePoll);
-      hbInterval = undefined;
-      onlinePoll = undefined;
-    };
-
-    startIntervals();
+    channel.subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        await channel.track({
+          userId: user.id,
+          username: user.username,
+          avatar: user.avatar,
+        });
+      }
+    });
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        stopIntervals();
-        socket.emit('user:going-offline');
+        channel.track({ userId: user.id, username: user.username, avatar: user.avatar, hidden: true });
       } else {
-        socket.emit('user:getOnline');
-        socket.emit('user:heartbeat');
-        startIntervals();
+        channel.track({ userId: user.id, username: user.username, avatar: user.avatar });
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     const handleBeforeUnload = () => {
-      stopIntervals();
-      socket.emit('user:going-offline');
+      channel.untrack();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('beforeunload', handleBeforeUnload);
-      stopIntervals();
+      channel.untrack();
+      supabase.removeChannel(channel);
+      presenceRef.current = null;
       socket.disconnect();
       socketRef.current = null;
       setConnected(false);
       setSelfOnline(false);
     };
-  }, [isAuthenticated, token, user?.id]);
+  }, [isAuthenticated, token, user?.id, user?.username, user?.avatar]);
 
   return (
     <SocketContext.Provider value={{ socket: socketRef.current, onlineUsers, selfOnline, connected }}>

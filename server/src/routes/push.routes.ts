@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import webpush from 'web-push';
-import { mutate, query } from '../db.js';
-import { verifyToken } from '../auth.js';
+import { supabase } from '../supabase.js';
+import { verifyAccessToken } from '../auth.js';
 
 const router = Router();
 
@@ -16,7 +16,7 @@ if (publicKey && privateKey) {
   );
 }
 
-router.post('/subscribe', (req: Request, res: Response) => {
+router.post('/subscribe', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'No token provided' });
@@ -24,7 +24,7 @@ router.post('/subscribe', (req: Request, res: Response) => {
   }
 
   const token = authHeader.split(' ')[1];
-  const decoded = verifyToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
     return;
@@ -36,16 +36,20 @@ router.post('/subscribe', (req: Request, res: Response) => {
     return;
   }
 
-  // Remove any stale subscription from a previous account on the same device
-  mutate(
-    `DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id != ?`,
-    [endpoint, decoded.userId]
-  );
+  await supabase
+    .from('push_subscriptions')
+    .delete()
+    .eq('endpoint', endpoint)
+    .neq('user_id', decoded.userId);
 
-  mutate(
-    `INSERT OR IGNORE INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)`,
-    [decoded.userId, endpoint, keys.p256dh, keys.auth]
-  );
+  await supabase
+    .from('push_subscriptions')
+    .insert({
+      user_id: decoded.userId,
+      endpoint,
+      p256dh: keys.p256dh,
+      auth: keys.auth,
+    });
 
   res.json({ success: true });
 });
@@ -53,28 +57,26 @@ router.post('/subscribe', (req: Request, res: Response) => {
 export async function sendPushNotification(userId: string, title: string, body: string, url?: string, conversationId?: string) {
   if (!publicKey || !privateKey) return;
 
-  console.log(`[Push] sendPushNotification called userId=${userId} title="${title}" body="${body}"`);
+  const { data: subs } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint, p256dh, auth')
+    .eq('user_id', userId);
 
-  const subs = await query(
-    `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?`,
-    [userId]
-  );
-
-  const endpoints = (subs[0]?.values || []).map((r: any[]) => r[0]);
-  console.log(`[Push] found ${endpoints.length} subscriptions for userId=${userId}:`, endpoints.map((e: string) => e.slice(0, 40) + '...'));
+  if (!subs?.length) return;
 
   const payload = JSON.stringify({ title, body, url: url || '/', conversationId });
 
-  for (const row of (subs[0]?.values || [])) {
+  for (const sub of subs) {
     try {
-      console.log(`[Push] sending to endpoint: ${(row[0] as string).slice(0, 40)}...`);
       await webpush.sendNotification({
-        endpoint: row[0] as string,
-        keys: { p256dh: row[1] as string, auth: row[2] as string },
+        endpoint: sub.endpoint,
+        keys: { p256dh: sub.p256dh, auth: sub.auth },
       }, payload);
-    } catch (err: any) {
-      console.warn(`[Push] send failed for endpoint, deleting: ${err?.message || 'unknown'}`);
-      mutate(`DELETE FROM push_subscriptions WHERE endpoint = ?`, [row[0] as string]);
+    } catch {
+      await supabase
+        .from('push_subscriptions')
+        .delete()
+        .eq('endpoint', sub.endpoint);
     }
   }
 }

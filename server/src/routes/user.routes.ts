@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { query } from '../db.js';
-import { verifyToken } from '../auth.js';
+import { supabase } from '../supabase.js';
+import { verifyAccessToken } from '../auth.js';
 
 const router = Router();
 
@@ -12,24 +12,24 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 
   const token = authHeader.split(' ')[1];
-  const decoded = verifyToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
     return;
   }
 
-  const result = await query(
-    `SELECT id, username, avatar, online FROM users WHERE id = ?`,
-    [decoded.userId]
-  );
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('id, username, avatar, online')
+    .eq('id', decoded.userId)
+    .single();
 
-  if (result.length === 0 || result[0].values.length === 0) {
+  if (error || !user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
 
-  const row = result[0].values[0];
-  res.json({ id: row[0], username: row[1], avatar: row[2], online: !!row[3] });
+  res.json(user);
 });
 
 router.get('/search', async (req: Request, res: Response) => {
@@ -39,16 +39,13 @@ router.get('/search', async (req: Request, res: Response) => {
     return;
   }
 
-  const result = await query(
-    `SELECT id, username, avatar, online FROM users WHERE username LIKE ? LIMIT 20`,
-    [`%${q}%`]
-  );
+  const { data: users } = await supabase
+    .from('users')
+    .select('id, username, avatar, online')
+    .ilike('username', `%${q}%`)
+    .limit(20);
 
-  const users = (result[0]?.values || []).map((row: any[]) => ({
-    id: row[0], username: row[1], avatar: row[2], online: !!row[3],
-  }));
-
-  res.json(users);
+  res.json(users || []);
 });
 
 export default router;

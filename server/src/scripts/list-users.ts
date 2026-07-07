@@ -1,10 +1,8 @@
-import { initDb, query } from '../db.js';
+import { supabase } from '../supabase.js';
 
 async function main() {
-  await initDb();
-  const result = await query('SELECT id, username, avatar FROM users');
-  const users = (result[0]?.values || []).map((r: any[]) => ({ id: r[0], username: r[1], avatar: r[2] }));
-  console.log(JSON.stringify(users, null, 2));
+  const { data: users } = await supabase.from('users').select('id, username, avatar');
+  console.log(JSON.stringify(users || [], null, 2));
   process.exit(0);
 }
 

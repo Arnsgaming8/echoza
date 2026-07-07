@@ -14,6 +14,7 @@ import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../utils/supabase';
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 
@@ -442,12 +443,6 @@ export default function Dashboard() {
       socket.emit('conversations:list');
     });
 
-    socket.on('message:readReceipt', ({ messageId }: { messageId: string }) => {
-      setMessages(prev =>
-        prev.map(m => (m.id === messageId ? { ...m, read: true } : m))
-      );
-    });
-
     socket.on('typing:start', ({ userId: typingUserId, conversationId }: { userId: string; conversationId: string }) => {
       if (conversationId === activeChatRef.current) {
         setTypingUsers(prev => new Set(prev).add(typingUserId));
@@ -508,7 +503,6 @@ export default function Dashboard() {
       socket.io.off('reconnect', onReconnect);
       socket.off('message:sent');
       socket.off('message:new');
-      socket.off('message:readReceipt');
       socket.off('typing:start');
       socket.off('typing:stop');
       socket.off('call:offer');
@@ -613,6 +607,31 @@ export default function Dashboard() {
     socket.on('messages:list', handler);
     return () => { socket.off('messages:list', handler); };
   }, [socket, activeChat, scrollToBottom, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel('messages-read')
+      .on('postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+          filter: `sender_id=eq.${user.id}`,
+        },
+        (payload) => {
+          if (payload.new.read === 1) {
+            setMessages(prev =>
+              prev.map(m => (m.id === payload.new.id ? { ...m, read: true } : m))
+            );
+          }
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
 
   const handleSend = (content: string, attachments?: { file: File; preview?: string; type: string }[]) => {
     if (!socket || !activeConv) return;

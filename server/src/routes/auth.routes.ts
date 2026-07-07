@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
-import { query, mutate } from '../db.js';
-import { hashPassword, comparePassword, generateToken, verifyToken } from '../auth.js';
+import { registerUser, loginUser, verifyAccessToken } from '../auth.js';
+import { supabase } from '../supabase.js';
 
 const router = Router();
 
@@ -23,22 +22,23 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
 
-  const existing = await query(`SELECT id FROM users WHERE username = ?`, [username]);
-  if (existing.length > 0 && existing[0].values.length > 0) {
+  const { data: existing } = await supabase
+    .from('users')
+    .select('id')
+    .eq('username', username)
+    .maybeSingle();
+  if (existing) {
     res.status(409).json({ error: 'Username already taken' });
     return;
   }
 
-  const id = uuidv4();
-  const hashedPassword = hashPassword(password);
-
-  await mutate(
-    `INSERT INTO users (id, username, password) VALUES (?, ?, ?)`,
-    [id, username, hashedPassword]
-  );
-
-  const token = generateToken(id);
-  res.status(201).json({ token, user: { id, username, avatar: '', online: false } });
+  try {
+    const result = await registerUser(username, password);
+    res.status(201).json({ token: result.access_token, user: result.user });
+  } catch (err: any) {
+    console.error('[Auth] register error:', err);
+    res.status(500).json({ error: err.message || 'Registration failed' });
+  }
 });
 
 router.post('/login', async (req: Request, res: Response) => {
@@ -49,26 +49,12 @@ router.post('/login', async (req: Request, res: Response) => {
     return;
   }
 
-  const result = await query(
-    `SELECT id, username, password, avatar, online FROM users WHERE username = ?`,
-    [username]
-  );
-
-  if (result.length === 0 || result[0].values.length === 0) {
+  try {
+    const result = await loginUser(username, password);
+    res.json({ token: result.access_token, user: result.user });
+  } catch (err: any) {
     res.status(401).json({ error: 'Invalid credentials' });
-    return;
   }
-
-  const row = result[0].values[0];
-  const [id, uname, hashedPassword, avatar, online] = row;
-
-  if (!comparePassword(password, hashedPassword as string)) {
-    res.status(401).json({ error: 'Invalid credentials' });
-    return;
-  }
-
-  const token = generateToken(id as string);
-  res.json({ token, user: { id, username: uname, avatar, online: !!online } });
 });
 
 router.get('/me', async (req: Request, res: Response) => {
@@ -77,25 +63,26 @@ router.get('/me', async (req: Request, res: Response) => {
     res.status(401).json({ error: 'No token provided' });
     return;
   }
+
   const token = authHeader.split(' ')[1];
-  const decoded = verifyToken(token);
+  const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
     return;
   }
 
-  const result = await query(
-    `SELECT id, username, avatar, online FROM users WHERE id = ?`,
-    [decoded.userId]
-  );
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('id, username, avatar, online')
+    .eq('id', decoded.userId)
+    .single();
 
-  if (result.length === 0 || result[0].values.length === 0) {
+  if (error || !user) {
     res.status(404).json({ error: 'User not found' });
     return;
   }
 
-  const row = result[0].values[0];
-  res.json({ id: row[0], username: row[1], avatar: row[2], online: !!row[3] });
+  res.json(user);
 });
 
 export default router;

@@ -1,12 +1,10 @@
-import { initDb, query, mutate } from '../db.js';
+import { supabase } from '../supabase.js';
 
 async function main() {
-  await initDb();
-
   const testPatterns = ['test', 'asd', 'qwe', 'abc', 'demo', 'admin', 'user'];
 
-  const allUsers = await query('SELECT id, username FROM users');
-  const users = (allUsers[0]?.values || []).map((r: any[]) => ({ id: r[0], username: r[1] }));
+  const { data: allUsers } = await supabase.from('users').select('id, username');
+  const users = (allUsers || []).map(u => ({ id: u.id, username: u.username }));
 
   const toDelete = users.filter(u => {
     const name = u.username.toLowerCase();
@@ -22,17 +20,16 @@ async function main() {
   toDelete.forEach(u => console.log(`  - ${u.username} (${u.id})`));
 
   for (const u of toDelete) {
-    await mutate(`DELETE FROM messages WHERE sender_id = ?`, [u.id]);
-    await mutate(`DELETE FROM group_members WHERE user_id = ?`, [u.id]);
-    const convs = await query(`SELECT id FROM conversations WHERE user1_id = ?`, [u.id]);
-    for (const row of (convs[0]?.values || [])) {
-      const convId = row[0] as string;
-      await mutate(`DELETE FROM group_members WHERE group_id = ?`, [convId]);
-      await mutate(`DELETE FROM messages WHERE conversation_id = ?`, [convId]);
-      await mutate(`DELETE FROM conversations WHERE id = ?`, [convId]);
+    await supabase.from('messages').delete().eq('sender_id', u.id);
+    await supabase.from('group_members').delete().eq('user_id', u.id);
+    const { data: convs } = await supabase.from('conversations').select('id').eq('user1_id', u.id);
+    for (const conv of (convs || [])) {
+      await supabase.from('group_members').delete().eq('group_id', conv.id);
+      await supabase.from('messages').delete().eq('conversation_id', conv.id);
+      await supabase.from('conversations').delete().eq('id', conv.id);
     }
-    await mutate(`DELETE FROM push_subscriptions WHERE user_id = ?`, [u.id]);
-    await mutate(`DELETE FROM users WHERE id = ?`, [u.id]);
+    await supabase.from('push_subscriptions').delete().eq('user_id', u.id);
+    await supabase.from('users').delete().eq('id', u.id);
     console.log(`  Deleted ${u.username}`);
   }
 

@@ -4,3 +4,6 @@ dist/
 *.db
 *.sqlite
 turn/*.log
+.env
+.env.local
+supabase/.temp/

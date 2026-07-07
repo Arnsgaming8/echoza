@@ -5,10 +5,10 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { initDb, getPool, mutate } from './db.js';
-import { verifyToken } from './auth.js';
+import { verifyAccessToken } from './auth.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket } from './socket.js';
+import { supabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -17,23 +17,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 
 async function main() {
-  await initDb();
-
-  // Clean up stale push subscriptions (same endpoint, different user — keeps newest)
-  try {
-    const pool = getPool();
-    if (pool) {
-      await pool.query(`
-        DELETE FROM push_subscriptions WHERE (user_id, endpoint) NOT IN (
-          SELECT user_id, endpoint FROM (
-            SELECT user_id, endpoint, ROW_NUMBER() OVER (PARTITION BY endpoint ORDER BY created_at DESC) rn
-            FROM push_subscriptions
-          ) sub WHERE rn = 1
-        )
-      `);
-    }
-  } catch {}
-
   const app = express();
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, {
@@ -51,6 +34,20 @@ async function main() {
     res.json({ status: 'ok' });
   });
 
+  app.get('/api/db-status', async (_req, res) => {
+    try {
+      await supabase.from('users').select('id', { count: 'exact', head: true }).limit(1);
+      res.json({ status: 'ok' });
+    } catch (err: any) {
+      const msg = err?.message || err?.error_description || '';
+      if (msg.toLowerCase().includes('database is paused') || err?.code === 'PGRST000') {
+        res.json({ status: 'paused', message: 'Database is paused. Please contact the Developer: 319-359-5613. Thank you for your understanding.' });
+      } else {
+        res.json({ status: 'error', message: msg });
+      }
+    }
+  });
+
   app.get('/api/test-discord', async (_req, res) => {
     await sendDiscordNotification('Test from Echoza server');
     res.json({ sent: true });
@@ -59,7 +56,7 @@ async function main() {
   app.post('/api/heartbeat', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const decoded = verifyToken(authHeader.slice(7));
+    const decoded = await verifyAccessToken(authHeader.slice(7));
     if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
     res.json({ ok: true });
   });
@@ -87,7 +84,6 @@ async function main() {
     res.json({ iceServers });
   });
 
-  // Simple web-based TURN test page
   app.get('/api/debug/ice-test', (_req, res) => {
     res.send(`<!DOCTYPE html>
 <html>
@@ -199,7 +195,6 @@ async function main() {
         addLog('PC2 candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + e.url, 'error');
       };
 
-      // Trigger ICE by creating a data channel
       const dc = pc1.createDataChannel('test');
       pc2.ondatachannel = e => {
         addLog('PC2: data channel received', 'info');
@@ -255,7 +250,6 @@ async function main() {
   process.on('SIGTERM', async () => {
     console.log('SIGTERM received, shutting down...');
     httpServer.close();
-    try { await getPool().end(); } catch {}
     process.exit(0);
   });
 }
