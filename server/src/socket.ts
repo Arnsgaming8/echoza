@@ -120,11 +120,20 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('conversations:list', async () => {
       try {
-        const { data: directConvs } = await supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
-          .eq('is_group', 0)
-          .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
+        // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version
+        const [asUser1, asUser2] = await Promise.all([
+          supabase
+            .from('conversations')
+            .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+            .eq('is_group', 0)
+            .eq('user1_id', userId),
+          supabase
+            .from('conversations')
+            .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+            .eq('is_group', 0)
+            .eq('user2_id', userId),
+        ]);
+        const directConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
 
         const { data: groupMemberRows } = await supabase
           .from('group_members')
@@ -265,12 +274,24 @@ export function setupSocket(io: SocketServer): void {
       try {
         const participants = [userId, receiverId].sort();
 
-        const { data: existingConv } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
-          .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-          .maybeSingle();
+        // Use individual eq queries instead of .or() — .or() broken for UUIDs
+        const [existing1, existing2] = await Promise.all([
+          supabase
+            .from('conversations')
+            .select('id')
+            .eq('is_group', 0)
+            .eq('user1_id', participants[0])
+            .eq('user2_id', participants[1])
+            .maybeSingle(),
+          supabase
+            .from('conversations')
+            .select('id')
+            .eq('is_group', 0)
+            .eq('user1_id', participants[1])
+            .eq('user2_id', participants[0])
+            .maybeSingle(),
+        ]);
+        const existingConv = existing1.data || existing2.data;
 
         let conversationId: string;
         if (existingConv) {

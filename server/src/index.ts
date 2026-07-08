@@ -91,12 +91,23 @@ async function main() {
 
     try {
       const participants = [userId, receiverId].sort();
-      const { data: existingConv } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('is_group', 0)
-        .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-        .maybeSingle();
+      const [existing1, existing2] = await Promise.all([
+        supabase
+          .from('conversations')
+          .select('id')
+          .eq('is_group', 0)
+          .eq('user1_id', participants[0])
+          .eq('user2_id', participants[1])
+          .maybeSingle(),
+        supabase
+          .from('conversations')
+          .select('id')
+          .eq('is_group', 0)
+          .eq('user1_id', participants[1])
+          .eq('user2_id', participants[0])
+          .maybeSingle(),
+      ]);
+      const existingConv = existing1.data || existing2.data;
 
       let conversationId: string;
       let created = false;
@@ -114,36 +125,20 @@ async function main() {
         created = true;
       }
 
-      // Attempt different .or() syntaxes to find what works
-      const { data: orPlain } = await supabase
-        .from('conversations')
-        .select('id, is_group')
-        .eq('is_group', 0)
-        .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
-
-      const { data: orQuoted } = await supabase
-        .from('conversations')
-        .select('id, is_group')
-        .eq('is_group', 0)
-        .or(`user1_id.eq."${userId}",user2_id.eq."${userId}"`);
-
-      const { data: orParen } = await supabase
-        .from('conversations')
-        .select('id, is_group')
-        .eq('is_group', 0)
-        .or(`(user1_id.eq.${userId}),(user2_id.eq.${userId})`);
-
-      const { data: orParenQuoted } = await supabase
-        .from('conversations')
-        .select('id, is_group')
-        .eq('is_group', 0)
-        .or(`(user1_id.eq."${userId}"),(user2_id.eq."${userId}")`);
-
-      // Test without .eq('is_group', 0) to rule that out
-      const { data: orNoIsGroup } = await supabase
-        .from('conversations')
-        .select('id, is_group')
-        .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
+      // Verify by querying with eq (which works) instead of .or() (which doesn't)
+      const [asUser1, asUser2] = await Promise.all([
+        supabase
+          .from('conversations')
+          .select('id, user1_id, user2_id, is_group')
+          .eq('is_group', 0)
+          .eq('user1_id', userId),
+        supabase
+          .from('conversations')
+          .select('id, user1_id, user2_id, is_group')
+          .eq('is_group', 0)
+          .eq('user2_id', userId),
+      ]);
+      const directConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
 
       res.json({
         success: true,
@@ -152,17 +147,8 @@ async function main() {
         userId,
         receiverId,
         participants,
-        // .or() syntax tests
-        orPlain: orPlain || [],
-        orPlainCount: orPlain?.length || 0,
-        orQuoted: orQuoted || [],
-        orQuotedCount: orQuoted?.length || 0,
-        orParen: orParen || [],
-        orParenCount: orParen?.length || 0,
-        orParenQuoted: orParenQuoted || [],
-        orParenQuotedCount: orParenQuoted?.length || 0,
-        orNoIsGroup: orNoIsGroup || [],
-        orNoIsGroupCount: orNoIsGroup?.length || 0,
+        conversationCount: directConvs.length,
+        conversations: directConvs,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Unknown error' });
