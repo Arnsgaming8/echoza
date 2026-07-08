@@ -35,17 +35,15 @@ async function main() {
   });
 
   app.get('/api/db-status', async (_req, res) => {
-    const { data, error } = await supabase.from('users').select('id').limit(1);
+    const { data, error } = await supabase.from('users').select('id, username').limit(1);
     if (error) {
       const msg = error.message || '';
       if (msg.toLowerCase().includes('database is paused') || error.code === 'PGRST000') {
         res.json({ status: 'paused', message: 'Database is paused. Please contact the Developer: 319-359-5613. Thank you for your understanding.' });
-      } else {
-        res.json({ status: 'error', message: msg });
+        return;
       }
-    } else {
-      res.json({ status: 'ok' });
     }
+    res.json({ status: data && data.length > 0 ? 'ok' : 'empty' });
   });
 
   app.get('/api/debug-db', async (_req, res) => {
