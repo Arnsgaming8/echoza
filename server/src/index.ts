@@ -8,7 +8,7 @@ import { existsSync } from 'fs';
 import { verifyAccessToken } from './auth.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket } from './socket.js';
-import { supabase } from './supabase.js';
+import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
