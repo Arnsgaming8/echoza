@@ -78,12 +78,24 @@ router.get('/me', async (req: Request, res: Response) => {
     .eq('id', decoded.userId)
     .single();
 
-  if (error || !user) {
-    res.status(404).json({ error: 'User not found' });
+  if (user) {
+    res.json(user);
     return;
   }
 
-  res.json(user);
+  // Fallback to Auth token metadata if DB is unreachable
+  const { data: { user: authUser } } = await supabase.auth.getUser(token);
+  if (authUser) {
+    res.json({
+      id: authUser.id,
+      username: authUser.user_metadata?.username || '',
+      avatar: '',
+      online: false,
+    });
+    return;
+  }
+
+  res.status(404).json({ error: 'User not found' });
 });
 
 router.post('/refresh', async (req: Request, res: Response) => {
@@ -100,7 +112,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       return;
     }
 
-    const { data: user } = await supabase
+    const { data: dbUser } = await supabase
       .from('users')
       .select('id, username, avatar, online')
       .eq('id', data.user.id)
@@ -109,7 +121,12 @@ router.post('/refresh', async (req: Request, res: Response) => {
     res.json({
       token: data.session.access_token,
       refresh_token: data.session.refresh_token,
-      user: user || null,
+      user: dbUser || {
+        id: data.user.id,
+        username: data.user.user_metadata?.username || '',
+        avatar: '',
+        online: false,
+      },
     });
   } catch {
     res.status(500).json({ error: 'Refresh failed' });
