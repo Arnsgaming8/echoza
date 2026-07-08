@@ -97,6 +97,9 @@ export function setupSocket(io: SocketServer): void {
     }
     onlineUsers.get(userId)!.set(socket.id, { username, avatar: '' });
 
+    // Fast online-user sync via Socket.IO; Realtime presence takes over for ongoing updates
+    socket.emit('online-users', Array.from(onlineUsers.keys()));
+
     socket.on('user:myIp', () => {
       socket.emit('user:myIp', socket.handshake.address);
     });

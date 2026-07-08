@@ -42,6 +42,10 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       socket.emit('conversations:list');
     });
 
+    socket.on('online-users', (userIds: string[]) => {
+      setOnlineUsers(prev => [...new Set([...prev, ...userIds])]);
+    });
+
     socket.on('disconnect', () => {
       setConnected(false);
       setSelfOnline(false);
