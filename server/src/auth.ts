@@ -101,34 +101,12 @@ export async function loginUser(username: string, password: string) {
     const uid = sessionData.user.id;
     const metaUsername = sessionData.user.user_metadata?.username || username;
 
-    const { data: userData } = await supabase
-      .from('users')
-      .select('id, username, avatar, online')
-      .eq('id', uid)
-      .single();
-
-    if (userData) {
-      return {
-        access_token: sessionData.session.access_token,
-        refresh_token: sessionData.session.refresh_token || '',
-        user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
-      };
-    }
-
-    // Auth user exists but no DB row – create on the fly
-    const { error: insErr } = await supabase.from('users').insert({
-      id: uid, username: metaUsername, password: '', avatar: '',
-    });
-    if (!insErr) {
-      return {
-        access_token: sessionData.session.access_token,
-        refresh_token: sessionData.session.refresh_token || '',
-        user: { id: uid, username: metaUsername, avatar: '', online: false },
-      };
-    }
-
-    console.error('[Login] Auth OK but DB insert failed:', insErr?.message);
-    throw new Error('Invalid credentials');
+    // Auth user exists but DB is unreachable – return data from Auth token
+    return {
+      access_token: sessionData.session.access_token,
+      refresh_token: sessionData.session.refresh_token || '',
+      user: { id: uid, username: metaUsername, avatar: '', online: false },
+    };
   }
 
   // Fall back to bcrypt (legacy users migrated from RiveStack)
