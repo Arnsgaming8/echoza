@@ -121,14 +121,37 @@ async function main() {
         .eq('is_group', 0)
         .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
 
+      // Also query by the specific new conversation ID to verify insert
+      const { data: byId } = await supabase
+        .from('conversations')
+        .select('id, user1_id, user2_id, is_group')
+        .eq('id', conversationId);
+
+      // Query all conversations (no filter) to see table state
+      const { data: allConvs, count: allCount } = await supabase
+        .from('conversations')
+        .select('id, user1_id, user2_id, is_group', { count: 'exact', head: true });
+
+      // Test a simple eq filter to verify basic query works
+      const { data: myConvs } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('user1_id', userId);
+
       res.json({
         success: true,
         conversationId,
         created,
         userId,
         receiverId,
+        participants,
         conversationCount: directConvs?.length || 0,
         conversations: directConvs || [],
+        byId: byId || [],
+        byIdCount: byId?.length || 0,
+        allConversationsCount: allCount || 0,
+        myConvsAsUser1: myConvs || [],
+        myConvsCount: myConvs?.length || 0,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Unknown error' });
