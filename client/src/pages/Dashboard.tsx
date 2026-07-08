@@ -369,6 +369,11 @@ export default function Dashboard() {
       socket.emit('conversations:list');
     });
 
+    socket.once('direct:started', ({ conversationId, receiverId }: { conversationId: string; receiverId: string }) => {
+      console.log('[Dashboard] direct:started received, conversation:', conversationId);
+      socket.emit('conversations:list');
+    });
+
     socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
       setConversations(prev => prev.filter(c => c.id !== conversationId));
       if (activeChat === conversationId) {
