@@ -33,7 +33,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     // Socket.IO for calls, typing, messages
     const socket = io(apiUrl('/'), {
       auth: { token },
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
     });
 
     socket.on('connect', () => {
