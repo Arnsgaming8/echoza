@@ -19,11 +19,11 @@ services:
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
       - key: SUPABASE_URL
-        value: https://kwoxlnoyggzhiiczlqaw.supabase.co
+        value: https://cekfrmgiecswlioflmip.supabase.co
       - key: SUPABASE_SERVICE_ROLE_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b3hsbm95Z2d6aGlpY3pscWF3Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzM2Njk4OSwiZXhwIjoyMDk4OTQyOTg5fQ.nO9W2tzFphYyfcfJkUntwdwyDnp_J4AqC1WltxwO8m0
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNla2ZybWdpZWNzd2xpb2ZsbWlwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzQ2ODE3NCwiZXhwIjoyMDk5MDQ0MTc0fQ.8PxvLkHgP6kALNdfP2fZeWuJiN2QCPVEnPVDDUH_5hc
       - key: SUPABASE_ANON_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt3b3hsbm95Z2d6aGlpY3pscWF3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNjY5ODksImV4cCI6MjA5ODk0Mjk4OX0.E63KFC4FY2vY8fR-sEXPbjse1FJjEAKtTZir8LRXmfA
+        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNla2ZybWdpZWNzd2xpb2ZsbWlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NjgxNzQsImV4cCI6MjA5OTA0NDE3NH0.7jNMQdBhmkUHqAAMq9d2F0y29E6F9H0CBU0Ui1e--DI
       - key: TURN_URL
         value: turn:161.153.65.53:3478
       - key: TURN_USERNAME
