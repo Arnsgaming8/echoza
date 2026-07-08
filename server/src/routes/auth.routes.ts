@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { registerUser, loginUser, verifyAccessToken } from '../auth.js';
-import { supabase } from '../supabase.js';
+import { supabase, anonSupabase } from '../supabase.js';
 
 const router = Router();
 
@@ -84,7 +84,7 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 
   // Fallback to Auth token metadata if DB is unreachable
-  const { data: { user: authUser } } = await supabase.auth.getUser(token);
+  const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
   if (authUser) {
     res.json({
       id: authUser.id,
@@ -106,7 +106,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
   }
 
   try {
-    const { data, error } = await supabase.auth.refreshSession({ refresh_token });
+    const { data, error } = await anonSupabase.auth.refreshSession({ refresh_token });
     if (error || !data.session) {
       res.status(401).json({ error: 'Invalid refresh token' });
       return;

@@ -140,7 +140,7 @@ export async function loginUser(username: string, password: string) {
 
 export async function verifyAccessToken(token: string): Promise<{ userId: string } | null> {
   try {
-    const { data, error } = await supabase.auth.getUser(token);
+    const { data, error } = await anonSupabase.auth.getUser(token);
     if (error || !data.user) return null;
     return { userId: data.user.id };
   } catch {

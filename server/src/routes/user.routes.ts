@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { supabase } from '../supabase.js';
+import { supabase, anonSupabase } from '../supabase.js';
 import { verifyAccessToken } from '../auth.js';
 
 const router = Router();
@@ -26,7 +26,7 @@ router.get('/me', async (req: Request, res: Response) => {
 
   if (error || !user) {
     // Fallback to Auth metadata if DB is unreachable or user row missing
-    const { data: { user: authUser } } = await supabase.auth.getUser(token);
+    const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
     if (authUser) {
       res.json({
         id: authUser.id,
