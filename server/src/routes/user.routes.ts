@@ -25,6 +25,17 @@ router.get('/me', async (req: Request, res: Response) => {
     .single();
 
   if (error || !user) {
+    // Fallback to Auth metadata if DB is unreachable or user row missing
+    const { data: { user: authUser } } = await supabase.auth.getUser(token);
+    if (authUser) {
+      res.json({
+        id: authUser.id,
+        username: authUser.user_metadata?.username || '',
+        avatar: '',
+        online: false,
+      });
+      return;
+    }
     res.status(404).json({ error: 'User not found' });
     return;
   }
