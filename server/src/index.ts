@@ -114,29 +114,36 @@ async function main() {
         created = true;
       }
 
-      // Now simulate conversations:list for this user
-      const { data: directConvs } = await supabase
+      // Attempt different .or() syntaxes to find what works
+      const { data: orPlain } = await supabase
         .from('conversations')
-        .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+        .select('id, is_group')
         .eq('is_group', 0)
         .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
 
-      // Also query by the specific new conversation ID to verify insert
-      const { data: byId } = await supabase
+      const { data: orQuoted } = await supabase
         .from('conversations')
-        .select('id, user1_id, user2_id, is_group')
-        .eq('id', conversationId);
+        .select('id, is_group')
+        .eq('is_group', 0)
+        .or(`user1_id.eq."${userId}",user2_id.eq."${userId}"`);
 
-      // Query all conversations (no filter) to see table state
-      const { data: allConvs, count: allCount } = await supabase
+      const { data: orParen } = await supabase
         .from('conversations')
-        .select('id, user1_id, user2_id, is_group', { count: 'exact', head: true });
+        .select('id, is_group')
+        .eq('is_group', 0)
+        .or(`(user1_id.eq.${userId}),(user2_id.eq.${userId})`);
 
-      // Test a simple eq filter to verify basic query works
-      const { data: myConvs } = await supabase
+      const { data: orParenQuoted } = await supabase
         .from('conversations')
-        .select('id')
-        .eq('user1_id', userId);
+        .select('id, is_group')
+        .eq('is_group', 0)
+        .or(`(user1_id.eq."${userId}"),(user2_id.eq."${userId}")`);
+
+      // Test without .eq('is_group', 0) to rule that out
+      const { data: orNoIsGroup } = await supabase
+        .from('conversations')
+        .select('id, is_group')
+        .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
 
       res.json({
         success: true,
@@ -145,13 +152,17 @@ async function main() {
         userId,
         receiverId,
         participants,
-        conversationCount: directConvs?.length || 0,
-        conversations: directConvs || [],
-        byId: byId || [],
-        byIdCount: byId?.length || 0,
-        allConversationsCount: allCount || 0,
-        myConvsAsUser1: myConvs || [],
-        myConvsCount: myConvs?.length || 0,
+        // .or() syntax tests
+        orPlain: orPlain || [],
+        orPlainCount: orPlain?.length || 0,
+        orQuoted: orQuoted || [],
+        orQuotedCount: orQuoted?.length || 0,
+        orParen: orParen || [],
+        orParenCount: orParen?.length || 0,
+        orParenQuoted: orParenQuoted || [],
+        orParenQuotedCount: orParenQuoted?.length || 0,
+        orNoIsGroup: orNoIsGroup || [],
+        orNoIsGroupCount: orNoIsGroup?.length || 0,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Unknown error' });
