@@ -1,5 +1,5 @@
 import { Server as SocketServer, Socket } from 'socket.io';
-import { supabase } from './supabase.js';
+import { supabase, anonSupabase } from './supabase.js';
 import { verifyAccessToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
@@ -96,19 +96,21 @@ export function setupSocket(io: SocketServer): void {
       return;
     }
 
+    socket.userId = decoded.userId;
+
     const { data: user } = await supabase
       .from('users')
       .select('username')
       .eq('id', decoded.userId)
-      .single();
+      .maybeSingle();
 
-    if (!user) {
-      next(new Error('User not found'));
-      return;
+    if (user) {
+      socket.username = user.username;
+    } else {
+      // Fallback to Auth metadata if DB row missing
+      const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
+      socket.username = authUser?.user_metadata?.username || decoded.userId.slice(0, 8);
     }
-
-    socket.userId = decoded.userId;
-    socket.username = user.username;
     next();
   });
 
@@ -729,7 +731,7 @@ export function setupSocket(io: SocketServer): void {
         .from('users')
         .select('avatar')
         .eq('id', userId)
-        .single();
+        .maybeSingle();
       const avatar = userData?.avatar || '';
       const sockets = onlineUsers.get(userId);
       if (sockets) {
