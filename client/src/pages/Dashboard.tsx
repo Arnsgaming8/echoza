@@ -756,13 +756,8 @@ export default function Dashboard() {
     if (!socket) return;
     socket.emit('direct:start', { receiverId });
 
-    socket.on('direct:started', ({ conversationId }: { conversationId: string }) => {
-      socket.off('direct:started');
+    socket.once('direct:started', ({ conversationId }: { conversationId: string }) => {
       socket.emit('conversations:list');
-      setTimeout(() => {
-        const conv = conversations.find(c => c.id === conversationId);
-        if (conv) handleSelectChat(conversationId, conv);
-      }, 300);
     });
   };
 

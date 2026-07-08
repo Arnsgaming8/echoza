@@ -259,29 +259,34 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
-      const participants = [userId, receiverId].sort();
+      try {
+        const participants = [userId, receiverId].sort();
 
-      const { data: existingConv } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('is_group', 0)
-        .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-        .maybeSingle();
+        const { data: existingConv } = await supabase
+          .from('conversations')
+          .select('id')
+          .eq('is_group', 0)
+          .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
+          .maybeSingle();
 
-      let conversationId: string;
-      if (existingConv) {
-        conversationId = existingConv.id;
-      } else {
-        conversationId = uuidv4();
-        await supabase.from('conversations').insert({
-          id: conversationId,
-          user1_id: participants[0],
-          user2_id: participants[1],
-          is_group: 0,
-        });
+        let conversationId: string;
+        if (existingConv) {
+          conversationId = existingConv.id;
+        } else {
+          conversationId = uuidv4();
+          const { error: insertErr } = await supabase.from('conversations').insert({
+            id: conversationId,
+            user1_id: participants[0],
+            user2_id: participants[1],
+            is_group: 0,
+          });
+          if (insertErr) { console.error('[direct:start] insert error:', insertErr); return; }
+        }
+
+        socket.emit('direct:started', { conversationId, receiverId });
+      } catch (err) {
+        console.error('[direct:start] error:', err);
       }
-
-      socket.emit('direct:started', { conversationId, receiverId });
     });
 
     socket.on('group:create', async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
