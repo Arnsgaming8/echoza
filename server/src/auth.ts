@@ -60,23 +60,32 @@ async function migrateToSupabaseAuth(userId: string, username: string, password:
     email_confirm: true,
     user_metadata: { username },
   });
-  if (createError || !authData.user) return null;
+  if (createError || !authData.user) {
+    console.error('[migrate] createUser failed:', createError?.message);
+    return null;
+  }
 
   const newId = authData.user.id;
   if (newId !== userId) {
+    // Rename old user to avoid UNIQUE conflict, insert new row, then delete old
+    await supabase.from('users').update({ username: username + '_old' }).eq('id', userId);
+
+    const { data: oldUser } = await supabase.from('users').select('*').eq('id', userId).single();
+    if (!oldUser) return null;
+
+    const { error: insErr } = await supabase.from('users').insert({
+      id: newId, username, password: '', avatar: oldUser.avatar, online: oldUser.online,
+    });
+    if (insErr) { console.error('[migrate] insert failed:', insErr.message); return null; }
+
     await supabase.from('messages').update({ sender_id: newId }).eq('sender_id', userId);
     await supabase.from('conversations').update({ user1_id: newId }).eq('user1_id', userId);
     await supabase.from('conversations').update({ user2_id: newId }).eq('user2_id', userId);
     await supabase.from('group_members').update({ user_id: newId }).eq('user_id', userId);
     await supabase.from('push_subscriptions').update({ user_id: newId }).eq('user_id', userId);
 
-    const { data: oldUser } = await supabase.from('users').select('*').eq('id', userId).single();
-    if (oldUser) {
-      await supabase.from('users').insert({
-        id: newId, username: oldUser.username, password: '', avatar: oldUser.avatar, online: oldUser.online,
-      });
-      await supabase.from('users').delete().eq('id', userId);
-    }
+    const { error: delErr } = await supabase.from('users').delete().eq('id', userId);
+    if (delErr) console.error('[migrate] delete old user failed:', delErr.message);
   } else {
     await supabase.from('users').update({ password: '' }).eq('id', userId);
   }
@@ -98,7 +107,7 @@ export async function loginUser(username: string, password: string) {
 
   // Try Supabase Auth first (for users registered via Supabase)
   const { data: sessionData, error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
-  console.error('[Login] debug:', JSON.stringify({ hasError: !!signInError, errMsg: signInError?.message, hasSession: !!sessionData?.session, uid: sessionData?.user?.id?.slice(0,8) }));
+  console.error('[Login] debug:', JSON.stringify({ username, hasError: !!signInError, errMsg: signInError?.message, hasSession: !!sessionData?.session, uid: sessionData?.user?.id?.slice(0,8), pwLen: userData.password?.length, hasPw: !!userData.password }));
   if (!signInError && sessionData?.session) {
     return {
       access_token: sessionData.session.access_token,
