@@ -56,13 +56,16 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
-        setOnlineUsers(Object.keys(state));
+        const userIds = Object.values(state).flat().map((p: any) => p.userId);
+        setOnlineUsers([...new Set(userIds)]);
       })
-      .on('presence', { event: 'join' }, ({ key }) => {
-        setOnlineUsers(prev => [...new Set([...prev, key])]);
+      .on('presence', { event: 'join' }, ({ newPresences }) => {
+        const ids = newPresences.map((p: any) => p.userId);
+        setOnlineUsers(prev => [...new Set([...prev, ...ids])]);
       })
-      .on('presence', { event: 'leave' }, ({ key }) => {
-        setOnlineUsers(prev => prev.filter(id => id !== key));
+      .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        const ids = leftPresences.map((p: any) => p.userId);
+        setOnlineUsers(prev => prev.filter(id => !ids.includes(id)));
       });
 
     channel.subscribe(async (status) => {
