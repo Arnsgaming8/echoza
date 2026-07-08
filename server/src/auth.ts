@@ -93,31 +93,52 @@ async function migrateToSupabaseAuth(userId: string, username: string, password:
 }
 
 export async function loginUser(username: string, password: string) {
-  const { data: userData, error: userError } = await supabase
+  const email = usernameToEmail(username);
+
+  // Try Supabase Auth first (this works even if DB queries fail)
+  const { data: sessionData, error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
+  if (!signInError && sessionData?.session) {
+    const uid = sessionData.user.id;
+    const metaUsername = sessionData.user.user_metadata?.username || username;
+
+    const { data: userData } = await supabase
+      .from('users')
+      .select('id, username, avatar, online')
+      .eq('id', uid)
+      .single();
+
+    if (userData) {
+      return {
+        access_token: sessionData.session.access_token,
+        refresh_token: sessionData.session.refresh_token || '',
+        user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
+      };
+    }
+
+    // Auth user exists but no DB row – create on the fly
+    const { error: insErr } = await supabase.from('users').insert({
+      id: uid, username: metaUsername, password: '', avatar: '',
+    });
+    if (!insErr) {
+      return {
+        access_token: sessionData.session.access_token,
+        refresh_token: sessionData.session.refresh_token || '',
+        user: { id: uid, username: metaUsername, avatar: '', online: false },
+      };
+    }
+
+    console.error('[Login] Auth OK but DB insert failed:', insErr?.message);
+    throw new Error('Invalid credentials');
+  }
+
+  // Fall back to bcrypt (legacy users migrated from RiveStack)
+  const { data: userData } = await supabase
     .from('users')
     .select('id, username, avatar, online, password')
     .eq('username', username)
     .single();
 
-  if (userError || !userData) {
-    throw new Error('Invalid credentials');
-  }
-
-  const email = usernameToEmail(username);
-
-  // Try Supabase Auth first (for users registered via Supabase)
-  const { data: sessionData, error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
-  console.error('[Login] debug:', JSON.stringify({ username, hasError: !!signInError, errMsg: signInError?.message, hasSession: !!sessionData?.session, uid: sessionData?.user?.id?.slice(0,8), pwLen: userData.password?.length, hasPw: !!userData.password }));
-  if (!signInError && sessionData?.session) {
-    return {
-      access_token: sessionData.session.access_token,
-      refresh_token: sessionData.session.refresh_token || '',
-      user: { id: userData.id, username: userData.username, avatar: userData.avatar, online: !!userData.online },
-    };
-  }
-
-  // Fall back to bcrypt (legacy users migrated from RiveStack)
-  if (userData.password && comparePassword(password, userData.password)) {
+  if (userData?.password && comparePassword(password, userData.password)) {
     await migrateToSupabaseAuth(userData.id, username, password);
 
     const { data: newSession } = await anonSupabase.auth.signInWithPassword({ email, password });

@@ -35,17 +35,33 @@ async function main() {
   });
 
   app.get('/api/db-status', async (_req, res) => {
-    try {
-      await supabase.from('users').select('id', { count: 'exact', head: true }).limit(1);
-      res.json({ status: 'ok' });
-    } catch (err: any) {
-      const msg = err?.message || err?.error_description || '';
-      if (msg.toLowerCase().includes('database is paused') || err?.code === 'PGRST000') {
+    const { data, error } = await supabase.from('users').select('id').limit(1);
+    if (error) {
+      const msg = error.message || '';
+      if (msg.toLowerCase().includes('database is paused') || error.code === 'PGRST000') {
         res.json({ status: 'paused', message: 'Database is paused. Please contact the Developer: 319-359-5613. Thank you for your understanding.' });
       } else {
         res.json({ status: 'error', message: msg });
       }
+    } else {
+      res.json({ status: 'ok' });
     }
+  });
+
+  app.get('/api/debug-db', async (_req, res) => {
+    const { data: users, error: listErr } = await supabase.from('users').select('id, username');
+    const { data: steph, error: stephErr } = await supabase.from('users').select('id, username').eq('username', 'Steph').single();
+    const { data: anonCheck, error: anonErr } = await anonSupabase.from('users').select('id').limit(1);
+    res.json({
+      usersCount: users?.length ?? 0,
+      users: users ?? [],
+      listError: listErr?.message ?? null,
+      steph: steph ?? null,
+      stephError: stephErr?.message ?? null,
+      anonCanRead: !anonErr,
+      anonError: anonErr?.message ?? null,
+      url: (process.env.SUPABASE_URL || '').slice(0, 30) + '...',
+    });
   });
 
   app.get('/api/test-discord', async (_req, res) => {
