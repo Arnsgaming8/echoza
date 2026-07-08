@@ -356,11 +356,13 @@ export default function Dashboard() {
       return;
     }
 
+    // Hide loading immediately once socket is available, don't wait for response
+    setConversationsLoaded(true);
+
     console.log('[Dashboard] useConversationEffect: registering handlers');
     socket.on('conversations:list', (data: Conversation[]) => {
       console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
-      if (!conversationsLoaded) setConversationsLoaded(true);
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
