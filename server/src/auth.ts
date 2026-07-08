@@ -136,7 +136,7 @@ export async function loginUser(username: string, password: string) {
     .from('users')
     .select('id, username, avatar, online, password')
     .eq('username', username)
-    .single();
+    .maybeSingle();
 
   if (userData?.password && comparePassword(password, userData.password)) {
     await migrateToSupabaseAuth(userData.id, username, password);

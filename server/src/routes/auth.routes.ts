@@ -53,7 +53,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const result = await loginUser(username, password);
     res.json({ token: result.access_token, refresh_token: result.refresh_token, user: result.user });
   } catch (err: any) {
-    console.error('[Login] error:', err?.message || err, err?.stack?.split('\n').slice(0,3).join(' | '));
+    console.error('[Login] error:', err?.message || err, '| stack:', err?.stack?.split('\n').slice(0,3).join(' | '));
     res.status(401).json({ error: 'Invalid credentials' });
   }
 });
