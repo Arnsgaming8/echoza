@@ -12,6 +12,7 @@ import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
+import { v4 as uuidv4 } from 'uuid';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -77,6 +78,61 @@ async function main() {
     const decoded = await verifyAccessToken(authHeader.slice(7));
     if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
     res.json({ ok: true });
+  });
+
+  app.post('/api/debug-create-conv', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+    const decoded = await verifyAccessToken(authHeader.slice(7));
+    if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
+    const userId = decoded.userId;
+    const { receiverId } = req.body;
+    if (!receiverId) { res.status(400).json({ error: 'receiverId required' }); return; }
+
+    try {
+      const participants = [userId, receiverId].sort();
+      const { data: existingConv } = await supabase
+        .from('conversations')
+        .select('id')
+        .eq('is_group', 0)
+        .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
+        .maybeSingle();
+
+      let conversationId: string;
+      let created = false;
+      if (existingConv) {
+        conversationId = existingConv.id;
+      } else {
+        conversationId = uuidv4();
+        const { error: insertErr } = await supabase.from('conversations').insert({
+          id: conversationId,
+          user1_id: participants[0],
+          user2_id: participants[1],
+          is_group: 0,
+        });
+        if (insertErr) { res.status(500).json({ error: insertErr.message }); return; }
+        created = true;
+      }
+
+      // Now simulate conversations:list for this user
+      const { data: directConvs } = await supabase
+        .from('conversations')
+        .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+        .eq('is_group', 0)
+        .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
+
+      res.json({
+        success: true,
+        conversationId,
+        created,
+        userId,
+        receiverId,
+        conversationCount: directConvs?.length || 0,
+        conversations: directConvs || [],
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || 'Unknown error' });
+    }
   });
 
   app.get('/api/ice-config', (_req, res) => {
