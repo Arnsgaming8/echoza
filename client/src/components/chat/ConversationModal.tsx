@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { Avatar, Button } from '../common';
+import { useSocket } from '../../contexts/SocketContext';
 import { FiX, FiUsers, FiUserPlus, FiMessageSquare, FiCheck } from 'react-icons/fi';
 
 interface User {
@@ -200,6 +201,7 @@ export default function ConversationModal({
   onStartDirect,
   onGroupCreated,
 }: ConversationModalProps) {
+  const { onlineUsers } = useSocket();
   const [tab, setTab] = useState<'direct' | 'group'>('direct');
   const [search, setSearch] = useState('');
   const [users, setUsers] = useState<User[]>([]);
@@ -302,7 +304,7 @@ export default function ConversationModal({
                 key={u.id}
                 onClick={() => tab === 'direct' ? handleDirectStart(u.id) : toggleMember(u.id)}
               >
-                  <Avatar username={u.username} src={u.avatar} size={36} online={u.online} />
+                  <Avatar username={u.username} src={u.avatar} size={36} online={onlineUsers.includes(u.id)} />
                 <UserInfo>
                   <UserName>{u.username}</UserName>
                   <UserStatus>{u.online ? 'Online' : 'Offline'}</UserStatus>

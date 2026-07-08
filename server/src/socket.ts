@@ -11,32 +11,6 @@ interface AuthSocket extends Socket {
 }
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
-const offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const MONITORED_USERNAME = 'Arnav_The_Dev';
-const DISCONNECT_GRACE_MS = 5000;
-
-async function getMonitoredUserId(): Promise<string | null> {
-  const { data } = await supabase
-    .from('users')
-    .select('id')
-    .eq('username', MONITORED_USERNAME)
-    .maybeSingle();
-  return data?.id || null;
-}
-
-async function isContactOfMonitored(userId: string): Promise<boolean> {
-  try {
-    const monitoredId = await getMonitoredUserId();
-    if (!monitoredId) return false;
-    const { data } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('is_group', 0)
-      .or(`and(user1_id.eq.${userId},user2_id.eq.${monitoredId}),and(user2_id.eq.${userId},user1_id.eq.${monitoredId})`)
-      .maybeSingle();
-    return !!data;
-  } catch { return false; }
-}
 
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
   try {
@@ -44,7 +18,7 @@ async function isReceiverMonitored(receiverId: string): Promise<boolean> {
       .from('users')
       .select('id')
       .eq('id', receiverId)
-      .eq('username', MONITORED_USERNAME)
+      .eq('username', 'Arnav_The_Dev')
       .maybeSingle();
     return !!data;
   } catch { return false; }
@@ -118,7 +92,6 @@ export function setupSocket(io: SocketServer): void {
     const userId = socket.userId!;
     const username = socket.username!;
 
-    const isFirstConnection = !onlineUsers.has(userId) || onlineUsers.get(userId)!.size === 0;
     if (!onlineUsers.has(userId)) {
       onlineUsers.set(userId, new Map());
     }
@@ -135,11 +108,11 @@ export function setupSocket(io: SocketServer): void {
       }
       const { data: users } = await supabase
         .from('users')
-        .select('id, username, avatar, online')
+        .select('id, username, avatar')
         .ilike('username', `%${q}%`)
         .neq('id', userId)
         .limit(20);
-      socket.emit('users:search', (users || []).map(u => ({ ...u, online: !!u.online })));
+      socket.emit('users:search', (users || []).map(u => ({ ...u, online: false })));
     });
 
     socket.on('conversations:list', async () => {
@@ -193,7 +166,7 @@ export function setupSocket(io: SocketServer): void {
           if (isGroup) {
             const { data: members } = await supabase
               .from('group_members')
-              .select('user_id, users(id, username, avatar, online)')
+              .select('user_id, users(id, username, avatar)')
               .eq('group_id', convId);
             memberResults.push({
               convId,
@@ -203,7 +176,6 @@ export function setupSocket(io: SocketServer): void {
                   id: u?.id || m.user_id,
                   username: u?.username || '',
                   avatar: u?.avatar || '',
-                  online: !!u?.online,
                 };
               }),
             });
@@ -222,7 +194,7 @@ export function setupSocket(io: SocketServer): void {
         if (allContactIds.length > 0) {
           const { data: contactUsers } = await supabase
             .from('users')
-            .select('id, username, avatar, online')
+            .select('id, username, avatar')
             .in('id', allContactIds);
           contactMap = new Map((contactUsers || []).map(u => [u.id, u]));
         }
@@ -251,7 +223,6 @@ export function setupSocket(io: SocketServer): void {
                 id: contactId,
                 username: contact?.username || '',
                 avatar: contact?.avatar || '',
-                online: !!contact?.online,
               },
               lastMessage: lastMsg,
               lastTime,
@@ -715,13 +686,6 @@ export function setupSocket(io: SocketServer): void {
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           onlineUsers.delete(userId);
-          const timer = setTimeout(() => {
-            if (!onlineUsers.has(userId)) {
-              supabase.from('users').update({ online: 0 }).eq('id', userId).then();
-            }
-            offlineTimers.delete(userId);
-          }, DISCONNECT_GRACE_MS);
-          offlineTimers.set(userId, timer);
         }
       }
     });
@@ -743,13 +707,5 @@ export function setupSocket(io: SocketServer): void {
       console.error('[Server] failed to fetch avatar for', userId, err);
     }
 
-    if (isFirstConnection) {
-      const timer = offlineTimers.get(userId);
-      if (timer) { clearTimeout(timer); offlineTimers.delete(userId); }
-      try {
-        await supabase.from('users').update({ online: 1 }).eq('id', userId);
-      } catch {}
-      if (await isContactOfMonitored(userId)) sendDiscordNotification(`**${username}** is now online`);
-    }
   });
 }
