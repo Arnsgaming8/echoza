@@ -126,6 +126,15 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('conversations:list', async () => {
       try {
+        // Diagnostic: check if minimal SELECT works first
+        const { data: testData, error: testErr } = await supabase
+          .from('conversations')
+          .select('id')
+          .limit(1);
+        if (testErr) {
+          socket.emit('server:diag', { stage: 'select_id', error: testErr.message, code: testErr.code });
+        }
+
         // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version.
         // NOTE: do NOT filter by is_group here. The live DB column type may resolve
         // as INTEGER, BOOLEAN or TEXT depending on how Supabase auto-coerced the
@@ -143,7 +152,11 @@ export function setupSocket(io: SocketServer): void {
             .eq('user2_id', userId),
         ]);
 
+        if (asUser1.error) socket.emit('server:diag', { stage: 'asUser1', error: asUser1.error.message, code: asUser1.error.code });
+        if (asUser2.error) socket.emit('server:diag', { stage: 'asUser2', error: asUser2.error.message, code: asUser2.error.code });
+
         const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+        socket.emit('server:diag', { stage: 'raw_count', count: rawUserConvs.length, userId });
 
         // Classify by row STRUCTURE (user2_id zero/null => group container),
         // NOT the unreliable is_group flag.
@@ -173,6 +186,7 @@ export function setupSocket(io: SocketServer): void {
         }
 
         const convRows = [...directConvs, ...groupConvs];
+        socket.emit('server:diag', { stage: 'classified', directConvs: directConvs.length, groupConvs: groupConvs.length });
         convRows.sort((a, b) => ((b.last_time || '') > (a.last_time || '') ? 1 : -1));
 
         if (convRows.length === 0) {
@@ -268,8 +282,9 @@ export function setupSocket(io: SocketServer): void {
         }
 
         socket.emit('conversations:list', conversations);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[Server] conversations:list error:', err);
+        socket.emit('server:diag', { stage: 'thrown', message: err?.message });
         socket.emit('conversations:list', []);
       }
     });

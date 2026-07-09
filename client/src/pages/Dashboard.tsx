@@ -360,6 +360,11 @@ export default function Dashboard() {
     setConversationsLoaded(true);
 
     console.log('[Dashboard] useConversationEffect: registering handlers');
+
+    socket.on('server:diag', (diag: any) => {
+      console.log('[SERVER DIAG]', diag);
+    });
+
     socket.on('conversations:list', (data: Conversation[]) => {
       console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
@@ -392,6 +397,7 @@ export default function Dashboard() {
     const poll = setInterval(() => socket.emit('conversations:list'), 5000);
     return () => {
       clearInterval(poll);
+      socket.off('server:diag');
       socket.off('conversations:list');
       socket.off('conversation:update');
       socket.off('conversation:deleted');
