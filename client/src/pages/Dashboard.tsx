@@ -206,10 +206,18 @@ export default function Dashboard() {
   const updateUserRef = useRef(updateUser);
   updateUserRef.current = updateUser;
 
-  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    // Load cached conversations instantly so the sidebar has data
+    // while the socket connects in the background.
+    try {
+      const cached = localStorage.getItem('echoza-conversations');
+      if (cached) return JSON.parse(cached) as Conversation[];
+    } catch { /* ignore corrupt cache */ }
+    return [];
+  });
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
-  const [conversationsLoaded, setConversationsLoaded] = useState(false);
+  const [conversationsLoaded, setConversationsLoaded] = useState(true); // Always show UI immediately
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -368,6 +376,8 @@ export default function Dashboard() {
     socket.on('conversations:list', (data: Conversation[]) => {
       console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
+      // Cache for instant load on next page visit
+      try { localStorage.setItem('echoza-conversations', JSON.stringify(data)); } catch {}
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
@@ -375,7 +385,11 @@ export default function Dashboard() {
     });
 
     socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
-      setConversations(prev => prev.filter(c => c.id !== conversationId));
+      setConversations(prev => {
+        const next = prev.filter(c => c.id !== conversationId);
+        try { localStorage.setItem('echoza-conversations', JSON.stringify(next)); } catch {}
+        return next;
+      });
       if (activeChat === conversationId) {
         setActiveChat(null);
         setActiveConv(null);
@@ -385,18 +399,20 @@ export default function Dashboard() {
 
     socket.on('messages:deleted', ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
       setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
-      setConversations(prev => prev.map(c =>
-        c.id === conversationId ? { ...c, unread: 0 } : c
-      ));
+      setConversations(prev => {
+        const next = prev.map(c =>
+          c.id === conversationId ? { ...c, unread: 0 } : c
+        );
+        try { localStorage.setItem('echoza-conversations', JSON.stringify(next)); } catch {}
+        return next;
+      });
       setDeleteMode(false);
       setSelectedMessages(new Set());
     });
 
     socket.emit('conversations:list');
 
-    const poll = setInterval(() => socket.emit('conversations:list'), 5000);
     return () => {
-      clearInterval(poll);
       socket.off('server:diag');
       socket.off('conversations:list');
       socket.off('conversation:update');
