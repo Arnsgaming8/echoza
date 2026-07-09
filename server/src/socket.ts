@@ -152,7 +152,12 @@ export function setupSocket(io: SocketServer): void {
         }
 
         const convRows = [...(directConvs || []), ...groupConvs];
-        convRows.sort((a, b) => ((b.last_time || '') > (a.last_time || '') ? 1 : -1));
+        convRows.sort((a, b) => {
+          const timeA = a.last_time || '';
+          const timeB = b.last_time || '';
+          if (timeA === timeB) return 0;
+          return timeB > timeA ? 1 : -1;
+        });
 
         if (convRows.length === 0) {
           socket.emit('conversations:list', []);
