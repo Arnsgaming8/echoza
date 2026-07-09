@@ -4,7 +4,7 @@ import { verifyAccessToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
-import { isGroupFlag, pickDirect } from './utils/group-flag.js';
+import { isGroupFlag, pickDirect, isGroupRow, isDirectByStructure } from './utils/group-flag.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -163,12 +163,22 @@ export function setupSocket(io: SocketServer): void {
         if (asUser1.error) console.warn(`[conversations:list] asUser1 error: ${asUser1.error.message}`);
         if (asUser2.error) console.warn(`[conversations:list] asUser2 error: ${asUser2.error.message}`);
         const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
-        // De-dupe by id (a row may match both eq() if user1_id == user2_id)
+        console.log(`[conversations:list] user=${userId} rawUserConvs.length=${rawUserConvs.length}`);
+        if (rawUserConvs.length > 0) {
+          const s = rawUserConvs[0];
+          console.log(`[conversations:list] sample row id=${s.id?.slice(0,8)} u1=${s.user1_id?.slice(0,8)} u2=${s.user2_id?.slice(0,8)} is_group=${JSON.stringify(s.is_group)}`);
+        }
+        // Classify by row STRUCTURE (user2_id zero/null => group container),
+        // NOT the unreliable is_group flag.
         const seen = new Set<string>();
-        const directConvs = rawUserConvs.filter(c => {
-          if (!isGroupFlag(c.is_group) && !seen.has(c.id)) { seen.add(c.id); return true; }
-          return false;
-        });
+        const directConvs: any[] = [];
+        for (const c of rawUserConvs) {
+          if (seen.has(c.id)) continue;
+          if (!isDirectByStructure(c)) continue;
+          seen.add(c.id);
+          directConvs.push(c);
+        }
+        console.log(`[conversations:list] user=${userId} directConvs.length=${directConvs.length}`);
 
         const { data: groupMemberRows } = await supabase
           .from('group_members')
@@ -180,9 +190,9 @@ export function setupSocket(io: SocketServer): void {
         if (groupConvIds.length > 0) {
           const { data } = await supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+            .select('id, user1_id, user2_id, group_name, group_avatar, last_message, last_time')
             .in('id', groupConvIds);
-          groupConvs = (data || []).filter(c => isGroupFlag(c.is_group));
+          groupConvs = data || [];
         }
 
         const convRows = [...(directConvs || []), ...groupConvs];
@@ -204,7 +214,7 @@ export function setupSocket(io: SocketServer): void {
 
         for (const row of convRows) {
           const convId = row.id;
-          const isGroup = row.is_group;
+          const isGroup = isGroupRow(row);
 
           const { count } = await supabase
             .from('messages')
@@ -236,7 +246,7 @@ export function setupSocket(io: SocketServer): void {
         const unreadMap = new Map(unreadResults.map(r => [r.convId, r.count]));
         const memberMap = new Map(memberResults.map(r => [r.convId, r.members]));
 
-        const directConvRows = convRows.filter(c => !c.is_group);
+        const directConvRows = convRows.filter(c => isDirectByStructure(c));
         const user1Ids = directConvRows.map(c => c.user1_id);
         const user2Ids = directConvRows.map(c => c.user2_id);
         const allContactIds = [...new Set([...user1Ids, ...user2Ids])].filter(id => id !== userId);
@@ -322,19 +332,21 @@ export function setupSocket(io: SocketServer): void {
         const [existing1, existing2] = await Promise.all([
           supabase
             .from('conversations')
-            .select('id, is_group')
+            .select('id, user1_id, user2_id, is_group')
             .eq('user1_id', participants[0])
             .eq('user2_id', participants[1])
             .maybeSingle(),
           supabase
             .from('conversations')
-            .select('id, is_group')
+            .select('id, user1_id, user2_id, is_group')
             .eq('user1_id', participants[1])
             .eq('user2_id', participants[0])
             .maybeSingle(),
         ]);
         if (existing1.error) console.warn(`[direct:start] existing1 error: ${existing1.error.message}`);
         if (existing2.error) console.warn(`[direct:start] existing2 error: ${existing2.error.message}`);
+        if (existing1.data) console.log(`[direct:start] existing1 hit is_group=${JSON.stringify(existing1.data.is_group)} u1=${existing1.data.user1_id?.slice(0,8)} u2=${existing1.data.user2_id?.slice(0,8)}`);
+        if (existing2.data) console.log(`[direct:start] existing2 hit is_group=${JSON.stringify(existing2.data.is_group)} u1=${existing2.data.user1_id?.slice(0,8)} u2=${existing2.data.user2_id?.slice(0,8)}`);
         const existingConv = pickDirect(existing1.data) || pickDirect(existing2.data);
 
         let conversationId: string;
