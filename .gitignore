@@ -7,3 +7,11 @@ turn/*.log
 .env
 .env.local
 supabase/.temp/
+
+# Throwaway debug scripts (contain hardcoded test accounts/passwords/bearer tokens).
+# Use scripts under server/src/scripts/ locally only; do not publish.
+server/src/scripts/
+
+# Personal cache-clearing helper scripts (hardcode the user's repo path; not portable).
+clear_cache.ps1
+clear_cache.sh
