@@ -322,7 +322,6 @@ export default function Dashboard() {
     };
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
