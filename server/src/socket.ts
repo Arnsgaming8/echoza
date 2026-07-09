@@ -12,6 +12,13 @@ interface AuthSocket extends Socket {
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
+// Permissive group-flag check — handles INTEGER 0/1, BOOLEAN true/false, and
+// their string forms. Lets every handler read `is_group` regardless of which
+// Postgres type the live DB column actually resolved to.
+function isGroupFlag(val: any): boolean {
+  return val === 1 || val === '1' || val === true || val === 'true';
+}
+
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
   try {
     const { data } = await supabase
@@ -119,6 +126,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('conversations:list', async () => {
+      console.log(`[conversations:list] user=${userId} requested`);
       try {
         // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version
         const [asUser1, asUser2] = await Promise.all([
@@ -133,6 +141,8 @@ export function setupSocket(io: SocketServer): void {
             .eq('is_group', 0)
             .eq('user2_id', userId),
         ]);
+        if (asUser1.error) console.warn(`[conversations:list] asUser1 error: ${asUser1.error.message}`);
+        if (asUser2.error) console.warn(`[conversations:list] asUser2 error: ${asUser2.error.message}`);
         const directConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
 
         const { data: groupMemberRows } = await supabase
@@ -276,8 +286,10 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
+      console.log(`[direct:start] user=${userId} receiver=${receiverId}`);
       try {
         const participants = [userId, receiverId].sort();
+        console.log(`[direct:start] participants=${JSON.stringify(participants)}`);
 
         // Use individual eq queries instead of .or() — .or() broken for UUIDs
         const [existing1, existing2] = await Promise.all([
@@ -296,23 +308,43 @@ export function setupSocket(io: SocketServer): void {
             .eq('user2_id', participants[0])
             .maybeSingle(),
         ]);
+        if (existing1.error) console.warn(`[direct:start] existing1 error: ${existing1.error.message}`);
+        if (existing2.error) console.warn(`[direct:start] existing2 error: ${existing2.error.message}`);
         const existingConv = existing1.data || existing2.data;
 
         let conversationId: string;
         if (existingConv) {
+          console.log(`[direct:start] using EXISTING conv=${existingConv.id}`);
           conversationId = existingConv.id;
         } else {
           conversationId = uuidv4();
+          console.log(`[direct:start] inserting NEW conv=${conversationId}`);
           const { error: insertErr } = await supabase.from('conversations').insert({
             id: conversationId,
             user1_id: participants[0],
             user2_id: participants[1],
             is_group: 0,
           });
-          if (insertErr) { console.error('[direct:start] insert error:', insertErr); return; }
+          if (insertErr) {
+            console.error('[direct:start] INSERT FAILED:', insertErr.message, '| hint:', insertErr.hint);
+            // Last-ditch attempt without is_group (let DB default apply)
+            const { error: retryErr } = await supabase.from('conversations').insert({
+              id: conversationId,
+              user1_id: participants[0],
+              user2_id: participants[1],
+            });
+            if (retryErr) {
+              console.error('[direct:start] INSERT RETRY (no is_group) ALSO FAILED:', retryErr.message);
+              return;
+            }
+            console.log('[direct:start] INSERT retry (no is_group) succeeded');
+          } else {
+            console.log(`[direct:start] INSERT succeeded conv=${conversationId}`);
+          }
         }
 
         socket.emit('direct:started', { conversationId, receiverId });
+        console.log(`[direct:start] emitted direct:started conv=${conversationId}`);
       } catch (err) {
         console.error('[direct:start] error:', err);
       }

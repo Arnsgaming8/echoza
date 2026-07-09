@@ -360,7 +360,7 @@ export default function Dashboard() {
 
     console.log('[Dashboard] useConversationEffect: registering handlers');
     socket.on('conversations:list', (data: Conversation[]) => {
-      console.log('[Dashboard] conversations:list received, count:', data.length);
+      console.log('[UI] conversations:list received, count:', data.length, 'socketId:', socket.id);
       setConversations(data);
     });
 
@@ -369,7 +369,7 @@ export default function Dashboard() {
     });
 
     socket.on('direct:started', ({ conversationId, receiverId }: { conversationId: string; receiverId: string }) => {
-      console.log('[Dashboard] direct:started received, conversation:', conversationId);
+      console.log('[UI] direct:started received, conversation:', conversationId);
       socket.emit('conversations:list');
     });
 
@@ -758,12 +758,17 @@ export default function Dashboard() {
   };
 
   const handleStartDirect = (receiverId: string) => {
-    if (!socket) return;
+    console.log('[UI] handleStartDirect called receiverId=', receiverId, 'socket?', !!socket, 'connected?', connected);
+    if (!socket) {
+      console.warn('[UI] handleStartDirect aborted — no socket');
+      return;
+    }
     // The conversations:list handler registered above will refresh the sidebar
     // when the server confirms the new conversation. Don't register an extra
     // .once here — two .once listeners for the same event means the second
     // user-add click never sees a refresh.
     socket.emit('direct:start', { receiverId });
+    console.log('[UI] handleStartDirect emitted direct:start');
   };
 
   const handleGroupCreated = (conversationId: string) => {

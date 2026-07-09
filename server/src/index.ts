@@ -318,8 +318,14 @@ async function main() {
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
-    app.use(express.static(clientDist));
+    // Cache hashed asset bundles aggressively (Vite names them with a build
+    // hash so they can't go stale). Serve the SPA index.html with no-store so
+    // the browser always gets the latest build on next navigation.
+    app.use(express.static(clientDist, { maxAge: '1y', immutable: true }));
     app.get('*', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       res.sendFile(join(clientDist, 'index.html'));
     });
     console.log('Serving client from:', clientDist);
