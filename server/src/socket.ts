@@ -4,6 +4,7 @@ import { verifyAccessToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
+import { isGroupFlag, pickDirect } from './utils/group-flag.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -12,11 +13,25 @@ interface AuthSocket extends Socket {
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
-// Permissive group-flag check — handles INTEGER 0/1, BOOLEAN true/false, and
-// their string forms. Lets every handler read `is_group` regardless of which
-// Postgres type the live DB column actually resolved to.
-function isGroupFlag(val: any): boolean {
-  return val === 1 || val === '1' || val === true || val === 'true';
+// Insert helper: tries with an explicit is_group value first (matches migration
+// intent), then strips the field and lets the DB default apply. Covers the
+// integer/boolean coercion mismatch on every fresh write. Local to this file
+// because it captures the module-level supabase client.
+async function insertConvTolerant(conv: {
+  id: string;
+  user1_id: string;
+  user2_id?: string | null;
+  is_group?: number | boolean;
+  group_name?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { error: e1 } = await supabase.from('conversations').insert(conv);
+  if (!e1) return { ok: true };
+  console.warn('[insertConvTolerant] explicit insert failed, retrying without is_group:', e1.message);
+  const { is_group, ...rest } = conv;
+  const { error: e2 } = await supabase.from('conversations').insert(rest);
+  if (!e2) return { ok: true };
+  console.error('[insertConvTolerant] both insert attempts failed:', e2.message);
+  return { ok: false, error: e2.message };
 }
 
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
@@ -98,6 +113,7 @@ export function setupSocket(io: SocketServer): void {
   io.on('connection', async (socket: AuthSocket) => {
     const userId = socket.userId!;
     const username = socket.username!;
+    console.log(`[io.connection] userId=${userId} username=${username} sid=${socket.id}`);
 
     if (!onlineUsers.has(userId)) {
       onlineUsers.set(userId, new Map());
@@ -128,22 +144,31 @@ export function setupSocket(io: SocketServer): void {
     socket.on('conversations:list', async () => {
       console.log(`[conversations:list] user=${userId} requested`);
       try {
-        // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version
+        // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version.
+        // NOTE: do NOT filter by is_group here. The live DB column type may resolve
+        // as INTEGER, BOOLEAN or TEXT depending on how Supabase auto-coerced the
+        // migration. Adding `.eq('is_group', 0)` would silently exclude every row
+        // if the type doesn't match — which is exactly the symptom we hit. Filter
+        // by user membership first, then tag direct vs group in JS.
         const [asUser1, asUser2] = await Promise.all([
           supabase
             .from('conversations')
             .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
-            .eq('is_group', 0)
             .eq('user1_id', userId),
           supabase
             .from('conversations')
             .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
-            .eq('is_group', 0)
             .eq('user2_id', userId),
         ]);
         if (asUser1.error) console.warn(`[conversations:list] asUser1 error: ${asUser1.error.message}`);
         if (asUser2.error) console.warn(`[conversations:list] asUser2 error: ${asUser2.error.message}`);
-        const directConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+        const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+        // De-dupe by id (a row may match both eq() if user1_id == user2_id)
+        const seen = new Set<string>();
+        const directConvs = rawUserConvs.filter(c => {
+          if (!isGroupFlag(c.is_group) && !seen.has(c.id)) { seen.add(c.id); return true; }
+          return false;
+        });
 
         const { data: groupMemberRows } = await supabase
           .from('group_members')
@@ -156,9 +181,8 @@ export function setupSocket(io: SocketServer): void {
           const { data } = await supabase
             .from('conversations')
             .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
-            .in('id', groupConvIds)
-            .eq('is_group', 1);
-          groupConvs = data || [];
+            .in('id', groupConvIds);
+          groupConvs = (data || []).filter(c => isGroupFlag(c.is_group));
         }
 
         const convRows = [...(directConvs || []), ...groupConvs];
@@ -291,26 +315,27 @@ export function setupSocket(io: SocketServer): void {
         const participants = [userId, receiverId].sort();
         console.log(`[direct:start] participants=${JSON.stringify(participants)}`);
 
-        // Use individual eq queries instead of .or() — .or() broken for UUIDs
+        // Use individual eq queries instead of .or() — .or() broken for UUIDs.
+        // Note: do NOT filter by is_group here either; same codec risk as
+        // conversations:list. Identify a "real" direct row by user1_id+user2_id
+        // pairing alone.
         const [existing1, existing2] = await Promise.all([
           supabase
             .from('conversations')
-            .select('id')
-            .eq('is_group', 0)
+            .select('id, is_group')
             .eq('user1_id', participants[0])
             .eq('user2_id', participants[1])
             .maybeSingle(),
           supabase
             .from('conversations')
-            .select('id')
-            .eq('is_group', 0)
+            .select('id, is_group')
             .eq('user1_id', participants[1])
             .eq('user2_id', participants[0])
             .maybeSingle(),
         ]);
         if (existing1.error) console.warn(`[direct:start] existing1 error: ${existing1.error.message}`);
         if (existing2.error) console.warn(`[direct:start] existing2 error: ${existing2.error.message}`);
-        const existingConv = existing1.data || existing2.data;
+        const existingConv = pickDirect(existing1.data) || pickDirect(existing2.data);
 
         let conversationId: string;
         if (existingConv) {
@@ -327,7 +352,6 @@ export function setupSocket(io: SocketServer): void {
           });
           if (insertErr) {
             console.error('[direct:start] INSERT FAILED:', insertErr.message, '| hint:', insertErr.hint);
-            // Last-ditch attempt without is_group (let DB default apply)
             const { error: retryErr } = await supabase.from('conversations').insert({
               id: conversationId,
               user1_id: participants[0],
@@ -337,7 +361,19 @@ export function setupSocket(io: SocketServer): void {
               console.error('[direct:start] INSERT RETRY (no is_group) ALSO FAILED:', retryErr.message);
               return;
             }
-            console.log('[direct:start] INSERT retry (no is_group) succeeded');
+            // Verify the retry actually persisted. Skip this on the fast path
+            // (first insert succeeded) because PostgREST already did a SELECT
+            // round-trip internally for the INSERT return value.
+            const { data: verify, error: verifyErr } = await supabase
+              .from('conversations')
+              .select('id')
+              .eq('id', conversationId)
+              .maybeSingle();
+            if (verifyErr || !verify) {
+              console.error(`[direct:start] INSERT retry SILENTLY DROPPED — row NOT visible to SELECT. verifyErr=${verifyErr?.message || 'none'}`);
+              return;
+            }
+            console.log('[direct:start] INSERT retry (no is_group) succeeded and verified');
           } else {
             console.log(`[direct:start] INSERT succeeded conv=${conversationId}`);
           }
@@ -355,12 +391,18 @@ export function setupSocket(io: SocketServer): void {
       if (allMembers.length < 2) return;
 
       const conversationId = uuidv4();
-      await supabase.from('conversations').insert({
+      // Note: do NOT pass user2_id here. Migration sets DEFAULT '0000…'.
+      // Passing null would store NULL and break consumers that expect a UUID.
+      const result = await insertConvTolerant({
         id: conversationId,
         user1_id: userId,
         is_group: 1,
         group_name: name || 'Unnamed Group',
       });
+      if (!result.ok) {
+        console.error('[group:create] insert failed:', result.error);
+        return;
+      }
 
       const memberRows = allMembers.map(memberId => ({
         group_id: conversationId,
@@ -386,18 +428,18 @@ export function setupSocket(io: SocketServer): void {
         isGroup = true;
       } else if (receiverId) {
         const participants = [userId, receiverId].sort();
-        const { data: existingConv } = await supabase
+        const { data: existingRow } = await supabase
           .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
+          .select('id, is_group')
           .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
           .maybeSingle();
+        const existingConv = pickDirect(existingRow);
 
         if (existingConv) {
           conversationId = existingConv.id;
         } else {
           conversationId = uuidv4();
-          await supabase.from('conversations').insert({
+          await insertConvTolerant({
             id: conversationId,
             user1_id: participants[0],
             user2_id: participants[1],
@@ -557,14 +599,14 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('group:addMember', async ({ groupId, newMemberId }: { groupId: string; newMemberId: string }) => {
-      const { data: isCreator } = await supabase
+      // Filter is_group client-side (defensive against integer/boolean mismatch).
+      const { data: row } = await supabase
         .from('conversations')
-        .select('id')
+        .select('id, is_group')
         .eq('id', groupId)
         .eq('user1_id', userId)
-        .eq('is_group', 1)
         .maybeSingle();
-      if (!isCreator) return;
+      if (!row || !isGroupFlag(row.is_group)) return;
 
       await supabase
         .from('group_members')
@@ -679,19 +721,19 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
       const participants = [userId, receiverId].sort();
-      const { data: existingConv } = await supabase
+      const { data: existingRow } = await supabase
         .from('conversations')
-        .select('id')
-        .eq('is_group', 0)
+        .select('id, is_group')
         .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
         .maybeSingle();
+      const existingConv = pickDirect(existingRow);
 
       let conversationId: string;
       if (existingConv) {
         conversationId = existingConv.id;
       } else {
         conversationId = uuidv4();
-        await supabase.from('conversations').insert({
+        await insertConvTolerant({
           id: conversationId,
           user1_id: participants[0],
           user2_id: participants[1],
@@ -747,6 +789,7 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('disconnect', () => {
+      console.log(`[io.disconnect] userId=${userId} sid=${socket.id}`);
       const sockets = onlineUsers.get(userId);
       if (sockets) {
         sockets.delete(socket.id);

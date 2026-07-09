@@ -13,6 +13,7 @@ import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
 import { v4 as uuidv4 } from 'uuid';
+import { pickDirect } from './utils/group-flag.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
@@ -94,20 +95,18 @@ async function main() {
       const [existing1, existing2] = await Promise.all([
         supabase
           .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
+          .select('id, is_group')
           .eq('user1_id', participants[0])
           .eq('user2_id', participants[1])
           .maybeSingle(),
         supabase
           .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
+          .select('id, is_group')
           .eq('user1_id', participants[1])
           .eq('user2_id', participants[0])
           .maybeSingle(),
       ]);
-      const existingConv = existing1.data || existing2.data;
+      const existingConv = pickDirect(existing1.data) || pickDirect(existing2.data);
 
       let conversationId: string;
       let created = false;
@@ -121,24 +120,37 @@ async function main() {
           user2_id: participants[1],
           is_group: 0,
         });
-        if (insertErr) { res.status(500).json({ error: insertErr.message }); return; }
+        if (insertErr) {
+          // Retry without is_group (DB default applies)
+          const { error: retryErr } = await supabase.from('conversations').insert({
+            id: conversationId,
+            user1_id: participants[0],
+            user2_id: participants[1],
+          });
+          if (retryErr) { res.status(500).json({ error: retryErr.message }); return; }
+        }
         created = true;
       }
 
-      // Verify by querying with eq (which works) instead of .or() (which doesn't)
+      // Verify by querying without the is_group filter, then classifying client-side
       const [asUser1, asUser2] = await Promise.all([
         supabase
           .from('conversations')
           .select('id, user1_id, user2_id, is_group')
-          .eq('is_group', 0)
           .eq('user1_id', userId),
         supabase
           .from('conversations')
           .select('id, user1_id, user2_id, is_group')
-          .eq('is_group', 0)
           .eq('user2_id', userId),
       ]);
-      const directConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+      const seen = new Set<string>();
+      const dedupedConvs = [];
+      for (const row of [...(asUser1.data || []), ...(asUser2.data || [])]) {
+        if (pickDirect(row) && !seen.has(row.id)) {
+          seen.add(row.id);
+          dedupedConvs.push(row);
+        }
+      }
 
       res.json({
         success: true,
@@ -147,8 +159,8 @@ async function main() {
         userId,
         receiverId,
         participants,
-        conversationCount: directConvs.length,
-        conversations: directConvs,
+        conversationCount: dedupedConvs.length,
+        conversations: dedupedConvs,
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Unknown error' });
