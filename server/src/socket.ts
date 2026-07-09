@@ -293,7 +293,7 @@ export function setupSocket(io: SocketServer): void {
         createdAt: row.created_at,
       }));
 
-      socket.emit('messages:list', messages);
+      socket.emit('messages:list', { conversationId, messages });
     });
 
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
