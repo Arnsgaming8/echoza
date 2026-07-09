@@ -12,9 +12,6 @@ import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
-import { v4 as uuidv4 } from 'uuid';
-import { pickDirect } from './utils/group-flag.js';
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 
@@ -79,92 +76,6 @@ async function main() {
     const decoded = await verifyAccessToken(authHeader.slice(7));
     if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
     res.json({ ok: true });
-  });
-
-  app.post('/api/debug-create-conv', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const decoded = await verifyAccessToken(authHeader.slice(7));
-    if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
-    const userId = decoded.userId;
-    const { receiverId } = req.body;
-    if (!receiverId) { res.status(400).json({ error: 'receiverId required' }); return; }
-
-    try {
-      const participants = [userId, receiverId].sort();
-      const [existing1, existing2] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('id, is_group')
-          .eq('user1_id', participants[0])
-          .eq('user2_id', participants[1])
-          .maybeSingle(),
-        supabase
-          .from('conversations')
-          .select('id, is_group')
-          .eq('user1_id', participants[1])
-          .eq('user2_id', participants[0])
-          .maybeSingle(),
-      ]);
-      const existingConv = pickDirect(existing1.data) || pickDirect(existing2.data);
-
-      let conversationId: string;
-      let created = false;
-      if (existingConv) {
-        conversationId = existingConv.id;
-      } else {
-        conversationId = uuidv4();
-        const { error: insertErr } = await supabase.from('conversations').insert({
-          id: conversationId,
-          user1_id: participants[0],
-          user2_id: participants[1],
-          is_group: 0,
-        });
-        if (insertErr) {
-          // Retry without is_group (DB default applies)
-          const { error: retryErr } = await supabase.from('conversations').insert({
-            id: conversationId,
-            user1_id: participants[0],
-            user2_id: participants[1],
-          });
-          if (retryErr) { res.status(500).json({ error: retryErr.message }); return; }
-        }
-        created = true;
-      }
-
-      // Verify by querying without the is_group filter, then classifying client-side
-      const [asUser1, asUser2] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group')
-          .eq('user1_id', userId),
-        supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group')
-          .eq('user2_id', userId),
-      ]);
-      const seen = new Set<string>();
-      const dedupedConvs = [];
-      for (const row of [...(asUser1.data || []), ...(asUser2.data || [])]) {
-        if (pickDirect(row) && !seen.has(row.id)) {
-          seen.add(row.id);
-          dedupedConvs.push(row);
-        }
-      }
-
-      res.json({
-        success: true,
-        conversationId,
-        created,
-        userId,
-        receiverId,
-        participants,
-        conversationCount: dedupedConvs.length,
-        conversations: dedupedConvs,
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err?.message || 'Unknown error' });
-    }
   });
 
   app.get('/api/ice-config', (_req, res) => {

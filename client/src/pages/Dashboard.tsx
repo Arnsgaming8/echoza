@@ -322,6 +322,7 @@ export default function Dashboard() {
     };
 
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
@@ -359,21 +360,12 @@ export default function Dashboard() {
     setConversationsLoaded(true);
 
     console.log('[Dashboard] useConversationEffect: registering handlers');
-    socket.on('server:debug', (info: any) => {
-      console.log('[SERVER DEBUG]', info);
-    });
-
     socket.on('conversations:list', (data: Conversation[]) => {
-      console.log('[UI] conversations:list received, count:', data.length, 'socketId:', socket.id);
+      console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
-      socket.emit('conversations:list');
-    });
-
-    socket.on('direct:started', ({ conversationId, receiverId }: { conversationId: string; receiverId: string }) => {
-      console.log('[UI] direct:started received, conversation:', conversationId);
       socket.emit('conversations:list');
     });
 
@@ -400,10 +392,8 @@ export default function Dashboard() {
     const poll = setInterval(() => socket.emit('conversations:list'), 5000);
     return () => {
       clearInterval(poll);
-      socket.off('server:debug');
       socket.off('conversations:list');
       socket.off('conversation:update');
-      socket.off('direct:started');
       socket.off('conversation:deleted');
       socket.off('messages:deleted');
     };
@@ -763,17 +753,12 @@ export default function Dashboard() {
   };
 
   const handleStartDirect = (receiverId: string) => {
-    console.log('[UI] handleStartDirect called receiverId=', receiverId, 'socket?', !!socket, 'connected?', connected);
-    if (!socket) {
-      console.warn('[UI] handleStartDirect aborted — no socket');
-      return;
-    }
-    // The conversations:list handler registered above will refresh the sidebar
-    // when the server confirms the new conversation. Don't register an extra
-    // .once here — two .once listeners for the same event means the second
-    // user-add click never sees a refresh.
+    if (!socket) return;
     socket.emit('direct:start', { receiverId });
-    console.log('[UI] handleStartDirect emitted direct:start');
+
+    socket.once('direct:started', ({ conversationId }: { conversationId: string }) => {
+      socket.emit('conversations:list');
+    });
   };
 
   const handleGroupCreated = (conversationId: string) => {
