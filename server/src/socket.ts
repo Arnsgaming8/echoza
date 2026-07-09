@@ -159,11 +159,11 @@ export function setupSocket(io: SocketServer): void {
         const [asUser1, asUser2] = await Promise.all([
           supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
             .eq('user1_id', userId),
           supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group, group_name, group_avatar, last_message, last_time')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
             .eq('user2_id', userId),
         ]);
         if (asUser1.error) console.warn(`[conversations:list] asUser1 error: ${asUser1.error.message}`);
@@ -214,7 +214,7 @@ export function setupSocket(io: SocketServer): void {
         if (groupConvIds.length > 0) {
           const { data } = await supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, group_name, group_avatar, last_message, last_time')
+            .select('id, user1_id, user2_id, last_message, last_time')
             .in('id', groupConvIds);
           groupConvs = data || [];
         }
