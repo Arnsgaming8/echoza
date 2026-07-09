@@ -106,7 +106,13 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('users:search', async ({ query: q }: { query: string }) => {
       if (!q.trim()) {
-        socket.emit('users:search', []);
+        // Return all users when search is empty so the modal shows everyone
+        const { data: users } = await supabase
+          .from('users')
+          .select('id, username, avatar')
+          .neq('id', userId)
+          .limit(50);
+        socket.emit('users:search', (users || []).map(u => ({ ...u, online: false })));
         return;
       }
       const { data: users } = await supabase
@@ -120,11 +126,36 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('conversations:list', async () => {
       try {
-        const { data: directConvs } = await supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group, last_message, last_time')
-          .eq('is_group', 0)
-          .or(`user1_id.eq.${userId},user2_id.eq.${userId}`);
+        // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version.
+        // NOTE: do NOT filter by is_group here. The live DB column type may resolve
+        // as INTEGER, BOOLEAN or TEXT depending on how Supabase auto-coerced the
+        // migration. Adding .eq('is_group', 0) would silently exclude every row
+        // if the type doesn't match. Filter by user membership first, then tag
+        // direct vs group in JS by checking user2_id (zero-UUID = group container).
+        const [asUser1, asUser2] = await Promise.all([
+          supabase
+            .from('conversations')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
+            .eq('user1_id', userId),
+          supabase
+            .from('conversations')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
+            .eq('user2_id', userId),
+        ]);
+
+        const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+
+        // Classify by row STRUCTURE (user2_id zero/null => group container),
+        // NOT the unreliable is_group flag.
+        const seen = new Set<string>();
+        const directConvs: any[] = [];
+        for (const c of rawUserConvs) {
+          if (seen.has(c.id)) continue;
+          seen.add(c.id);
+          const u2 = c.user2_id;
+          const isGroup = !u2 || u2 === '00000000-0000-0000-0000-000000000000';
+          if (!isGroup) directConvs.push(c);
+        }
 
         const { data: groupMemberRows } = await supabase
           .from('group_members')
@@ -137,12 +168,11 @@ export function setupSocket(io: SocketServer): void {
           const { data } = await supabase
             .from('conversations')
             .select('id, user1_id, user2_id, is_group, last_message, last_time')
-            .in('id', groupConvIds)
-            .eq('is_group', 1);
+            .in('id', groupConvIds);
           groupConvs = data || [];
         }
 
-        const convRows = [...(directConvs || []), ...groupConvs];
+        const convRows = [...directConvs, ...groupConvs];
         convRows.sort((a, b) => ((b.last_time || '') > (a.last_time || '') ? 1 : -1));
 
         if (convRows.length === 0) {
@@ -203,7 +233,10 @@ export function setupSocket(io: SocketServer): void {
         }
 
         for (const row of convRows) {
-          const { id: convId, user1_id: u1Id, user2_id: u2Id, is_group: isGroup, group_name: groupName, group_avatar: groupAvatar, last_message: lastMsg, last_time: lastTime } = row;
+          const { id: convId, user1_id: u1Id, user2_id: u2Id, group_name: groupName, group_avatar: groupAvatar, last_message: lastMsg, last_time: lastTime } = row;
+          // Classify by structure (user2_id null/zero-UUID = group container),
+          // not the unreliable is_group column which can be INTEGER/BOOLEAN/TEXT.
+          const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
 
           if (isGroup) {
             conversations.push({

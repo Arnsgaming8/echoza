@@ -208,20 +208,22 @@ export default function ConversationModal({
   const [selectedMembers, setSelectedMembers] = useState<Set<string>>(new Set());
   const [groupName, setGroupName] = useState('');
 
-  // Register the response listener ONCE per socket lifetime. Re-registering on
-  // every keystroke was racing against the cleanup and dropping the response.
+  // Register the response listener ONCE per socket lifetime.
   useEffect(() => {
     if (!socket) return;
     const handler = (data: User[]) => setUsers(data);
     socket.on('users:search', handler);
+    // Fetch all users on mount
+    socket.emit('users:search', { query: '' });
     return () => { socket.off('users:search', handler); };
   }, [socket]);
 
-  // Debounced emit on every search change.
+  // Debounced emit on every search change. Clear search immediately (no delay)
+  // so users see the full list right away when they clear the input.
   useEffect(() => {
     if (!socket) return;
     if (!search.trim()) {
-      setUsers([]);
+      socket.emit('users:search', { query: '' });
       return;
     }
     const timer = setTimeout(() => {
