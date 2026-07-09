@@ -603,28 +603,33 @@ export default function Dashboard() {
     });
   };
 
+  // Register messages:list once (not dependent on activeChat) to avoid race
+  // where handleSelectChat emits messages:get before the handler is registered.
+  // Use refs to read the current activeChat at event time.
   useEffect(() => {
-    if (!socket || !activeChat) return;
+    if (!socket) return;
 
-    const handler = (data: Message[]) => {
+    socket.on('messages:list', (data: Message[]) => {
+      const currentChat = activeChatRef.current;
+      if (!currentChat) return;
+
       setMessages(data);
       scrollToBottom(forceScrollNext.current);
       forceScrollNext.current = false;
 
       setConversations(prev => prev.map(c =>
-        c.id === activeChat ? { ...c, unread: 0 } : c
+        c.id === currentChat ? { ...c, unread: 0 } : c
       ));
 
       data.forEach(m => {
-        if (m.senderId !== user?.id && !m.read) {
-          socket.emit('message:read', { messageId: m.id, conversationId: activeChat });
+        if (m.senderId !== userRef.current?.id && !m.read) {
+          socket.emit('message:read', { messageId: m.id, conversationId: currentChat });
         }
       });
-    };
+    });
 
-    socket.on('messages:list', handler);
-    return () => { socket.off('messages:list', handler); };
-  }, [socket, activeChat, scrollToBottom, user?.id]);
+    return () => { socket.off('messages:list'); };
+  }, [socket]);
 
   useEffect(() => {
     if (!user?.id) return;
