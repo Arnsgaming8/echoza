@@ -79,10 +79,14 @@ export function SocketProvider({ children }: { children: ReactNode }) {
           .map((p: any) => p?.userId)
           .filter(Boolean);
         setOnlineUsers(prev => {
-          // Skip empty-state syncs while we still know about others — happens
-          // briefly during our own teardown when the channel ack arrives late.
-          if (ids.length === 0 && prev.some(id => id !== user.id)) return prev;
-          return [...new Set(ids)];
+          // Merge with existing state instead of replacing — the socket
+          // online-users event already gave us the full list.  Realtime
+          // presence sync should only ADD users we haven't seen yet.
+          // Without this merge, the first sync after track() (which only
+          // contains the current user) would overwrite everyone else.
+          if (ids.length === 0) return prev;
+          const merged = new Set([...prev, ...ids]);
+          return [...merged];
         });
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
@@ -98,9 +102,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         setOnlineUsers(prev => prev.filter(id => !ids.includes(id)));
       });
 
-    channel.subscribe(async (status) => {
+    channel.subscribe((status) => {
       if (cancelled || status !== 'SUBSCRIBED') return;
-      await channel.track({
+      channel.track({
         userId: user.id,
         username: user.username,
         hidden: document.hidden,
