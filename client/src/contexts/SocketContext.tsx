@@ -42,7 +42,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
     const newSocket = io(apiUrl('/'), {
       auth: { token },
-      transports: ['polling'],
+      transports: ['websocket', 'polling'],
     });
 
     newSocket.on('connect', () => {
