@@ -78,6 +78,152 @@ async function main() {
     res.json({ ok: true });
   });
 
+  app.get('/api/conversations', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const decoded = await verifyAccessToken(authHeader.slice(7));
+    if (!decoded) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+    const userId = decoded.userId;
+
+    try {
+      // Same logic as socket.ts conversations:list — two eq queries to find all
+      // conversations the user belongs to, then classify by user2_id.
+      const [asUser1, asUser2] = await Promise.all([
+        supabase
+          .from('conversations')
+          .select('id, user1_id, user2_id, is_group')
+          .eq('user1_id', userId),
+        supabase
+          .from('conversations')
+          .select('id, user1_id, user2_id, is_group')
+          .eq('user2_id', userId),
+      ]);
+
+      const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
+      const seen = new Set<string>();
+      const directConvs: any[] = [];
+      for (const c of rawUserConvs) {
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        const u2 = c.user2_id;
+        const isGroup = !u2 || u2 === '00000000-0000-0000-0000-000000000000';
+        if (!isGroup) directConvs.push(c);
+      }
+
+      const { data: groupMemberRows } = await supabase
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId);
+
+      const groupConvIds = (groupMemberRows || []).map(g => g.group_id);
+      let groupConvs: any[] = [];
+      if (groupConvIds.length > 0) {
+        const { data } = await supabase
+          .from('conversations')
+          .select('id, user1_id, user2_id, is_group')
+          .in('id', groupConvIds);
+        groupConvs = data || [];
+      }
+
+      const convRows = [...directConvs, ...groupConvs];
+
+      // Fetch unread counts in a single batch
+      const unreadMap = new Map<string, number>();
+      if (convRows.length > 0) {
+        for (const row of convRows) {
+          const { count } = await supabase
+            .from('messages')
+            .select('id', { count: 'exact', head: true })
+            .eq('conversation_id', row.id)
+            .neq('sender_id', userId)
+            .eq('read', 0);
+          unreadMap.set(row.id, count || 0);
+        }
+      }
+
+      // Fetch group members
+      const memberMap = new Map<string, any[]>();
+      const groupRows = convRows.filter(c => !c.user2_id || c.user2_id === '00000000-0000-0000-0000-000000000000');
+      for (const row of groupRows) {
+        const { data: members } = await supabase
+          .from('group_members')
+          .select('user_id, users(id, username, avatar)')
+          .eq('group_id', row.id);
+        memberMap.set(
+          row.id,
+          (members || []).map((m: any) => {
+            const u = Array.isArray(m.users) ? m.users[0] : m.users;
+            return {
+              id: u?.id || m.user_id,
+              username: u?.username || '',
+              avatar: u?.avatar || '',
+            };
+          })
+        );
+      }
+
+      // Fetch contacts
+      const directConvRows = convRows.filter(c => {
+        const u2 = c.user2_id;
+        return u2 && u2 !== '00000000-0000-0000-0000-000000000000';
+      });
+      const allContactIds = [...new Set([
+        ...directConvRows.map(c => c.user1_id),
+        ...directConvRows.map(c => c.user2_id),
+      ])].filter(id => id !== userId);
+
+      let contactMap = new Map();
+      if (allContactIds.length > 0) {
+        const { data: contactUsers } = await supabase
+          .from('users')
+          .select('id, username, avatar')
+          .in('id', allContactIds);
+        contactMap = new Map((contactUsers || []).map(u => [u.id, u]));
+      }
+
+      // Build response
+      const conversations = convRows.map(row => {
+        const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
+        if (isGroup) {
+          return {
+            id: row.id,
+            isGroup: true,
+            groupName: row.group_name || 'Unnamed Group',
+            members: memberMap.get(row.id) || [],
+            lastMessage: '',
+            lastTime: '',
+            unread: unreadMap.get(row.id) || 0,
+          };
+        }
+        const contactId = row.user1_id === userId ? row.user2_id : row.user1_id;
+        const contact = contactMap.get(contactId);
+        return {
+          id: row.id,
+          isGroup: false,
+          contact: {
+            id: contactId,
+            username: contact?.username || '',
+            avatar: contact?.avatar || '',
+          },
+          lastMessage: '',
+          lastTime: '',
+          unread: unreadMap.get(row.id) || 0,
+        };
+      });
+
+      res.json(conversations);
+    } catch (err: any) {
+      console.error('[API] /api/conversations error:', err);
+      res.status(500).json({ error: err?.message || 'Unknown error' });
+    }
+  });
+
   app.get('/api/ice-config', (_req, res) => {
     const turnUrl = process.env.TURN_URL;
     const turnUsername = process.env.TURN_USERNAME;

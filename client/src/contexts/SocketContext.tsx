@@ -50,13 +50,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setConnected(true);
       setSelfOnline(true);
       setSocket(newSocket);
-      newSocket.emit('conversations:list');
     });
 
     newSocket.on('disconnect', () => {
       if (cancelled) return;
       setConnected(false);
       setSelfOnline(false);
+    });
+
+    // Server sends the full online-users map on every connect — instant initial
+    // state before the Realtime presence channel syncs.
+    newSocket.on('online-users', (userIds: string[]) => {
+      if (cancelled) return;
+      setOnlineUsers(userIds);
     });
 
     // Supabase Realtime presence is the single source of truth for online status

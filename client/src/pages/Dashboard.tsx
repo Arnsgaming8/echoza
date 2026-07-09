@@ -349,24 +349,38 @@ export default function Dashboard() {
     }, 50);
   }, []);
 
-  // Register conversation:list handlers once (never cleaned up)
+  // Fetch conversations via HTTP immediately — no need to wait for socket
   useEffect(() => {
-    if (!socket) {
-      console.log('[Dashboard] useConversationEffect: no socket yet, skipping');
-      return;
-    }
+    const token = localStorage.getItem('echoza-token');
+    if (!token) return;
 
-    // Hide loading immediately once socket is available, don't wait for response
+    let cancelled = false;
+    fetch(apiUrl('/api/conversations'), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (!cancelled && Array.isArray(data)) {
+          setConversations(data);
+          setConversationsLoaded(true);
+        }
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, []);
+
+  // Socket listeners for real-time conversation updates
+  useEffect(() => {
+    if (!socket) return;
+
     setConversationsLoaded(true);
-
-    console.log('[Dashboard] useConversationEffect: registering handlers');
 
     socket.on('server:diag', (diag: any) => {
       console.log('[SERVER DIAG]', diag);
     });
 
     socket.on('conversations:list', (data: Conversation[]) => {
-      console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
     });
 
@@ -391,8 +405,6 @@ export default function Dashboard() {
       setDeleteMode(false);
       setSelectedMessages(new Set());
     });
-
-    socket.emit('conversations:list');
 
     return () => {
       socket.off('server:diag');
