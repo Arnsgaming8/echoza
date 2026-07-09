@@ -107,23 +107,25 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
   try {
     const { data, error } = await anonSupabase.auth.refreshSession({ refresh_token });
-    if (error || !data.session) {
+    if (error || !data.session || !data.user) {
       res.status(401).json({ error: 'Invalid refresh token' });
       return;
     }
 
+    const refreshUser = data.user;
+
     const { data: dbUser } = await supabase
       .from('users')
       .select('id, username, avatar, online')
-      .eq('id', data.user.id)
+      .eq('id', refreshUser.id)
       .single();
 
     res.json({
       token: data.session.access_token,
       refresh_token: data.session.refresh_token,
       user: dbUser || {
-        id: data.user.id,
-        username: data.user.user_metadata?.username || '',
+        id: refreshUser.id,
+        username: refreshUser.user_metadata?.username || '',
         avatar: '',
         online: false,
       },
