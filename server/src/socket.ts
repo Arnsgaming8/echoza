@@ -331,12 +331,25 @@ export function setupSocket(io: SocketServer): void {
       if (allMembers.length < 2) return;
 
       const conversationId = uuidv4();
-      await supabase.from('conversations').insert({
+      const { error: groupInsertErr } = await supabase.from('conversations').insert({
         id: conversationId,
         user1_id: userId,
         is_group: 1,
         group_name: name || 'Unnamed Group',
       });
+      if (groupInsertErr) {
+        // group_name column likely missing, retry without it
+        console.warn('[group:create] first insert failed, retrying without group_name:', groupInsertErr.message);
+        const { error: groupRetryErr } = await supabase.from('conversations').insert({
+          id: conversationId,
+          user1_id: userId,
+          is_group: 1,
+        });
+        if (groupRetryErr) {
+          console.error('[group:create] insert failed:', groupRetryErr);
+          return;
+        }
+      }
 
       const memberRows = allMembers.map(memberId => ({
         group_id: conversationId,
@@ -408,10 +421,11 @@ export function setupSocket(io: SocketServer): void {
             ? 'Attachments'
             : '';
 
-      await supabase
+      const { error: updatePreviewErr } = await supabase
         .from('conversations')
         .update({ last_message: preview, last_time: createdAt })
         .eq('id', conversationId);
+      if (updatePreviewErr) console.warn('[message:send] preview update skipped:', updatePreviewErr.message);
 
       const parsedAttachments = attachments ? attachments : [];
 
@@ -476,13 +490,14 @@ export function setupSocket(io: SocketServer): void {
         .limit(1)
         .maybeSingle();
 
-      await supabase
+      const { error: updateDelErr } = await supabase
         .from('conversations')
         .update({
           last_message: lastMsg?.content || '',
           last_time: lastMsg?.created_at || null,
         })
         .eq('id', conversationId);
+      if (updateDelErr) console.warn('[messages:delete] conversation update skipped:', updateDelErr.message);
 
       const { data: conv } = await supabase
         .from('conversations')
@@ -688,10 +703,11 @@ export function setupSocket(io: SocketServer): void {
         created_at: createdAt,
       });
 
-      await supabase
+      const { error: missedUpdateErr } = await supabase
         .from('conversations')
         .update({ last_message: content, last_time: createdAt })
         .eq('id', conversationId);
+      if (missedUpdateErr) console.warn('[call:missed] conversation update skipped:', missedUpdateErr.message);
 
       const message = { id: messageId, conversationId, senderId: userId, senderUsername: username, content, attachments: [], read: false, createdAt, isGroup: false };
       emitToUser(io, userId, 'message:sent', message);
