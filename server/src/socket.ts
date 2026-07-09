@@ -299,12 +299,19 @@ export function setupSocket(io: SocketServer): void {
       try {
         const participants = [userId, receiverId].sort();
 
-        const { data: existingConv } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
-          .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-          .maybeSingle();
+        // Use two eq queries instead of .or() — .or() broken for UUIDs
+        const [as1, as2] = await Promise.all([
+          supabase.from('conversations').select('id')
+            .eq('user1_id', participants[0])
+            .eq('user2_id', participants[1])
+            .maybeSingle(),
+          supabase.from('conversations').select('id')
+            .eq('user1_id', participants[1])
+            .eq('user2_id', participants[0])
+            .maybeSingle(),
+        ]);
+
+        const existingConv = as1.data || as2.data;
 
         let conversationId: string;
         if (existingConv) {
@@ -375,12 +382,19 @@ export function setupSocket(io: SocketServer): void {
         isGroup = true;
       } else if (receiverId) {
         const participants = [userId, receiverId].sort();
-        const { data: existingConv } = await supabase
-          .from('conversations')
-          .select('id')
-          .eq('is_group', 0)
-          .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-          .maybeSingle();
+        // Use two eq queries instead of .or() — .or() broken for UUIDs
+        const [as1, as2] = await Promise.all([
+          supabase.from('conversations').select('id')
+            .eq('user1_id', participants[0])
+            .eq('user2_id', participants[1])
+            .maybeSingle(),
+          supabase.from('conversations').select('id')
+            .eq('user1_id', participants[1])
+            .eq('user2_id', participants[0])
+            .maybeSingle(),
+        ]);
+
+        const existingConv = as1.data || as2.data;
 
         if (existingConv) {
           conversationId = existingConv.id;
@@ -670,12 +684,19 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
       const participants = [userId, receiverId].sort();
-      const { data: existingConv } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('is_group', 0)
-        .or(`and(user1_id.eq.${participants[0]},user2_id.eq.${participants[1]}),and(user2_id.eq.${participants[0]},user1_id.eq.${participants[1]})`)
-        .maybeSingle();
+      // Use two eq queries instead of .or() — .or() broken for UUIDs
+      const [as1, as2] = await Promise.all([
+        supabase.from('conversations').select('id')
+          .eq('user1_id', participants[0])
+          .eq('user2_id', participants[1])
+          .maybeSingle(),
+        supabase.from('conversations').select('id')
+          .eq('user1_id', participants[1])
+          .eq('user2_id', participants[0])
+          .maybeSingle(),
+      ]);
+
+      const existingConv = as1.data || as2.data;
 
       let conversationId: string;
       if (existingConv) {
