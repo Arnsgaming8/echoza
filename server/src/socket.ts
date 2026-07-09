@@ -4,7 +4,7 @@ import { verifyAccessToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
-import { isGroupFlag, pickDirect, isGroupRow, isDirectByStructure } from './utils/group-flag.js';
+import { isGroupFlag, pickDirect, isGroupRow, isDirectByStructure, isZeroUuid } from './utils/group-flag.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -141,8 +141,14 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('users:search', (users || []).map(u => ({ ...u, online: false })));
     });
 
+    // Server-side diagnostic channel. Pipes server-internal state to the
+    // browser console so the next user paste pinpoints where the chain breaks
+    // without needing access to Render logs.
+    const debugClient = (info: any) => socket.emit('server:debug', info);
+
     socket.on('conversations:list', async () => {
       console.log(`[conversations:list] user=${userId} requested`);
+      debugClient({ stage: 'entry', userId });
       try {
         // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version.
         // NOTE: do NOT filter by is_group here. The live DB column type may resolve
@@ -164,26 +170,44 @@ export function setupSocket(io: SocketServer): void {
         if (asUser2.error) console.warn(`[conversations:list] asUser2 error: ${asUser2.error.message}`);
         const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
         console.log(`[conversations:list] user=${userId} rawUserConvs.length=${rawUserConvs.length}`);
-        if (rawUserConvs.length > 0) {
-          const s = rawUserConvs[0];
-          console.log(`[conversations:list] sample row id=${s.id?.slice(0,8)} u1=${s.user1_id?.slice(0,8)} u2=${s.user2_id?.slice(0,8)} is_group=${JSON.stringify(s.is_group)}`);
-        }
+        debugClient({
+          stage: 'raw',
+          asUser1Count: asUser1.data?.length || 0,
+          asUser2Count: asUser2.data?.length || 0,
+          asUser1Err: asUser1.error?.message,
+          asUser2Err: asUser2.error?.message,
+          rows: rawUserConvs.map(r => ({
+            id: r.id?.slice(0, 8),
+            u1: r.user1_id?.slice(0, 8),
+            u2: r.user2_id?.slice(0, 8),
+            is_group: r.is_group,
+            isGroupByStructure: isGroupRow(r),
+            isDirectByStructure: isDirectByStructure(r),
+            isZeroUuidUser2: isZeroUuid(r.user2_id),
+          })),
+        });
         // Classify by row STRUCTURE (user2_id zero/null => group container),
         // NOT the unreliable is_group flag.
         const seen = new Set<string>();
         const directConvs: any[] = [];
+        const droppedAsNotDirect: any[] = [];
         for (const c of rawUserConvs) {
           if (seen.has(c.id)) continue;
-          if (!isDirectByStructure(c)) continue;
+          if (!isDirectByStructure(c)) {
+            droppedAsNotDirect.push({ id: c.id?.slice(0,8), u2: c.user2_id?.slice(0,8), is_group: c.is_group });
+            continue;
+          }
           seen.add(c.id);
           directConvs.push(c);
         }
         console.log(`[conversations:list] user=${userId} directConvs.length=${directConvs.length}`);
+        debugClient({ stage: 'classified', directConvs: directConvs.length, droppedAsNotDirect });
 
         const { data: groupMemberRows } = await supabase
           .from('group_members')
           .select('group_id')
           .eq('user_id', userId);
+        debugClient({ stage: 'groupMembers', count: groupMemberRows?.length || 0 });
 
         const groupConvIds = (groupMemberRows || []).map(g => g.group_id);
         let groupConvs: any[] = [];
@@ -204,6 +228,7 @@ export function setupSocket(io: SocketServer): void {
         });
 
         if (convRows.length === 0) {
+          debugClient({ stage: 'empty', rawConvs: rawUserConvs.length, directConvs: directConvs.length, groupConvs: groupConvs.length });
           socket.emit('conversations:list', []);
           return;
         }
@@ -293,8 +318,10 @@ export function setupSocket(io: SocketServer): void {
         }
 
         socket.emit('conversations:list', conversations);
-      } catch (err) {
+        debugClient({ stage: 'emitted', count: conversations.length });
+      } catch (err: any) {
         console.error('[Server] conversations:list error:', err);
+        debugClient({ stage: 'thrown', message: err?.message, stack: err?.stack?.slice(0, 800) });
         socket.emit('conversations:list', []);
       }
     });
@@ -393,8 +420,10 @@ export function setupSocket(io: SocketServer): void {
 
         socket.emit('direct:started', { conversationId, receiverId });
         console.log(`[direct:start] emitted direct:started conv=${conversationId}`);
-      } catch (err) {
+        debugClient({ stage: 'direct_start_ok', conversationId, receiverId });
+      } catch (err: any) {
         console.error('[direct:start] error:', err);
+        debugClient({ stage: 'direct_start_error', message: err?.message, stack: err?.stack?.slice(0, 800) });
       }
     });
 
