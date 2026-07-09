@@ -368,7 +368,7 @@ export default function Dashboard() {
       socket.emit('conversations:list');
     });
 
-    socket.once('direct:started', ({ conversationId, receiverId }: { conversationId: string; receiverId: string }) => {
+    socket.on('direct:started', ({ conversationId, receiverId }: { conversationId: string; receiverId: string }) => {
       console.log('[Dashboard] direct:started received, conversation:', conversationId);
       socket.emit('conversations:list');
     });
@@ -398,6 +398,7 @@ export default function Dashboard() {
       clearInterval(poll);
       socket.off('conversations:list');
       socket.off('conversation:update');
+      socket.off('direct:started');
       socket.off('conversation:deleted');
       socket.off('messages:deleted');
     };
@@ -758,11 +759,11 @@ export default function Dashboard() {
 
   const handleStartDirect = (receiverId: string) => {
     if (!socket) return;
+    // The conversations:list handler registered above will refresh the sidebar
+    // when the server confirms the new conversation. Don't register an extra
+    // .once here — two .once listeners for the same event means the second
+    // user-add click never sees a refresh.
     socket.emit('direct:start', { receiverId });
-
-    socket.once('direct:started', ({ conversationId }: { conversationId: string }) => {
-      socket.emit('conversations:list');
-    });
   };
 
   const handleGroupCreated = (conversationId: string) => {

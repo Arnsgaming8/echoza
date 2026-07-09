@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { apiUrl } from '../utils/api';
 
 interface User {
@@ -34,6 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('echoza-token'));
   const [authLoading, setAuthLoading] = useState(!!localStorage.getItem('echoza-token'));
+  // Pending retry timer must live at the top of the component (Rules of Hooks)
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!token) {
@@ -46,7 +48,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const MAX_RETRIES = 3;
     const RETRY_DELAY = 2000;
 
-    const refreshThenCheck = async () => {
+    const runCheck = async (): Promise<void> => {
+      if (cancelled) return;
+      try {
+        const res = await fetch(apiUrl('/api/users/me'), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const err: any = new Error(`HTTP ${res.status}`);
+          err.status = res.status;
+          throw err;
+        }
+        const data = await res.json();
+        if (!cancelled) {
+          setUser(data);
+          setAuthLoading(false);
+        }
+      } catch (err: any) {
+        if (cancelled) return;
+        retries += 1;
+        if (retries < MAX_RETRIES) {
+          retryTimeoutRef.current = setTimeout(runCheck, RETRY_DELAY);
+          return;
+        }
+        // Out of retries. Only nuke the tokens when we KNOW they're invalid
+        // (HTTP 401). Server hiccups / network blips just show the login
+        // screen and keep tokens so a refresh can recover without re-entering
+        // credentials.
+        if (err?.status === 401) {
+          localStorage.removeItem('echoza-token');
+          localStorage.removeItem(REFRESH_TOKEN_KEY);
+        }
+        setToken(null);
+        setUser(null);
+        setAuthLoading(false);
+      }
+    };
+
+    const refreshThenCheck = async (): Promise<void> => {
       const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
       if (storedRefresh) {
         try {
@@ -66,44 +105,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return;
             }
           }
-        } catch {}
+        } catch {
+          // fall through to /me fallback
+        }
       }
 
-      // Refresh failed or no refresh token — try original token
-      const check = () => {
-        fetch(apiUrl('/api/users/me'), {
-          headers: { Authorization: `Bearer ${token}` },
-        })
-          .then(res => {
-            if (!res.ok) throw new Error('Invalid token');
-            return res.json();
-          })
-          .then(data => {
-            if (!cancelled) {
-              setUser(data);
-              setAuthLoading(false);
-              localStorage.setItem('echoza-token', token);
-            }
-          })
-          .catch(() => {
-            if (cancelled) return;
-            retries++;
-            if (retries < MAX_RETRIES) {
-              setTimeout(check, RETRY_DELAY);
-            } else {
-              setToken(null);
-              localStorage.removeItem('echoza-token');
-              localStorage.removeItem(REFRESH_TOKEN_KEY);
-              setAuthLoading(false);
-            }
-          });
-      };
-
-      check();
+      await runCheck();
     };
 
     refreshThenCheck();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
   }, [token]);
 
   const login = (newToken: string, newRefreshToken: string, newUser: User) => {
@@ -132,12 +150,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem(REFRESH_TOKEN_KEY);
   };
 
-  const updateUser = (updates: Partial<User>) => {
-    setUser(prev => prev ? { ...prev, ...updates } : null);
+  const updateUser = (updates: Partial<User>): void => {
+    setUser(prev => (prev ? { ...prev, ...updates } : null));
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, updateUser, isAuthenticated: !!user, authLoading }}>
+    <AuthContext.Provider
+      value={{ user, token, login, logout, updateUser, isAuthenticated: !!user, authLoading }}
+    >
       {children}
     </AuthContext.Provider>
   );

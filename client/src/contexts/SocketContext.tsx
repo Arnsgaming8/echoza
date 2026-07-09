@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, ReactNode, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, ReactNode, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { apiUrl } from '../utils/api';
@@ -21,96 +21,136 @@ const SocketContext = createContext<SocketContextType>({
 
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { token, user, isAuthenticated } = useAuth();
-  const socketRef = useRef<Socket | null>(null);
-  const presenceRef = useRef<RealtimeChannel | null>(null);
+  const [socket, setSocket] = useState<Socket | null>(null);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [selfOnline, setSelfOnline] = useState(false);
   const [connected, setConnected] = useState(false);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
+  // Main effect: establish Socket.IO connection + Supabase Realtime presence
+  // channel. Narrow deps so profile updates don't tear this down.
   useEffect(() => {
-    if (!isAuthenticated || !token || !user) return;
+    if (!isAuthenticated || !token || !user?.id) {
+      setSocket(null);
+      setConnected(false);
+      setSelfOnline(false);
+      setOnlineUsers([]);
+      return;
+    }
 
-    // Socket.IO for calls, typing, messages
-    const socket = io(apiUrl('/'), {
+    let cancelled = false;
+
+    const newSocket = io(apiUrl('/'), {
       auth: { token },
       transports: ['polling'],
     });
 
-    socket.on('connect', () => {
+    newSocket.on('connect', () => {
+      if (cancelled) return;
       setConnected(true);
       setSelfOnline(true);
-      socket.emit('conversations:list');
+      setSocket(newSocket);
+      newSocket.emit('conversations:list');
     });
 
-    socket.on('online-users', (userIds: string[]) => {
-      setOnlineUsers(prev => [...new Set([...prev, ...userIds])]);
-    });
-
-    socket.on('disconnect', () => {
+    newSocket.on('disconnect', () => {
+      if (cancelled) return;
       setConnected(false);
       setSelfOnline(false);
     });
 
-    socketRef.current = socket;
-
-    // Supabase Realtime presence for online tracking
+    // Supabase Realtime presence is the single source of truth for online status
     const channel = supabase.channel('online-users');
-    presenceRef.current = channel;
+    channelRef.current = channel;
+    let lastHidden = document.hidden;
 
     channel
       .on('presence', { event: 'sync' }, () => {
+        if (cancelled) return;
         const state = channel.presenceState();
-        const userIds = Object.values(state).flat().map((p: any) => p.userId);
-        setOnlineUsers([...new Set(userIds)]);
+        const ids = Object.values(state)
+          .flat()
+          .map((p: any) => p?.userId)
+          .filter(Boolean);
+        setOnlineUsers(prev => {
+          // Skip empty-state syncs while we still know about others — happens
+          // briefly during our own teardown when the channel ack arrives late.
+          if (ids.length === 0 && prev.some(id => id !== user.id)) return prev;
+          return [...new Set(ids)];
+        });
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
-        const ids = newPresences.map((p: any) => p.userId);
+        if (cancelled) return;
+        const ids = newPresences.map((p: any) => p?.userId).filter(Boolean);
+        if (!ids.length) return;
         setOnlineUsers(prev => [...new Set([...prev, ...ids])]);
       })
       .on('presence', { event: 'leave' }, ({ leftPresences }) => {
-        const ids = leftPresences.map((p: any) => p.userId);
+        if (cancelled) return;
+        const ids = leftPresences.map((p: any) => p?.userId).filter(Boolean);
+        if (!ids.length) return;
         setOnlineUsers(prev => prev.filter(id => !ids.includes(id)));
       });
 
     channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        await channel.track({
-          userId: user.id,
-          username: user.username,
-          avatar: user.avatar,
-        });
-      }
+      if (cancelled || status !== 'SUBSCRIBED') return;
+      await channel.track({
+        userId: user.id,
+        username: user.username,
+        hidden: document.hidden,
+      });
     });
 
     const handleVisibilityChange = () => {
-      if (document.hidden) {
-        channel.track({ userId: user.id, username: user.username, avatar: user.avatar, hidden: true });
-      } else {
-        channel.track({ userId: user.id, username: user.username, avatar: user.avatar });
-      }
+      // Only re-track when the hidden flag actually FLIPS — track() on every
+      // visibility tick was the dominant source of presence sync flicker.
+      if (cancelled || document.hidden === lastHidden) return;
+      lastHidden = document.hidden;
+      channel.track({
+        userId: user.id,
+        username: user.username,
+        hidden: document.hidden,
+      });
+      if (document.hidden) setSelfOnline(false);
+      else setSelfOnline(true);
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    const handleBeforeUnload = () => {
-      channel.untrack();
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
     return () => {
+      cancelled = true;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
       channel.untrack();
       supabase.removeChannel(channel);
-      presenceRef.current = null;
-      socket.disconnect();
-      socketRef.current = null;
+      channelRef.current = null;
+      newSocket.disconnect();
+      setSocket(null);
       setConnected(false);
       setSelfOnline(false);
+      setOnlineUsers([]);
     };
-  }, [isAuthenticated, token, user?.id, user?.username, user?.avatar]);
+  }, [isAuthenticated, token, user?.id]);
+
+  // Re-track presence when the user edits their profile (avatar / username) so
+  // other connected users see the updated meta. Doesn't tear down the socket.
+  useEffect(() => {
+    if (!user?.id || !channelRef.current) return;
+    channelRef.current.track({
+      userId: user.id,
+      username: user.username,
+      avatar: user.avatar,
+      hidden: typeof document !== 'undefined' && document.hidden,
+    }).catch(() => { /* channel may be tearing down, ignore */ });
+  }, [user?.id, user?.username, user?.avatar]);
+
+  // Memoize the context value so consumers don't re-render unless one of the
+  // four pieces of state actually changed in identity (not just reference).
+  const value = useMemo<SocketContextType>(
+    () => ({ socket, onlineUsers, selfOnline, connected }),
+    [socket, onlineUsers, selfOnline, connected]
+  );
 
   return (
-    <SocketContext.Provider value={{ socket: socketRef.current, onlineUsers, selfOnline, connected }}>
+    <SocketContext.Provider value={value}>
       {children}
     </SocketContext.Provider>
   );

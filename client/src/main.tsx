@@ -2,7 +2,10 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
-// Clear stale storage once per version bump
+// Bump this value ON PURPOSE when you actually need a one-time hard reset of
+// local storage for all users (e.g. after a breaking change to cached convo
+// shape). Today's value matches what's already stored in user browsers so this
+// deploy does NOT wipe anyone's session.
 const STORAGE_VERSION = '3';
 const storedVersion = localStorage.getItem('echoza-storage-version');
 if (storedVersion !== STORAGE_VERSION) {
