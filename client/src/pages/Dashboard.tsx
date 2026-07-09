@@ -206,15 +206,7 @@ export default function Dashboard() {
   const updateUserRef = useRef(updateUser);
   updateUserRef.current = updateUser;
 
-  const [conversations, setConversations] = useState<Conversation[]>(() => {
-    // Load cached conversations instantly so the sidebar has data
-    // while the socket connects in the background.
-    try {
-      const cached = localStorage.getItem('echoza-conversations');
-      if (cached) return JSON.parse(cached) as Conversation[];
-    } catch { /* ignore corrupt cache */ }
-    return [];
-  });
+  const [conversations, setConversations] = useState<Conversation[]>([]);
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
   const [conversationsLoaded, setConversationsLoaded] = useState(true); // Always show UI immediately
@@ -376,8 +368,6 @@ export default function Dashboard() {
     socket.on('conversations:list', (data: Conversation[]) => {
       console.log('[Dashboard] conversations:list received, count:', data.length);
       setConversations(data);
-      // Cache for instant load on next page visit
-      try { localStorage.setItem('echoza-conversations', JSON.stringify(data)); } catch {}
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
@@ -385,11 +375,7 @@ export default function Dashboard() {
     });
 
     socket.on('conversation:deleted', ({ conversationId }: { conversationId: string }) => {
-      setConversations(prev => {
-        const next = prev.filter(c => c.id !== conversationId);
-        try { localStorage.setItem('echoza-conversations', JSON.stringify(next)); } catch {}
-        return next;
-      });
+      setConversations(prev => prev.filter(c => c.id !== conversationId));
       if (activeChat === conversationId) {
         setActiveChat(null);
         setActiveConv(null);
@@ -399,13 +385,9 @@ export default function Dashboard() {
 
     socket.on('messages:deleted', ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
       setMessages(prev => prev.filter(m => !messageIds.includes(m.id)));
-      setConversations(prev => {
-        const next = prev.map(c =>
-          c.id === conversationId ? { ...c, unread: 0 } : c
-        );
-        try { localStorage.setItem('echoza-conversations', JSON.stringify(next)); } catch {}
-        return next;
-      });
+      setConversations(prev => prev.map(c =>
+        c.id === conversationId ? { ...c, unread: 0 } : c
+      ));
       setDeleteMode(false);
       setSelectedMessages(new Set());
     });
