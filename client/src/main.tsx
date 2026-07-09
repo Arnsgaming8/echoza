@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 
 // Clear stale storage once per version bump
-const STORAGE_VERSION = '2';
+const STORAGE_VERSION = '3';
 const storedVersion = localStorage.getItem('echoza-storage-version');
 if (storedVersion !== STORAGE_VERSION) {
   localStorage.removeItem('echoza-token');
