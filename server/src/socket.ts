@@ -135,11 +135,11 @@ export function setupSocket(io: SocketServer): void {
         const [asUser1, asUser2] = await Promise.all([
           supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
             .eq('user1_id', userId),
           supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
             .eq('user2_id', userId),
         ]);
 
@@ -171,7 +171,7 @@ export function setupSocket(io: SocketServer): void {
         if (groupConvIds.length > 0) {
           const { data } = await supabase
             .from('conversations')
-            .select('id, user1_id, user2_id, is_group')
+            .select('id, user1_id, user2_id, is_group, last_message, last_time')
             .in('id', groupConvIds);
           groupConvs = data || [];
         }
@@ -186,7 +186,8 @@ export function setupSocket(io: SocketServer): void {
 
         for (const row of convRows) {
           const convId = row.id;
-          const isGroup = row.is_group;
+          // Use structural classification (user2_id) instead of unreliable is_group column
+          const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
 
           const { count } = await supabase
             .from('messages')
@@ -233,7 +234,7 @@ export function setupSocket(io: SocketServer): void {
         }
 
         for (const row of convRows) {
-          const { id: convId, user1_id: u1Id, user2_id: u2Id, group_name: groupName, group_avatar: groupAvatar } = row;
+          const { id: convId, user1_id: u1Id, user2_id: u2Id, group_name: groupName, group_avatar: groupAvatar, last_message: lastMsg, last_time: lastTime } = row;
           // Classify by structure (user2_id null/zero-UUID = group container),
           // not the unreliable is_group column which can be INTEGER/BOOLEAN/TEXT.
           const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
@@ -244,8 +245,8 @@ export function setupSocket(io: SocketServer): void {
               isGroup: true,
               groupName: groupName || 'Unnamed Group',
               members: memberMap.get(convId) || [],
-              lastMessage: '',
-              lastTime: '',
+              lastMessage: lastMsg || '',
+              lastTime: lastTime || '',
               unread: unreadMap.get(convId) || 0,
             });
           } else {
@@ -260,8 +261,8 @@ export function setupSocket(io: SocketServer): void {
                 username: contact?.username || '',
                 avatar: contact?.avatar || '',
               },
-              lastMessage: '',
-              lastTime: '',
+              lastMessage: lastMsg || '',
+              lastTime: lastTime || '',
               unread: unreadMap.get(convId) || 0,
             });
           }

@@ -97,11 +97,11 @@ async function main() {
       const [asUser1, asUser2] = await Promise.all([
         supabase
           .from('conversations')
-          .select('id, user1_id, user2_id, is_group')
+          .select('id, user1_id, user2_id, is_group, last_message, last_time')
           .eq('user1_id', userId),
         supabase
           .from('conversations')
-          .select('id, user1_id, user2_id, is_group')
+          .select('id, user1_id, user2_id, is_group, last_message, last_time')
           .eq('user2_id', userId),
       ]);
 
@@ -126,7 +126,7 @@ async function main() {
       if (groupConvIds.length > 0) {
         const { data } = await supabase
           .from('conversations')
-          .select('id, user1_id, user2_id, is_group')
+          .select('id, user1_id, user2_id, is_group, last_message, last_time')
           .in('id', groupConvIds);
         groupConvs = data || [];
       }
@@ -196,8 +196,8 @@ async function main() {
             isGroup: true,
             groupName: row.group_name || 'Unnamed Group',
             members: memberMap.get(row.id) || [],
-            lastMessage: '',
-            lastTime: '',
+            lastMessage: row.last_message || '',
+            lastTime: row.last_time || '',
             unread: unreadMap.get(row.id) || 0,
           };
         }
@@ -211,8 +211,8 @@ async function main() {
             username: contact?.username || '',
             avatar: contact?.avatar || '',
           },
-          lastMessage: '',
-          lastTime: '',
+          lastMessage: row.last_message || '',
+          lastTime: row.last_time || '',
           unread: unreadMap.get(row.id) || 0,
         };
       });
