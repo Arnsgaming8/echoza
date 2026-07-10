@@ -34,7 +34,7 @@ async function main() {
   });
 
   app.get('/api/db-status', async (_req, res) => {
-    const { data, error } = await supabase.from('users').select('id, username').limit(1);
+    const { data, error } = await supabase.from('profiles').select('id, username').limit(1);
     if (error) {
       const msg = error.message || '';
       if (msg.toLowerCase().includes('database is paused') || error.code === 'PGRST000') {
@@ -47,12 +47,12 @@ async function main() {
 
   app.get('/api/debug-db', async (_req, res) => {
     try {
-      const { data: users, error: listErr } = await supabase.from('users').select('id, username');
-      const { data: steph, error: stephErr } = await supabase.from('users').select('id, username').eq('username', 'Steph').maybeSingle();
-      const { data: anonCheck, error: anonErr } = await anonSupabase.from('users').select('id').limit(1);
+      const { data: profiles, error: listErr } = await supabase.from('profiles').select('id, username');
+      const { data: steph, error: stephErr } = await supabase.from('profiles').select('id, username').eq('username', 'Steph').maybeSingle();
+      const { data: anonCheck, error: anonErr } = await anonSupabase.from('profiles').select('id').limit(1);
       res.json({
-        usersCount: users?.length ?? 0,
-        users: users ?? [],
+        profilesCount: profiles?.length ?? 0,
+        profiles: profiles ?? [],
         listError: listErr?.message ?? null,
         steph: steph ?? null,
         stephError: stephErr?.message ?? null,
@@ -92,127 +92,111 @@ async function main() {
     const userId = decoded.userId;
 
     try {
-      // Same logic as socket.ts conversations:list — two eq queries to find all
-      // conversations the user belongs to, then classify by user2_id.
-      const [asUser1, asUser2] = await Promise.all([
-        supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group, last_message, last_time')
-          .eq('user1_id', userId),
-        supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group, last_message, last_time')
-          .eq('user2_id', userId),
-      ]);
-
-      const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
-      const seen = new Set<string>();
-      const directConvs: any[] = [];
-      for (const c of rawUserConvs) {
-        if (seen.has(c.id)) continue;
-        seen.add(c.id);
-        const u2 = c.user2_id;
-        const isGroup = !u2 || u2 === '00000000-0000-0000-0000-000000000000';
-        if (!isGroup) directConvs.push(c);
-      }
-
-      const { data: groupMemberRows } = await supabase
-        .from('group_members')
-        .select('group_id')
+      // ── Step 1: Get all conversation IDs the user belongs to ──
+      const { data: participantRows } = await supabase
+        .from('participants')
+        .select('conversation_id, last_read_at')
         .eq('user_id', userId);
 
-      const groupConvIds = (groupMemberRows || []).map(g => g.group_id);
-      let groupConvs: any[] = [];
-      if (groupConvIds.length > 0) {
-        const { data } = await supabase
-          .from('conversations')
-          .select('id, user1_id, user2_id, is_group, last_message, last_time')
-          .in('id', groupConvIds);
-        groupConvs = data || [];
+      const convIds = (participantRows || []).map(p => p.conversation_id);
+      const lastReadMap = new Map(
+        (participantRows || []).map(p => [p.conversation_id, p.last_read_at])
+      );
+
+      if (convIds.length === 0) {
+        res.json([]);
+        return;
       }
 
-      const convRows = [...directConvs, ...groupConvs];
+      // ── Step 2: Fetch conversation rows ──
+      const { data: convRows } = await supabase
+        .from('conversations')
+        .select('*')
+        .in('id', convIds)
+        .order('last_message_at', { ascending: false });
 
-      // Fetch unread counts in a single batch
-      const unreadMap = new Map<string, number>();
-      if (convRows.length > 0) {
-        for (const row of convRows) {
-          const { count } = await supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('conversation_id', row.id)
-            .neq('sender_id', userId)
-            .eq('read', 0);
-          unreadMap.set(row.id, count || 0);
-        }
+      if (!convRows || convRows.length === 0) {
+        res.json([]);
+        return;
       }
 
-      // Fetch group members
-      const memberMap = new Map<string, any[]>();
-      const groupRows = convRows.filter(c => !c.user2_id || c.user2_id === '00000000-0000-0000-0000-000000000000');
-      for (const row of groupRows) {
-        const { data: members } = await supabase
-          .from('group_members')
-          .select('user_id, users(id, username, avatar)')
-          .eq('group_id', row.id);
-        memberMap.set(
-          row.id,
-          (members || []).map((m: any) => {
-            const u = Array.isArray(m.users) ? m.users[0] : m.users;
-            return {
-              id: u?.id || m.user_id,
-              username: u?.username || '',
-              avatar: u?.avatar || '',
-            };
-          })
-        );
-      }
-
-      // Fetch contacts
-      const directConvRows = convRows.filter(c => {
-        const u2 = c.user2_id;
-        return u2 && u2 !== '00000000-0000-0000-0000-000000000000';
+      // Sort: conversations with no messages go last
+      convRows.sort((a, b) => {
+        if (!a.last_message_at && !b.last_message_at) return 0;
+        if (!a.last_message_at) return 1;
+        if (!b.last_message_at) return -1;
+        return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
       });
-      const allContactIds = [...new Set([
-        ...directConvRows.map(c => c.user1_id),
-        ...directConvRows.map(c => c.user2_id),
-      ])].filter(id => id !== userId);
 
-      let contactMap = new Map();
-      if (allContactIds.length > 0) {
-        const { data: contactUsers } = await supabase
-          .from('users')
-          .select('id, username, avatar')
-          .in('id', allContactIds);
-        contactMap = new Map((contactUsers || []).map(u => [u.id, u]));
+      // ── Step 3: Fetch all participants ──
+      const { data: allParticipants } = await supabase
+        .from('participants')
+        .select('conversation_id, user_id')
+        .in('conversation_id', convIds);
+
+      // ── Step 4: Fetch profiles ──
+      const allUserIds = [...new Set((allParticipants || []).map(p => p.user_id))];
+      const { data: allProfiles } = await supabase
+        .from('profiles')
+        .select('id, username, avatar')
+        .in('id', allUserIds);
+      const profileMap = new Map((allProfiles || []).map(p => [p.id, p]));
+
+      // ── Step 5: Build participant lookup ──
+      const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
+      for (const p of (allParticipants || [])) {
+        if (!participantMap.has(p.conversation_id)) {
+          participantMap.set(p.conversation_id, []);
+        }
+        const prof = profileMap.get(p.user_id);
+        participantMap.get(p.conversation_id)!.push({
+          id: p.user_id,
+          username: prof?.username || '',
+          avatar: prof?.avatar || '',
+        });
       }
 
-      // Build response
+      // ── Step 6: Unread counts (batched with Promise.all) ──
+      const unreadMap = new Map<string, number>();
+      await Promise.all(convRows.map(async (row) => {
+        const lastRead = lastReadMap.get(row.id);
+        let query = supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', row.id)
+          .neq('sender_id', userId);
+        if (lastRead) {
+          query = query.gt('created_at', lastRead);
+        }
+        const { count } = await query;
+        unreadMap.set(row.id, count || 0);
+      }));
+
+      // ── Step 7: Build response ──
       const conversations = convRows.map(row => {
-        const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
-        if (isGroup) {
+        const members = participantMap.get(row.id) || [];
+        const otherParticipants = members.filter(m => m.id !== userId);
+
+        if (row.is_group) {
           return {
             id: row.id,
             isGroup: true,
             groupName: row.group_name || 'Unnamed Group',
-            members: memberMap.get(row.id) || [],
+            groupAvatar: row.group_avatar || '',
+            members,
             lastMessage: row.last_message || '',
-            lastTime: row.last_time || '',
+            lastTime: row.last_message_at || '',
             unread: unreadMap.get(row.id) || 0,
           };
         }
-        const contactId = row.user1_id === userId ? row.user2_id : row.user1_id;
-        const contact = contactMap.get(contactId);
+
+        const contact = otherParticipants[0] || { id: '', username: '', avatar: '' };
         return {
           id: row.id,
           isGroup: false,
-          contact: {
-            id: contactId,
-            username: contact?.username || '',
-            avatar: contact?.avatar || '',
-          },
+          contact,
           lastMessage: row.last_message || '',
-          lastTime: row.last_time || '',
+          lastTime: row.last_message_at || '',
           unread: unreadMap.get(row.id) || 0,
         };
       });
@@ -281,7 +265,7 @@ async function main() {
     const status = document.getElementById('status');
 
     function addLog(msg, cls = '') {
-      log.innerHTML += '<span class="' + cls + '">' + new Date().toISOString().slice(11,19) + ' ' + msg + '</span>\\n';
+      log.innerHTML += '<span class="' + cls + '">' + new Date().toISOString().slice(11,19) + ' ' + msg + '</span>\\\\n';
     }
 
     function clearLog() { log.innerHTML = ''; }
@@ -387,9 +371,6 @@ async function main() {
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
-    // Cache hashed asset bundles aggressively (Vite names them with a build
-    // hash so they can't go stale). Serve the SPA index.html with no-store so
-    // the browser always gets the latest build on next navigation.
     app.use(express.static(clientDist, { maxAge: '1y', immutable: true }));
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

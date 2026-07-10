@@ -14,7 +14,6 @@ import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../utils/supabase';
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 
@@ -630,30 +629,20 @@ export default function Dashboard() {
     return () => { socket.off('messages:list'); };
   }, [socket]);
 
+  // Listen for real-time read status updates via socket (replaces old Realtime
+  // subscription on messages.read column, which no longer exists in v2 schema).
   useEffect(() => {
-    if (!user?.id) return;
+    if (!socket) return;
 
-    const channel = supabase
-      .channel('messages-read')
-      .on('postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `sender_id=eq.${user.id}`,
-        },
-        (payload) => {
-          if (payload.new.read === 1) {
-            setMessages(prev =>
-              prev.map(m => (m.id === payload.new.id ? { ...m, read: true } : m))
-            );
-          }
-        }
-      )
-      .subscribe();
+    const handler = ({ messageId }: { messageId: string }) => {
+      setMessages(prev =>
+        prev.map(m => (m.id === messageId ? { ...m, read: true } : m))
+      );
+    };
 
-    return () => { supabase.removeChannel(channel); };
-  }, [user?.id]);
+    socket.on('message:read-status', handler);
+    return () => { socket.off('message:read-status', handler); };
+  }, [socket]);
 
   const handleSend = (content: string, attachments?: { file: File; preview?: string; type: string }[]) => {
     if (!socket || !activeConv) return;

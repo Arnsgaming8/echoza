@@ -18,29 +18,30 @@ router.get('/me', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('id, username, avatar, online')
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, username, avatar')
     .eq('id', decoded.userId)
-    .single();
+    .maybeSingle();
 
-  if (error || !user) {
-    // Fallback to Auth metadata if DB is unreachable or user row missing
-    const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
-    if (authUser) {
-      res.json({
-        id: authUser.id,
-        username: authUser.user_metadata?.username || '',
-        avatar: '',
-        online: false,
-      });
-      return;
-    }
-    res.status(404).json({ error: 'User not found' });
+  if (profile) {
+    res.json({ ...profile, online: false });
     return;
   }
 
-  res.json(user);
+  // Fallback to Auth metadata if DB is unreachable or profile row missing
+  const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
+  if (authUser) {
+    res.json({
+      id: authUser.id,
+      username: authUser.user_metadata?.username || '',
+      avatar: '',
+      online: false,
+    });
+    return;
+  }
+
+  res.status(404).json({ error: 'User not found' });
 });
 
 router.get('/search', async (req: Request, res: Response) => {
@@ -50,13 +51,13 @@ router.get('/search', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: users } = await supabase
-    .from('users')
-    .select('id, username, avatar, online')
+  const { data: profiles } = await supabase
+    .from('profiles')
+    .select('id, username, avatar')
     .ilike('username', `%${q}%`)
     .limit(20);
 
-  res.json(users || []);
+  res.json((profiles || []).map(p => ({ ...p, online: false })));
 });
 
 export default router;

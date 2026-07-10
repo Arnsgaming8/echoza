@@ -26,10 +26,10 @@ export async function registerUser(username: string, password: string) {
   if (createError) throw createError;
   if (!authData.user) throw new Error('Failed to create user');
 
-  const { error: dbError } = await supabase.from('users').insert({
+  const { error: dbError } = await supabase.from('profiles').insert({
     id: authData.user.id,
     username,
-    password: '',
+    display_name: '',
     avatar: '',
   });
   if (dbError) {
@@ -52,46 +52,6 @@ export async function registerUser(username: string, password: string) {
   };
 }
 
-async function migrateToSupabaseAuth(userId: string, username: string, password: string) {
-  const email = usernameToEmail(username);
-  const { data: authData, error: createError } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { username },
-  });
-  if (createError || !authData.user) {
-    console.error('[migrate] createUser failed:', createError?.message);
-    return null;
-  }
-
-  const newId = authData.user.id;
-  if (newId !== userId) {
-    // Rename old user to avoid UNIQUE conflict, insert new row, then delete old
-    await supabase.from('users').update({ username: username + '_old' }).eq('id', userId);
-
-    const { data: oldUser } = await supabase.from('users').select('*').eq('id', userId).single();
-    if (!oldUser) return null;
-
-    const { error: insErr } = await supabase.from('users').insert({
-      id: newId, username, password: '', avatar: oldUser.avatar, online: oldUser.online,
-    });
-    if (insErr) { console.error('[migrate] insert failed:', insErr.message); return null; }
-
-    await supabase.from('messages').update({ sender_id: newId }).eq('sender_id', userId);
-    await supabase.from('conversations').update({ user1_id: newId }).eq('user1_id', userId);
-    await supabase.from('conversations').update({ user2_id: newId }).eq('user2_id', userId);
-    await supabase.from('group_members').update({ user_id: newId }).eq('user_id', userId);
-    await supabase.from('push_subscriptions').update({ user_id: newId }).eq('user_id', userId);
-
-    const { error: delErr } = await supabase.from('users').delete().eq('id', userId);
-    if (delErr) console.error('[migrate] delete old user failed:', delErr.message);
-  } else {
-    await supabase.from('users').update({ password: '' }).eq('id', userId);
-  }
-  return authData;
-}
-
 export async function loginUser(username: string, password: string) {
   const email = usernameToEmail(username);
 
@@ -101,40 +61,26 @@ export async function loginUser(username: string, password: string) {
     const uid = sessionData.user.id;
     const metaUsername = sessionData.user.user_metadata?.username || username;
 
-    // Auth user exists but DB is unreachable – return data from Auth token
+    // Try to fetch the profile row; if missing (fresh schema, no migration), fall back to auth metadata
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('id, username, avatar')
+      .eq('id', uid)
+      .maybeSingle();
+
     return {
       access_token: sessionData.session.access_token,
       refresh_token: sessionData.session.refresh_token || '',
-      user: { id: uid, username: metaUsername, avatar: '', online: false },
+      user: {
+        id: uid,
+        username: profile?.username || metaUsername,
+        avatar: profile?.avatar || '',
+        online: false,
+      },
     };
   }
 
-  // Fall back to bcrypt (legacy users migrated from RiveStack)
-  const { data: userData } = await supabase
-    .from('users')
-    .select('id, username, avatar, online, password')
-    .eq('username', username)
-    .maybeSingle();
-
-  if (userData?.password && comparePassword(password, userData.password)) {
-    await migrateToSupabaseAuth(userData.id, username, password);
-
-    const { data: newSession } = await anonSupabase.auth.signInWithPassword({ email, password });
-    if (!newSession?.session) throw new Error('Invalid credentials');
-
-    const { data: migratedUser } = await supabase
-      .from('users')
-      .select('id, username, avatar, online')
-      .eq('id', newSession.user.id)
-      .single();
-
-    return {
-      access_token: newSession.session.access_token,
-      refresh_token: newSession.session.refresh_token || '',
-      user: { id: migratedUser?.id || userData.id, username: migratedUser?.username || userData.username, avatar: migratedUser?.avatar || userData.avatar, online: !!migratedUser?.online || !!userData.online },
-    };
-  }
-
+  // Legacy bcrypt fallback removed — users must log in via Supabase Auth.
   throw new Error('Invalid credentials');
 }
 

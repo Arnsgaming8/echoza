@@ -23,7 +23,7 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 
   const { data: existing } = await supabase
-    .from('users')
+    .from('profiles')
     .select('id')
     .eq('username', username)
     .maybeSingle();
@@ -72,14 +72,14 @@ router.get('/me', async (req: Request, res: Response) => {
     return;
   }
 
-  const { data: user, error } = await supabase
-    .from('users')
-    .select('id, username, avatar, online')
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, username, avatar')
     .eq('id', decoded.userId)
-    .single();
+    .maybeSingle();
 
-  if (user) {
-    res.json(user);
+  if (profile) {
+    res.json({ ...profile, online: false });
     return;
   }
 
@@ -114,21 +114,23 @@ router.post('/refresh', async (req: Request, res: Response) => {
 
     const refreshUser = data.user;
 
-    const { data: dbUser } = await supabase
-      .from('users')
-      .select('id, username, avatar, online')
+    const { data: dbProfile } = await supabase
+      .from('profiles')
+      .select('id, username, avatar')
       .eq('id', refreshUser.id)
-      .single();
+      .maybeSingle();
 
     res.json({
       token: data.session.access_token,
       refresh_token: data.session.refresh_token,
-      user: dbUser || {
-        id: refreshUser.id,
-        username: refreshUser.user_metadata?.username || '',
-        avatar: '',
-        online: false,
-      },
+      user: dbProfile
+        ? { ...dbProfile, online: false }
+        : {
+            id: refreshUser.id,
+            username: refreshUser.user_metadata?.username || '',
+            avatar: '',
+            online: false,
+          },
     });
   } catch {
     res.status(500).json({ error: 'Refresh failed' });

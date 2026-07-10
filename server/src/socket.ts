@@ -15,7 +15,7 @@ const onlineUsers = new Map<string, Map<string, { username: string; avatar: stri
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
   try {
     const { data } = await supabase
-      .from('users')
+      .from('profiles')
       .select('id')
       .eq('id', receiverId)
       .eq('username', 'Arnav_The_Dev')
@@ -46,14 +46,48 @@ function emitToUserExcept(io: SocketServer, userId: string, exceptSocketId: stri
 
 async function emitToGroupMembers(io: SocketServer, groupId: string, event: string, data: any, excludeUserId?: string) {
   const { data: members } = await supabase
-    .from('group_members')
+    .from('participants')
     .select('user_id')
-    .eq('group_id', groupId);
+    .eq('conversation_id', groupId);
   for (const row of (members || [])) {
     if (row.user_id !== excludeUserId) {
       emitToUser(io, row.user_id, event, data);
     }
   }
+}
+
+/** Fetch or create a direct (2-person) conversation. Returns the conversation id. */
+async function resolveDirectConversation(userA: string, userB: string): Promise<string | null> {
+  const participants = [userA, userB].sort();
+
+  // Find existing direct conversation where both are participants and only 2 participants
+  const { data: convs } = await supabase
+    .from('participants')
+    .select('conversation_id')
+    .eq('user_id', participants[0]);
+
+  if (convs && convs.length > 0) {
+    const convIds = convs.map(c => c.conversation_id);
+    // Find conversations where userB is also a participant
+    const { data: matched } = await supabase
+      .from('participants')
+      .select('conversation_id')
+      .in('conversation_id', convIds)
+      .eq('user_id', participants[1]);
+
+    if (matched && matched.length > 0) {
+      for (const row of matched) {
+        // Verify it's a direct conversation (exactly 2 participants)
+        const { count } = await supabase
+          .from('participants')
+          .select('id', { count: 'exact', head: true })
+          .eq('conversation_id', row.conversation_id);
+        if (count === 2) return row.conversation_id;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function setupSocket(io: SocketServer): void {
@@ -72,16 +106,16 @@ export function setupSocket(io: SocketServer): void {
 
     socket.userId = decoded.userId;
 
-    const { data: user } = await supabase
-      .from('users')
+    const { data: profile } = await supabase
+      .from('profiles')
       .select('username')
       .eq('id', decoded.userId)
       .maybeSingle();
 
-    if (user) {
-      socket.username = user.username;
+    if (profile) {
+      socket.username = profile.username;
     } else {
-      // Fallback to Auth metadata if DB row missing
+      // Fallback to Auth metadata if profile row missing
       const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
       socket.username = authUser?.user_metadata?.username || decoded.userId.slice(0, 8);
     }
@@ -106,164 +140,131 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('users:search', async ({ query: q }: { query: string }) => {
       if (!q.trim()) {
-        // Return all users when search is empty so the modal shows everyone
-        const { data: users } = await supabase
-          .from('users')
+        const { data: profiles } = await supabase
+          .from('profiles')
           .select('id, username, avatar')
           .neq('id', userId)
           .limit(50);
-        socket.emit('users:search', (users || []).map(u => ({ ...u, online: false })));
+        socket.emit('users:search', (profiles || []).map(p => ({ ...p, online: false })));
         return;
       }
-      const { data: users } = await supabase
-        .from('users')
+      const { data: profiles } = await supabase
+        .from('profiles')
         .select('id, username, avatar')
         .ilike('username', `%${q}%`)
         .neq('id', userId)
         .limit(20);
-      socket.emit('users:search', (users || []).map(u => ({ ...u, online: false })));
+      socket.emit('users:search', (profiles || []).map(p => ({ ...p, online: false })));
     });
 
     socket.on('conversations:list', async () => {
       try {
-        // Use two eq queries instead of .or() — .or() broken for UUIDs in this Supabase version.
-        // NOTE: do NOT filter by is_group here. The live DB column type may resolve
-        // as INTEGER, BOOLEAN or TEXT depending on how Supabase auto-coerced the
-        // migration. Adding .eq('is_group', 0) would silently exclude every row
-        // if the type doesn't match. Filter by user membership first, then tag
-        // direct vs group in JS by checking user2_id (zero-UUID = group container).
-        const [asUser1, asUser2] = await Promise.all([
-          supabase
-            .from('conversations')
-            .select('id, user1_id, user2_id, is_group, last_message, last_time')
-            .eq('user1_id', userId),
-          supabase
-            .from('conversations')
-            .select('id, user1_id, user2_id, is_group, last_message, last_time')
-            .eq('user2_id', userId),
-        ]);
-
-        if (asUser1.error) socket.emit('server:diag', { stage: 'asUser1', error: asUser1.error.message, code: asUser1.error.code });
-        if (asUser2.error) socket.emit('server:diag', { stage: 'asUser2', error: asUser2.error.message, code: asUser2.error.code });
-
-        const rawUserConvs = [...(asUser1.data || []), ...(asUser2.data || [])];
-        socket.emit('server:diag', { stage: 'raw_count', count: rawUserConvs.length, userId });
-
-        // Classify by row STRUCTURE (user2_id zero/null => group container),
-        // NOT the unreliable is_group flag.
-        const seen = new Set<string>();
-        const directConvs: any[] = [];
-        for (const c of rawUserConvs) {
-          if (seen.has(c.id)) continue;
-          seen.add(c.id);
-          const u2 = c.user2_id;
-          const isGroup = !u2 || u2 === '00000000-0000-0000-0000-000000000000';
-          if (!isGroup) directConvs.push(c);
-        }
-
-        const { data: groupMemberRows } = await supabase
-          .from('group_members')
-          .select('group_id')
+        // ── Step 1: Get all conversation IDs the user belongs to ──
+        const { data: participantRows } = await supabase
+          .from('participants')
+          .select('conversation_id, last_read_at')
           .eq('user_id', userId);
 
-        const groupConvIds = (groupMemberRows || []).map(g => g.group_id);
-        let groupConvs: any[] = [];
-        if (groupConvIds.length > 0) {
-          const { data } = await supabase
-            .from('conversations')
-            .select('id, user1_id, user2_id, is_group, last_message, last_time')
-            .in('id', groupConvIds);
-          groupConvs = data || [];
+        const convIds = (participantRows || []).map(p => p.conversation_id);
+        const lastReadMap = new Map(
+          (participantRows || []).map(p => [p.conversation_id, p.last_read_at])
+        );
+
+        if (convIds.length === 0) {
+          socket.emit('conversations:list', []);
+          return;
         }
 
-        const convRows = [...directConvs, ...groupConvs];
-        socket.emit('server:diag', { stage: 'classified', directConvs: directConvs.length, groupConvs: groupConvs.length });
-        convRows.sort((a, b) => ((b.last_time || '') > (a.last_time || '') ? 1 : -1));
+        // ── Step 2: Fetch conversation rows ──
+        const { data: convRows } = await supabase
+          .from('conversations')
+          .select('*')
+          .in('id', convIds)
+          .order('last_message_at', { ascending: false });
 
-        const conversations: any[] = [];
-        const unreadResults: { convId: string; count: number }[] = [];
-        const memberResults: { convId: string; members: any[] }[] = [];
+        if (!convRows || convRows.length === 0) {
+          socket.emit('conversations:list', []);
+          return;
+        }
 
-        for (const row of convRows) {
-          const convId = row.id;
-          // Use structural classification (user2_id) instead of unreliable is_group column
-          const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
+        // Sort: conversations with no messages go last
+        convRows.sort((a, b) => {
+          if (!a.last_message_at && !b.last_message_at) return 0;
+          if (!a.last_message_at) return 1;
+          if (!b.last_message_at) return -1;
+          return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+        });
 
-          const { count } = await supabase
+        // ── Step 3: Fetch all participants for these conversations ──
+        const { data: allParticipants } = await supabase
+          .from('participants')
+          .select('conversation_id, user_id')
+          .in('conversation_id', convIds);
+
+        // ── Step 4: Fetch all profiles referenced ──
+        const allUserIds = [...new Set((allParticipants || []).map(p => p.user_id))];
+        const { data: allProfiles } = await supabase
+          .from('profiles')
+          .select('id, username, avatar')
+          .in('id', allUserIds);
+        const profileMap = new Map((allProfiles || []).map(p => [p.id, p]));
+
+        // ── Step 5: Build participant lookup per conversation ──
+        const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
+        for (const p of (allParticipants || [])) {
+          if (!participantMap.has(p.conversation_id)) {
+            participantMap.set(p.conversation_id, []);
+          }
+          const prof = profileMap.get(p.user_id);
+          participantMap.get(p.conversation_id)!.push({
+            id: p.user_id,
+            username: prof?.username || '',
+            avatar: prof?.avatar || '',
+          });
+        }
+
+        // ── Step 6: Compute unread counts (batched with Promise.all) ──
+        const unreadMap = new Map<string, number>();
+        await Promise.all(convRows.map(async (row) => {
+          const lastRead = lastReadMap.get(row.id);
+          let query = supabase
             .from('messages')
             .select('id', { count: 'exact', head: true })
-            .eq('conversation_id', convId)
-            .neq('sender_id', userId)
-            .eq('read', 0);
-          unreadResults.push({ convId, count: count || 0 });
-
-          if (isGroup) {
-            const { data: members } = await supabase
-              .from('group_members')
-              .select('user_id, users(id, username, avatar)')
-              .eq('group_id', convId);
-            memberResults.push({
-              convId,
-              members: (members || []).map((m: any) => {
-                const u = Array.isArray(m.users) ? m.users[0] : m.users;
-                return {
-                  id: u?.id || m.user_id,
-                  username: u?.username || '',
-                  avatar: u?.avatar || '',
-                };
-              }),
-            });
+            .eq('conversation_id', row.id)
+            .neq('sender_id', userId);
+          if (lastRead) {
+            query = query.gt('created_at', lastRead);
           }
-        }
+          const { count } = await query;
+          unreadMap.set(row.id, count || 0);
+        }));
 
-        const unreadMap = new Map(unreadResults.map(r => [r.convId, r.count]));
-        const memberMap = new Map(memberResults.map(r => [r.convId, r.members]));
-
-        const directConvRows = convRows.filter(c => !c.is_group);
-        const user1Ids = directConvRows.map(c => c.user1_id);
-        const user2Ids = directConvRows.map(c => c.user2_id);
-        const allContactIds = [...new Set([...user1Ids, ...user2Ids])].filter(id => id !== userId);
-
-        let contactMap = new Map();
-        if (allContactIds.length > 0) {
-          const { data: contactUsers } = await supabase
-            .from('users')
-            .select('id, username, avatar')
-            .in('id', allContactIds);
-          contactMap = new Map((contactUsers || []).map(u => [u.id, u]));
-        }
-
+        // ── Step 7: Build response ──
+        const conversations: any[] = [];
         for (const row of convRows) {
-          const { id: convId, user1_id: u1Id, user2_id: u2Id, group_name: groupName, group_avatar: groupAvatar, last_message: lastMsg, last_time: lastTime } = row;
-          // Classify by structure (user2_id null/zero-UUID = group container),
-          // not the unreliable is_group column which can be INTEGER/BOOLEAN/TEXT.
-          const isGroup = !row.user2_id || row.user2_id === '00000000-0000-0000-0000-000000000000';
+          const members = participantMap.get(row.id) || [];
+          const otherParticipants = members.filter(m => m.id !== userId);
 
-          if (isGroup) {
+          if (row.is_group) {
             conversations.push({
-              id: convId,
+              id: row.id,
               isGroup: true,
-              groupName: groupName || 'Unnamed Group',
-              members: memberMap.get(convId) || [],
-              lastMessage: lastMsg || '',
-              lastTime: lastTime || '',
-              unread: unreadMap.get(convId) || 0,
+              groupName: row.group_name || 'Unnamed Group',
+              groupAvatar: row.group_avatar || '',
+              members,
+              lastMessage: row.last_message || '',
+              lastTime: row.last_message_at || '',
+              unread: unreadMap.get(row.id) || 0,
             });
           } else {
-            const isUser1 = u1Id === userId;
-            const contactId = isUser1 ? u2Id : u1Id;
-            const contact = contactMap.get(contactId);
+            const contact = otherParticipants[0] || { id: '', username: '', avatar: '' };
             conversations.push({
-              id: convId,
+              id: row.id,
               isGroup: false,
-              contact: {
-                id: contactId,
-                username: contact?.username || '',
-                avatar: contact?.avatar || '',
-              },
-              lastMessage: lastMsg || '',
-              lastTime: lastTime || '',
-              unread: unreadMap.get(convId) || 0,
+              contact,
+              lastMessage: row.last_message || '',
+              lastTime: row.last_message_at || '',
+              unread: unreadMap.get(row.id) || 0,
             });
           }
         }
@@ -277,55 +278,64 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('messages:get', async ({ conversationId }: { conversationId: string }) => {
-      const { data: msgRows } = await supabase
+      const msgResult = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, content, attachments, read, created_at')
+        .select('id, conversation_id, sender_id, content, attachments, created_at')
         .eq('conversation_id', conversationId)
         .order('created_at', { ascending: true });
 
-      const messages = (msgRows || []).map((row: any) => ({
-        id: row.id,
-        conversationId: row.conversation_id,
-        senderId: row.sender_id,
-        content: row.content,
-        attachments: row.attachments ? JSON.parse(row.attachments) : [],
-        read: !!row.read,
-        createdAt: row.created_at,
-      }));
+      const messageIds = (msgResult.data || []).map(m => m.id);
+      const readReceipts = new Map<string, Set<string>>();
+
+      if (messageIds.length > 0) {
+        const { data: rrRows } = await supabase
+          .from('read_receipts')
+          .select('message_id, user_id')
+          .in('message_id', messageIds);
+
+        for (const rr of (rrRows || [])) {
+          if (!readReceipts.has(rr.message_id)) {
+            readReceipts.set(rr.message_id, new Set());
+          }
+          readReceipts.get(rr.message_id)!.add(rr.user_id);
+        }
+      }
+
+      const messages = (msgResult.data || []).map((row: any) => {
+        const readers = readReceipts.get(row.id) || new Set();
+        // read = at least one other user has acknowledged this message
+        const read = readers.size > 0;
+
+        return {
+          id: row.id,
+          conversationId: row.conversation_id,
+          senderId: row.sender_id,
+          content: row.content,
+          attachments: row.attachments || [],
+          read,
+          createdAt: row.created_at,
+        };
+      });
 
       socket.emit('messages:list', { conversationId, messages });
     });
 
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       try {
-        const participants = [userId, receiverId].sort();
+        let conversationId = await resolveDirectConversation(userId, receiverId);
 
-        // Use two eq queries instead of .or() — .or() broken for UUIDs
-        const [as1, as2] = await Promise.all([
-          supabase.from('conversations').select('id')
-            .eq('user1_id', participants[0])
-            .eq('user2_id', participants[1])
-            .maybeSingle(),
-          supabase.from('conversations').select('id')
-            .eq('user1_id', participants[1])
-            .eq('user2_id', participants[0])
-            .maybeSingle(),
-        ]);
-
-        const existingConv = as1.data || as2.data;
-
-        let conversationId: string;
-        if (existingConv) {
-          conversationId = existingConv.id;
-        } else {
+        if (!conversationId) {
           conversationId = uuidv4();
           const { error: insertErr } = await supabase.from('conversations').insert({
             id: conversationId,
-            user1_id: participants[0],
-            user2_id: participants[1],
-            is_group: 0,
+            is_group: false,
           });
           if (insertErr) { console.error('[direct:start] insert error:', insertErr); return; }
+
+          await supabase.from('participants').insert([
+            { conversation_id: conversationId, user_id: userId },
+            { conversation_id: conversationId, user_id: receiverId },
+          ]);
         }
 
         socket.emit('direct:started', { conversationId, receiverId });
@@ -341,35 +351,26 @@ export function setupSocket(io: SocketServer): void {
       const conversationId = uuidv4();
       const { error: groupInsertErr } = await supabase.from('conversations').insert({
         id: conversationId,
-        user1_id: userId,
-        is_group: 1,
-        group_name: name || 'Unnamed Group',
+        is_group: true,
+        group_name: name || `${allMembers.length} members`,
+        created_by: userId,
       });
       if (groupInsertErr) {
-        // group_name column likely missing, retry without it
-        console.warn('[group:create] first insert failed, retrying without group_name:', groupInsertErr.message);
-        const { error: groupRetryErr } = await supabase.from('conversations').insert({
-          id: conversationId,
-          user1_id: userId,
-          is_group: 1,
-        });
-        if (groupRetryErr) {
-          console.error('[group:create] insert failed:', groupRetryErr);
-          return;
-        }
+        console.error('[group:create] insert failed:', groupInsertErr);
+        return;
       }
 
       const memberRows = allMembers.map(memberId => ({
-        group_id: conversationId,
+        conversation_id: conversationId,
         user_id: memberId,
       }));
-      await supabase.from('group_members').insert(memberRows);
+      await supabase.from('participants').insert(memberRows);
 
       for (const memberId of allMembers) {
         emitToUser(io, memberId, 'conversation:update', { conversationId });
       }
 
-      socket.emit('group:created', { conversationId, name: name || 'Unnamed Group' });
+      socket.emit('group:created', { conversationId, name: name || `${allMembers.length} members` });
     });
 
     socket.on('message:send', async ({ receiverId, content, groupId, attachments }: { receiverId?: string; content: string; groupId?: string; attachments?: any[] }) => {
@@ -382,31 +383,19 @@ export function setupSocket(io: SocketServer): void {
         conversationId = groupId;
         isGroup = true;
       } else if (receiverId) {
-        const participants = [userId, receiverId].sort();
-        // Use two eq queries instead of .or() — .or() broken for UUIDs
-        const [as1, as2] = await Promise.all([
-          supabase.from('conversations').select('id')
-            .eq('user1_id', participants[0])
-            .eq('user2_id', participants[1])
-            .maybeSingle(),
-          supabase.from('conversations').select('id')
-            .eq('user1_id', participants[1])
-            .eq('user2_id', participants[0])
-            .maybeSingle(),
-        ]);
-
-        const existingConv = as1.data || as2.data;
-
-        if (existingConv) {
-          conversationId = existingConv.id;
+        const existing = await resolveDirectConversation(userId, receiverId);
+        if (existing) {
+          conversationId = existing;
         } else {
           conversationId = uuidv4();
           await supabase.from('conversations').insert({
             id: conversationId,
-            user1_id: participants[0],
-            user2_id: participants[1],
-            is_group: 0,
+            is_group: false,
           });
+          await supabase.from('participants').insert([
+            { conversation_id: conversationId, user_id: userId },
+            { conversation_id: conversationId, user_id: receiverId },
+          ]);
         }
       } else {
         return;
@@ -414,14 +403,13 @@ export function setupSocket(io: SocketServer): void {
 
       const messageId = uuidv4();
       const createdAt = new Date().toISOString();
-      const attachmentsJson = attachments ? JSON.stringify(attachments) : '[]';
 
       await supabase.from('messages').insert({
         id: messageId,
         conversation_id: conversationId,
         sender_id: userId,
         content,
-        attachments: attachmentsJson,
+        attachments: attachments || [],
         created_at: createdAt,
       });
 
@@ -438,16 +426,14 @@ export function setupSocket(io: SocketServer): void {
 
       const { error: updatePreviewErr } = await supabase
         .from('conversations')
-        .update({ last_message: preview, last_time: createdAt })
+        .update({ last_message: preview, last_message_at: createdAt, last_message_sender_id: userId })
         .eq('id', conversationId);
       if (updatePreviewErr) console.warn('[message:send] preview update skipped:', updatePreviewErr.message);
-
-      const parsedAttachments = attachments ? attachments : [];
 
       const message = {
         id: messageId, conversationId, senderId: userId,
         senderUsername: username,
-        content, attachments: parsedAttachments,
+        content, attachments: attachments || [],
         read: false, createdAt, isGroup,
       };
 
@@ -471,21 +457,37 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('message:read', async ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
-      const { data: msgData } = await supabase
+      // Verify the user is a participant in this conversation
+      const { data: participant } = await supabase
+        .from('participants')
+        .select('user_id')
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!participant) return;
+
+      // Insert read receipt (ignore duplicate)
+      await supabase
+        .from('read_receipts')
+        .insert({ message_id: messageId, user_id: userId })
+        .maybeSingle(); // ignore PK conflicts
+
+      // Update last_read_at on the participant row
+      await supabase
+        .from('participants')
+        .update({ last_read_at: new Date().toISOString() })
+        .eq('conversation_id', conversationId)
+        .eq('user_id', userId);
+
+      // Notify the message sender that it was read (for direct messages)
+      const { data: msg } = await supabase
         .from('messages')
         .select('sender_id')
         .eq('id', messageId)
         .single();
-      if (!msgData) return;
-      const senderId = msgData.sender_id;
-      if (senderId === userId) return;
-
-      await supabase
-        .from('messages')
-        .update({ read: 1 })
-        .eq('id', messageId)
-        .neq('sender_id', userId);
-
+      if (msg && msg.sender_id !== userId) {
+        emitToUser(io, msg.sender_id, 'message:read-status', { messageId, conversationId, readByUserId: userId });
+      }
     });
 
     socket.on('messages:delete', async ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
@@ -509,34 +511,22 @@ export function setupSocket(io: SocketServer): void {
         .from('conversations')
         .update({
           last_message: lastMsg?.content || '',
-          last_time: lastMsg?.created_at || null,
+          last_message_at: lastMsg?.created_at || null,
+          last_message_sender_id: lastMsg ? undefined : null,
         })
         .eq('id', conversationId);
       if (updateDelErr) console.warn('[messages:delete] conversation update skipped:', updateDelErr.message);
 
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('is_group, user1_id, user2_id')
-        .eq('id', conversationId)
-        .single();
-
-      if (!conv) return;
+      // Get all participants to notify
+      const { data: participants } = await supabase
+        .from('participants')
+        .select('user_id')
+        .eq('conversation_id', conversationId);
 
       const msg = { messageIds, conversationId };
-      if (conv.is_group) {
-        const { data: members } = await supabase
-          .from('group_members')
-          .select('user_id')
-          .eq('group_id', conversationId);
-        for (const row of (members || [])) {
-          emitToUser(io, row.user_id, 'messages:deleted', msg);
-          emitToUser(io, row.user_id, 'conversation:update', { conversationId });
-        }
-      } else {
-        emitToUser(io, conv.user1_id, 'messages:deleted', msg);
-        emitToUser(io, conv.user2_id, 'messages:deleted', msg);
-        emitToUser(io, conv.user1_id, 'conversation:update', { conversationId });
-        emitToUser(io, conv.user2_id, 'conversation:update', { conversationId });
+      for (const row of (participants || [])) {
+        emitToUser(io, row.user_id, 'messages:deleted', msg);
+        emitToUser(io, row.user_id, 'conversation:update', { conversationId });
       }
     });
 
@@ -563,18 +553,18 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('group:addMember', async ({ groupId, newMemberId }: { groupId: string; newMemberId: string }) => {
-      const { data: isCreator } = await supabase
+      const { data: conv } = await supabase
         .from('conversations')
         .select('id')
         .eq('id', groupId)
-        .eq('user1_id', userId)
-        .eq('is_group', 1)
+        .eq('created_by', userId)
+        .eq('is_group', true)
         .maybeSingle();
-      if (!isCreator) return;
+      if (!conv) return;
 
       await supabase
-        .from('group_members')
-        .insert({ group_id: groupId, user_id: newMemberId });
+        .from('participants')
+        .insert({ conversation_id: groupId, user_id: newMemberId });
 
       emitToUser(io, newMemberId, 'conversation:update', { conversationId: groupId });
       socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
@@ -583,42 +573,42 @@ export function setupSocket(io: SocketServer): void {
     socket.on('conversation:delete', async ({ conversationId }: { conversationId: string }) => {
       const { data: conv } = await supabase
         .from('conversations')
-        .select('is_group, user1_id')
+        .select('is_group, created_by')
         .eq('id', conversationId)
         .single();
       if (!conv) return;
 
       const isGroup = conv.is_group;
-      const creatorId = conv.user1_id;
 
       if (isGroup) {
-        if (creatorId !== userId) return;
-        const { data: members } = await supabase
-          .from('group_members')
+        if (conv.created_by !== userId) return;
+        const { data: participants } = await supabase
+          .from('participants')
           .select('user_id')
-          .eq('group_id', conversationId);
-        const memberIds = (members || []).map(r => r.user_id);
+          .eq('conversation_id', conversationId);
+        const memberIds = (participants || []).map(r => r.user_id);
 
         await supabase.from('messages').delete().eq('conversation_id', conversationId);
-        await supabase.from('group_members').delete().eq('group_id', conversationId);
+        await supabase.from('participants').delete().eq('conversation_id', conversationId);
         await supabase.from('conversations').delete().eq('id', conversationId);
 
         for (const mid of memberIds) {
           emitToUser(io, mid, 'conversation:deleted', { conversationId });
         }
       } else {
-        const { data: otherUser } = await supabase
-          .from('conversations')
-          .select('user1_id, user2_id')
-          .eq('id', conversationId)
-          .single();
-        const otherId = otherUser?.user1_id === userId ? otherUser.user2_id : otherUser?.user1_id;
+        const { data: otherParticipant } = await supabase
+          .from('participants')
+          .select('user_id')
+          .eq('conversation_id', conversationId)
+          .neq('user_id', userId)
+          .maybeSingle();
 
         await supabase.from('messages').delete().eq('conversation_id', conversationId);
+        await supabase.from('participants').delete().eq('conversation_id', conversationId);
         await supabase.from('conversations').delete().eq('id', conversationId);
 
         emitToUser(io, userId, 'conversation:deleted', { conversationId });
-        if (otherId) emitToUser(io, otherId, 'conversation:deleted', { conversationId });
+        if (otherParticipant) emitToUser(io, otherParticipant.user_id, 'conversation:deleted', { conversationId });
       }
     });
 
@@ -629,7 +619,7 @@ export function setupSocket(io: SocketServer): void {
       }
 
       const { data: existing } = await supabase
-        .from('users')
+        .from('profiles')
         .select('id')
         .eq('username', newUsername)
         .neq('id', userId)
@@ -639,9 +629,9 @@ export function setupSocket(io: SocketServer): void {
         return;
       }
 
-      await supabase.from('users').update({ username: newUsername }).eq('id', userId);
+      await supabase.from('profiles').update({ username: newUsername }).eq('id', userId);
       if (avatar) {
-        await supabase.from('users').update({ avatar }).eq('id', userId);
+        await supabase.from('profiles').update({ avatar }).eq('id', userId);
       }
 
       const sockets = onlineUsers.get(userId);
@@ -684,32 +674,18 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
-      const participants = [userId, receiverId].sort();
-      // Use two eq queries instead of .or() — .or() broken for UUIDs
-      const [as1, as2] = await Promise.all([
-        supabase.from('conversations').select('id')
-          .eq('user1_id', participants[0])
-          .eq('user2_id', participants[1])
-          .maybeSingle(),
-        supabase.from('conversations').select('id')
-          .eq('user1_id', participants[1])
-          .eq('user2_id', participants[0])
-          .maybeSingle(),
-      ]);
+      let conversationId = await resolveDirectConversation(userId, receiverId);
 
-      const existingConv = as1.data || as2.data;
-
-      let conversationId: string;
-      if (existingConv) {
-        conversationId = existingConv.id;
-      } else {
+      if (!conversationId) {
         conversationId = uuidv4();
         await supabase.from('conversations').insert({
           id: conversationId,
-          user1_id: participants[0],
-          user2_id: participants[1],
-          is_group: 0,
+          is_group: false,
         });
+        await supabase.from('participants').insert([
+          { conversation_id: conversationId, user_id: userId },
+          { conversation_id: conversationId, user_id: receiverId },
+        ]);
       }
 
       const messageId = uuidv4();
@@ -727,7 +703,7 @@ export function setupSocket(io: SocketServer): void {
 
       const { error: missedUpdateErr } = await supabase
         .from('conversations')
-        .update({ last_message: content, last_time: createdAt })
+        .update({ last_message: content, last_message_at: createdAt, last_message_sender_id: userId })
         .eq('id', conversationId);
       if (missedUpdateErr) console.warn('[call:missed] conversation update skipped:', missedUpdateErr.message);
 
@@ -747,9 +723,9 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('call:group-offer', async ({ groupId, type }: { groupId: string; type?: string }) => {
       const { data: members } = await supabase
-        .from('group_members')
+        .from('participants')
         .select('user_id')
-        .eq('group_id', groupId)
+        .eq('conversation_id', groupId)
         .neq('user_id', userId);
       for (const row of (members || [])) {
         emitToUser(io, row.user_id, 'call:offer', {
@@ -770,13 +746,14 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
+    // Fetch avatar on connect
     try {
-      const { data: userData } = await supabase
-        .from('users')
+      const { data: profileData } = await supabase
+        .from('profiles')
         .select('avatar')
         .eq('id', userId)
         .maybeSingle();
-      const avatar = userData?.avatar || '';
+      const avatar = profileData?.avatar || '';
       const sockets = onlineUsers.get(userId);
       if (sockets) {
         for (const [sid, data] of sockets) {
