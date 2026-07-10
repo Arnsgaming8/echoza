@@ -55,7 +55,18 @@ export async function registerUser(username: string, password: string) {
 export async function loginUser(username: string, password: string) {
   const email = usernameToEmail(username);
 
-  // Try Supabase Auth first (this works even if DB queries fail)
+  // Check if the account exists in the profiles table first
+  const { data: existingProfile } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('username', username)
+    .maybeSingle();
+
+  if (!existingProfile) {
+    throw new Error('Account does not exist');
+  }
+
+  // Try Supabase Auth
   const { data: sessionData, error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
   if (!signInError && sessionData?.session) {
     const uid = sessionData.user.id;
@@ -80,7 +91,7 @@ export async function loginUser(username: string, password: string) {
     };
   }
 
-  // Legacy bcrypt fallback removed — users must log in via Supabase Auth.
+  // Profile exists but password is wrong
   throw new Error('Invalid credentials');
 }
 
