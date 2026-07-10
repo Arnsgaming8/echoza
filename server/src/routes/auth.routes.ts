@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { registerUser, loginUser, verifyAccessToken } from '../auth.js';
+import { registerUser, loginUser, verifyAccessToken, usernameToEmail } from '../auth.js';
 import { supabase, anonSupabase } from '../supabase.js';
 
 const router = Router();
@@ -98,6 +98,74 @@ router.get('/me', async (req: Request, res: Response) => {
   }
 
   res.status(404).json({ error: 'User not found' });
+});
+
+router.post('/delete-account', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'No token provided' });
+    return;
+  }
+
+  const token = authHeader.split(' ')[1];
+  const decoded = await verifyAccessToken(token);
+  if (!decoded) {
+    res.status(401).json({ error: 'Invalid token' });
+    return;
+  }
+
+  const { password } = req.body;
+  if (!password) {
+    res.status(400).json({ error: 'Password required' });
+    return;
+  }
+
+  const userId = decoded.userId;
+
+  // Fetch the profile to get the username
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('id, username')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!profile) {
+    res.status(404).json({ error: 'Profile not found' });
+    return;
+  }
+
+  // Verify password by trying to log in
+  const email = usernameToEmail(profile.username);
+  const { error: signInError } = await anonSupabase.auth.signInWithPassword({ email, password });
+  if (signInError) {
+    res.status(401).json({ error: 'Invalid password' });
+    return;
+  }
+
+  try {
+    // Delete user data in FK-safe order
+    await supabase.from('read_receipts').delete().eq('user_id', userId);
+    // Delete messages sent by this user
+    await supabase.from('messages').delete().eq('sender_id', userId);
+    // Remove from participants
+    await supabase.from('participants').delete().eq('user_id', userId);
+    // Delete push subscriptions
+    await supabase.from('push_subscriptions').delete().eq('user_id', userId);
+    // Nullify conversation references (two separate queries to avoid clearing the wrong field)
+    await Promise.all([
+      supabase.from('conversations').update({ created_by: null }).eq('created_by', userId),
+      supabase.from('conversations').update({ last_message_sender_id: null }).eq('last_message_sender_id', userId),
+    ]);
+    // Delete profile
+    await supabase.from('profiles').delete().eq('id', userId);
+    // Delete auth user (this triggers cascade on everything else)
+    await supabase.auth.admin.deleteUser(userId);
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[Delete Account] error:', err);
+    res.status(500).json({ error: err.message || 'Failed to delete account' });
+  }
 });
 
 router.post('/refresh', async (req: Request, res: Response) => {

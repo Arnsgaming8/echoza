@@ -3,7 +3,7 @@ import { supabase, anonSupabase } from './supabase.js';
 
 const EMAIL_DOMAIN = '@echoza.app';
 
-function usernameToEmail(username: string): string {
+export function usernameToEmail(username: string): string {
   return `u.${username.toLowerCase()}${EMAIL_DOMAIN}`;
 }
 

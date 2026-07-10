@@ -10,6 +10,7 @@ import VideoCallUI from '../components/call/VideoCallUI/VideoCallUI';
 import IncomingCall from '../components/call/IncomingCall/IncomingCall';
 import ConversationModal from '../components/chat/ConversationModal';
 import ProfileEditModal from '../components/chat/ProfileEditModal';
+import SettingsModal from '../components/chat/SettingsModal';
 import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
@@ -223,6 +224,7 @@ export default function Dashboard() {
   } | null>(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
@@ -866,6 +868,7 @@ export default function Dashboard() {
           onToggleSidebar={() => setShowSidebar(s => !s)}
           deleteMode={deleteMode}
           onToggleDeleteMode={toggleDeleteMode}
+          onSettings={() => setShowSettings(true)}
         />
         <ChatArea>
           {activeChat && activeConv ? (
@@ -975,6 +978,12 @@ export default function Dashboard() {
           socket={socket}
           onClose={() => setShowProfileEdit(false)}
           onUpdate={handleProfileUpdate}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
         />
       )}
 

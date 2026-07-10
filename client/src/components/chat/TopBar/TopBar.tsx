@@ -26,6 +26,7 @@ interface TopBarProps {
   onToggleSidebar?: () => void;
   deleteMode?: boolean;
   onToggleDeleteMode?: () => void;
+  onSettings?: () => void;
 }
 
 const Wrapper = styled.header`
@@ -154,7 +155,7 @@ const IconBtn = styled.button<{ $active?: boolean }>`
   }
 `;
 
-export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode }: TopBarProps) {
+export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode, onSettings }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
   const { onlineUsers } = useSocket();
   const contactOnline = conversation?.contact ? onlineUsers.includes(conversation.contact.id) : false;
@@ -217,7 +218,7 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
         <IconBtn onClick={toggleTheme} title="Toggle theme">
           {isDark ? <FiSun /> : <FiMoon />}
         </IconBtn>
-        <IconBtn title="Settings">
+        <IconBtn onClick={onSettings} title="Settings">
           <FiSettings />
         </IconBtn>
       </Right>
