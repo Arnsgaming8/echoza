@@ -406,7 +406,7 @@ interface VideoCallUIProps {
 
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
-    localStream, remoteStream, isMuted, isCameraOn, audioLevel, connected, callStatus, seconds,
+    localStream, remoteStream, isMuted, isCameraOn, audioLevel, connected, callStatus, callError, seconds,
     toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, setPlaybackVolume, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
@@ -533,7 +533,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     dragStartRef.current = null;
   };
 
-  const ended = callStatus === 'missed' || callStatus === 'declined';
+  const ended = callStatus === 'missed' || callStatus === 'declined' || callStatus === 'failed';
 
   return (
     <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
@@ -578,6 +578,20 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
               )}
             </AvatarBottom>
             <MissedText>{contact.username} declined</MissedText>
+          </BottomContent>
+        </CallingOverlay>
+      )}
+      {callStatus === 'failed' && (
+        <CallingOverlay>
+          <BottomContent>
+            <AvatarBottom>
+              {contact.avatar ? (
+                <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+              ) : (
+                contact.username[0].toUpperCase()
+              )}
+            </AvatarBottom>
+            <MissedText>{callError || 'Call failed'}</MissedText>
           </BottomContent>
         </CallingOverlay>
       )}

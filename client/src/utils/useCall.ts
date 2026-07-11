@@ -26,8 +26,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const [isCameraOn, setIsCameraOn] = useState(true);
   const [connected, setConnected] = useState(false);
   const [seconds, setSeconds] = useState(0);
-  const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected'>('ringing');
+  const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected' | 'failed'>('ringing');
   const [audioLevel, setAudioLevel] = useState(0);
+  const [callError, setCallError] = useState<string | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -153,10 +154,44 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     onEndRef.current();
   }, [socket, contact, stopRingtone]);
 
-  const delayedEnd = useCallback((status: 'missed' | 'declined') => {
+  const delayedEnd = useCallback((status: 'missed' | 'declined' | 'failed') => {
     setCallStatus(status);
     endTimerRef.current = setTimeout(() => handleEnd(), 2000);
   }, [handleEnd]);
+
+  // Surface a setup failure to the user with a friendly reason, immediately
+  // end the call, and notify the other party so their phone stops ringing.
+  const failCall = useCallback((err: any) => {
+    if (missedRef.current) return;
+    missedRef.current = true;
+
+    const name = err?.name as string | undefined;
+    let reason: string;
+    if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+      reason = 'Microphone/camera permission denied';
+    } else if (name === 'NotFoundError') {
+      reason = type === 'video'
+        ? 'No microphone or camera available'
+        : 'No microphone available';
+    } else if (name === 'NotReadableError') {
+      reason = 'Mic or camera is in use by another app';
+    } else if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') {
+      reason = 'No device matches the required settings';
+    } else {
+      reason = 'Unable to start the call';
+    }
+
+    setCallStatus('failed');
+    setCallError(reason);
+    console.warn('[useCall] setup failed:', err);
+
+    if (socket && contact) {
+      socket.emit('call:end', { receiverId: contact.id });
+    }
+
+    if (endTimerRef.current) clearTimeout(endTimerRef.current);
+    endTimerRef.current = setTimeout(() => handleEnd(), 2500);
+  }, [socket, contact, type, handleEnd]);
 
   // Timer
   useEffect(() => {
@@ -257,7 +292,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
             type,
             sdp: pc.localDescription?.sdp || '',
           });
-        }).catch(err => console.warn('Outgoing call setup failed:', err));
+        }).catch(err => failCall(err));
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
@@ -308,7 +343,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           sdp: pc.localDescription?.sdp || '',
         });
       }).catch(err => {
-        console.warn('Incoming call setup failed:', err);
+        failCall(err);
       });
 
       const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
@@ -402,6 +437,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     audioLevel,
     connected,
     callStatus,
+    callError,
     seconds,
     toggleMute,
     toggleCamera,

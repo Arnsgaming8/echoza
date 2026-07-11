@@ -306,7 +306,7 @@ interface AudioCallUIProps {
 
 export default function AudioCallUI({ contact, onEnd, socket, user, direction, initialSdp }: AudioCallUIProps) {
   const {
-    remoteStream, isMuted, audioLevel, connected, callStatus, seconds,
+    remoteStream, isMuted, audioLevel, connected, callStatus, callError, seconds,
     toggleMute, switchAudioDevice, resumePlayback, setPlaybackVolume, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'audio', onEnd });
 
@@ -364,7 +364,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
     setPlaybackVolume(v);
   }, [setPlaybackVolume]);
 
-  const ended = callStatus === 'missed' || callStatus === 'declined';
+  const ended = callStatus === 'missed' || callStatus === 'declined' || callStatus === 'failed';
 
   return (
     <Overlay>
@@ -412,6 +412,17 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
             )}
           </AvatarBottom>
           <MissedText>{contact.username} declined</MissedText>
+        </BottomContent>
+      ) : callStatus === 'failed' ? (
+        <BottomContent>
+          <AvatarBottom>
+            {contact.avatar ? (
+              <AvatarImgBottom src={contact.avatar} alt={contact.username} />
+            ) : (
+              contact.username[0].toUpperCase()
+            )}
+          </AvatarBottom>
+          <MissedText>{callError || 'Call failed'}</MissedText>
         </BottomContent>
       ) : (
         <>
