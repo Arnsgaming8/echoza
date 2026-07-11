@@ -390,6 +390,31 @@ export default function Dashboard() {
     }, 50);
   }, []);
 
+  // ── One-time mic + camera permission prompt (fires once per session). ──
+  // The browser shows its native permission popup on the first getUserMedia
+  // call per origin; subsequent calls reuse the cached decision. We stop
+  // all tracks immediately because we only wanted the permission grant —
+  // actual capture happens during real calls. The sessionStorage flag
+  // prevents us from re-asking after a denial within the same session,
+  // even if the user might be willing to grant on a second ask.
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return;
+    if (!navigator.mediaDevices?.getUserMedia) return;
+    try {
+      if (sessionStorage.getItem('echoza:media-prompted') === '1') return;
+    } catch { /* sessionStorage may throw on disabled cookies */ }
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true,
+        });
+        stream.getTracks().forEach(t => t.stop());
+      } catch { /* denied or unavailable — browser is authority, don't retry */ }
+      try { sessionStorage.setItem('echoza:media-prompted', '1'); } catch { /* ignore */ }
+    })();
+  }, []);
+
   // Fetch conversations via HTTP immediately — no need to wait for socket
   useEffect(() => {
     const token = localStorage.getItem('echoza-token');

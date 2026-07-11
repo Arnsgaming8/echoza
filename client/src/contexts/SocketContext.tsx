@@ -71,48 +71,40 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     let lastHidden = document.hidden;
 
     channel
+      // SYNC: REPLACE onlineUsers with the server-authoritative presence
+      // state. Supabase's 'sync' event always reflects the full truth after
+      // any presence change (track/untrack/leave), so this is the moment
+      // defunct users correctly drop out of the sidebar. Without REPLACE,
+      // a user who went offline would linger in the local UI until a
+      // hard refresh, because the merge-only handler never removes
+      // anything.
       .on('presence', { event: 'sync' }, () => {
         if (cancelled) return;
         const state = channel.presenceState();
-        const ids = Object.values(state)
-          .flat()
-          .map((p: any) => p?.userId)
-          .filter(Boolean);
-        setOnlineUsers(prev => {
-          // Merge with existing state instead of replacing — the socket
-          // online-users event already gave us the full list.  Realtime
-          // presence sync should only ADD users we haven't seen yet.
-          // Without this merge, the first sync after track() (which only
-          // contains the current user) would overwrite everyone else.
-          if (ids.length === 0) return prev;
-          const merged = new Set([...prev, ...ids]);
-          return [...merged];
-        });
+        const ids = new Set<string>();
+        for (const row of Object.values(state).flat()) {
+          const uid = (row as any)?.userId;
+          if (uid) ids.add(uid);
+        }
+        setOnlineUsers([...ids]);
       })
       .on('presence', { event: 'join' }, ({ newPresences }) => {
+        // Optimistic add so the green dot pops within ms of a friend
+        // coming online, even before the next sync lands.
         if (cancelled) return;
         const ids = newPresences.map((p: any) => p?.userId).filter(Boolean);
         if (!ids.length) return;
         setOnlineUsers(prev => [...new Set([...prev, ...ids])]);
       })
       .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+        // Optimistic remove so the green dot drops within ms of a friend
+        // going offline. The previous flicker-guard (skipping the removal
+        // if presenceState still showed them) is no longer needed now
+        // that SYNC replaces the full list as the authoritative source —
+        // and that guard was the root cause of users staying "online"
+        // forever instead of going offline on disconnect.
         if (cancelled) return;
-        // A single 'leave' doesn't necessarily mean the user is offline —
-        // they may have another tab open, or StrictMode may be tearing
-        // down and re-mounting this same channel. Validate against the
-        // current presence state before removing anyone, so the green
-        // dot doesn't flicker on first visit.
-        const current = channel.presenceState();
-        const stillPresent = new Set<string>();
-        for (const row of Object.values(current).flat()) {
-          const uid = (row as any)?.userId;
-          if (uid) stillPresent.add(uid);
-        }
-        const ids = leftPresences
-          .map((p: any) => p?.userId)
-          .filter((uid: string | undefined): uid is string =>
-            Boolean(uid) && !stillPresent.has(uid!)
-          );
+        const ids = leftPresences.map((p: any) => p?.userId).filter(Boolean);
         if (!ids.length) return;
         setOnlineUsers(prev => prev.filter(id => !ids.includes(id)));
       });

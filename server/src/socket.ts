@@ -146,8 +146,12 @@ export function setupSocket(io: SocketServer): void {
     }
     onlineUsers.get(userId)!.set(socket.id, { username, avatar: '' });
 
-    // Fast online-user sync via Socket.IO; Realtime presence takes over for ongoing updates
-    socket.emit('online-users', Array.from(onlineUsers.keys()));
+    // Broadcast full online-users list to ALL connected sockets (including
+    // the joining socket AND everyone else) on every connect. Lets existing
+    // clients see new arrivals in their sidebars without waiting for a
+    // Supabase presence round-trip. The realtime presence channel is the
+    // authoritative source; this is the fast path.
+    io.emit('online-users', Array.from(onlineUsers.keys()));
 
     socket.on('user:myIp', () => {
       socket.emit('user:myIp', socket.handshake.address);
@@ -759,6 +763,12 @@ export function setupSocket(io: SocketServer): void {
           onlineUsers.delete(userId);
         }
       }
+      // Broadcast the updated online-users list to ALL remaining sockets so
+      // they immediately mark the disconnected user as offline (no page
+      // refresh needed). Belt-and-suspenders with the Supabase presence
+      // round-trip — this is the fast path so the green dot drops the
+      // instant a friend closes their browser.
+      io.emit('online-users', Array.from(onlineUsers.keys()));
     });
 
     // Fetch avatar on connect
