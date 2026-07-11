@@ -407,6 +407,7 @@ interface VideoCallUIProps {
 export default function VideoCallUI({ contact, onEnd, socket, user, direction, initialSdp }: VideoCallUIProps) {
   const {
     localStream, remoteStream, isMuted, isCameraOn, audioLevel, connected, callStatus, callError, seconds,
+    receiverReachable,
     toggleMute, toggleCamera, flipCamera, switchAudioDevice, resumePlayback, setPlaybackVolume, handleEnd, formatTime,
   } = useCall({ socket, contact, user, direction, initialSdp, type: 'video', onEnd });
 
@@ -549,7 +550,19 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
               <CameraOffInitial>{contact.username[0].toUpperCase()}</CameraOffInitial>
             )}
           </CameraOffAvatar>
-          <CallingText>Calling {contact.username}...</CallingText>
+          {/* Ringing ACK arrives from the server within ~50ms. Swap wording
+              so the caller UI distinguishes 'Ringing…' (receiver's Echoza
+              tab is reachable) from 'Notifying…' (only via push). */}
+          <CallingText>
+            {/* server's call:ringing ACK arrives within ~50ms but null is
+                the pre-ACK state; telling the user 'Ringing…' before we
+                actually know that would be a lie. */}
+            {receiverReachable === true
+              ? `Ringing ${contact.username}…`
+              : receiverReachable === false
+                ? `Notifying ${contact.username}…`
+                : `Calling ${contact.username}…`}
+          </CallingText>
           <CallingTimer>{formatTime(seconds)}</CallingTimer>
         </CallingOverlay>
       )}

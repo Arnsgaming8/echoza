@@ -433,10 +433,19 @@ export default function Dashboard() {
   // first-choice RTCConfiguration. Without this, every outgoing call pays
   // the 100–500 ms round-trip to /api/ice-config before socket.emit fires,
   // which surfaced as a noticeable delay before the receiver's phone rings.
+  // Cache shape is { iceServers, fetchedAt } so useCall.ts can transparently
+  // re-fetch when credentials rotate server-side.
   useEffect(() => {
     fetch(apiUrl('/api/ice-config'))
       .then(r => r.json())
-      .then(d => { if (d?.iceServers) (window as any)._echozaIce = d.iceServers; })
+      .then(d => {
+        if (d?.iceServers) {
+          (window as any)._echozaIce = {
+            iceServers: d.iceServers,
+            fetchedAt: Date.now(),
+          };
+        }
+      })
       .catch(() => { /* FALLBACK_ICE_CONFIG in useCall.ts already covers cold start */ });
   }, []);
 
@@ -1033,23 +1042,19 @@ export default function Dashboard() {
     };
   }, [incomingCall]);
 
-  const handleAcceptCall = async () => {
+  const handleAcceptCall = () => {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
     setIncomingSdp(incomingCall.sdp);
-    // Pre-warm media WITHIN the user gesture (required by iOS Safari)
-    // and AWAIT it so tracks are fully released before AudioCallUI /
-    // VideoCallUI mounts. Without awaiting, Chrome can briefly consider
-    // the device still held by this stream and return NotFoundError to
-    // setupLocalMedia() moments later — manifesting as a confusing
-    // 'no mic or camera available' error on a device the user JUST had
-    // working. setupLocalMedia() now also has its own retry/fallback
-    // for the rare case this still races.
-    const needsVideo = incomingCall.type === 'video';
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: needsVideo });
-      stream.getTracks().forEach(t => t.stop());
-    } catch { /* keep going — actual media setup will retry with constraint relaxation in useCall.ts */ }
+    // DO NOT pre-call getUserMedia from this user-gesture handler. iOS
+    // Safari enforces a per-gesture device-init budget; firing it here
+    // AND again in useCall's setupLocalMedia counts as two device-inits
+    // and the second one can be refused with NotFoundError — exactly
+    // the 'no mic or camera available' error this code was written to
+    // prevent. The session-mount pre-warm above covers the iOS-permission
+    // grant for the whole session, and useCall's setupLocalMedia now has
+    // an attempt=0→retry(400ms)→attempt=2 (audio-only for video callers)
+    // rollback for the rare Chromium tab-cold-start race.
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {

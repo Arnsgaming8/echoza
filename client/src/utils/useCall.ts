@@ -29,6 +29,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected' | 'failed'>('ringing');
   const [audioLevel, setAudioLevel] = useState(0);
   const [callError, setCallError] = useState<string | null>(null);
+  // Server emits `call:ringing` ACK with `{ offline }` flag in <50ms after
+  // the offer. UI uses this to swap between 'Ringing…' and 'Notifying…'
+  // messaging on the caller's side. null = the ACK hasn't arrived yet.
+  const [receiverReachable, setReceiverReachable] = useState<boolean | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -238,19 +242,31 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
     const run = async () => {
       let config: RTCConfiguration = FALLBACK_ICE_CONFIG;
-      // ICE pre-warm: Dashboard mounts fetch /api/ice-config and stashes
-      // it on window._echozaIce. Use it instantly so we don't pay the
-      // 100–500 ms round-trip on every call. Fall back to FALLBACK_ICE_CONFIG
-      // if the cache is missing or the endpoint errored silently.
-      if ((window as any)._echozaIce) {
-        config = { iceServers: (window as any)._echozaIce };
+      // ICE pre-warm: Dashboard mounts fetch /api/ice-config and stash
+      // { iceServers, fetchedAt } on window._echozaIce. Use it instantly
+      // when fresh, otherwise re-fetch transparently so rotated TURN
+      // credentials don't silently poison the call.
+      const cached = (window as any)._echozaIce;
+      let cachedServers: any[] | null = null;
+      let cachedFetchedAt = 0;
+      if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
+        if (Array.isArray(cached.iceServers)) cachedServers = cached.iceServers;
+        cachedFetchedAt = cached.fetchedAt || 0;
+      } else if (Array.isArray(cached)) {
+        cachedServers = cached as any[];
+      }
+      if (cachedServers && Date.now() - cachedFetchedAt < 300_000) {
+        config = { iceServers: cachedServers };
       } else {
         try {
           const res = await fetch(apiUrl('/api/ice-config'));
           const data = await res.json();
-          if (data.iceServers) {
+          if (data?.iceServers) {
             config = { iceServers: data.iceServers };
-            (window as any)._echozaIce = data.iceServers;
+            (window as any)._echozaIce = {
+              iceServers: data.iceServers,
+              fetchedAt: Date.now(),
+            };
           }
         } catch {}
       }
@@ -402,6 +418,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         };
         socket.io.on('reconnect', onSocketReconnect);
 
+        // Server ack telling us whether the receiver is reachable. Drives
+        // 'Ringing…' vs 'Notifying…' on the caller UI within ~50 ms.
+        const onRingingAck = ({ offline }: { offline: boolean }) => {
+          setReceiverReachable(!offline);
+        };
+        socket.on('call:ringing', onRingingAck);
+
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
           pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
@@ -442,6 +465,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           socket.off('call:answer', onAnswer);
           socket.off('call:ice-candidate', onIce);
           socket.off('call:end', onEnd);
+          socket.off('call:ringing', onRingingAck);
           socket.io.off('reconnect', onSocketReconnect);
         };
         return;
@@ -569,6 +593,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     callStatus,
     callError,
     seconds,
+    receiverReachable,
     toggleMute,
     toggleCamera,
     flipCamera,
