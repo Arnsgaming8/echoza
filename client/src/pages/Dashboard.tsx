@@ -189,6 +189,26 @@ const Footer = styled.footer`
   z-index: 5;
 `;
 
+/**
+ * Dedupes a conversation list. Direct conversations are keyed by their
+ * contact.id (the actual other user), groups by their id. Removes
+ * historical duplicates produced by a TOCTOU race in the server's
+ * resolveDirectConversation (now also made deterministic on the server).
+ */
+function dedupeConversations(list: any[]): Conversation[] {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set<string>();
+  const out: Conversation[] = [];
+  for (const c of list) {
+    if (!c || typeof c.id !== 'string') continue;
+    const key = c.isGroup ? `g:${c.id}` : `d:${c.contact?.id ?? c.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(c as Conversation);
+  }
+  return out;
+}
+
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -362,10 +382,9 @@ export default function Dashboard() {
     })
       .then(res => res.json())
       .then(data => {
-        if (!cancelled && Array.isArray(data)) {
-          setConversations(data);
-          setConversationsLoaded(true);
-        }
+        if (cancelled) return;
+        setConversations(dedupeConversations(data));
+        setConversationsLoaded(true);
       })
       .catch(() => {});
 
@@ -387,9 +406,7 @@ export default function Dashboard() {
         console.error('[Dashboard] conversations:list payload not array, ignoring', data);
         return;
       }
-      const valid = data.filter((c: any) => c && typeof c.id === 'string');
-      if (valid.length === 0) return;
-      setConversations(valid as Conversation[]);
+      setConversations(dedupeConversations(data));
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {

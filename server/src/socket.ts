@@ -56,38 +56,53 @@ async function emitToGroupMembers(io: SocketServer, groupId: string, event: stri
   }
 }
 
-/** Fetch or create a direct (2-person) conversation. Returns the conversation id. */
+/**
+ * Resolve the canonical direct (2-person) conversation for a user pair.
+ * Picks the OLDEST existing direct conversation deterministically so that
+ * if a historical TOCTOU race spawned duplicates between the same pair,
+ * every caller ends up writing to the same row — duplicates drain
+ * themselves without any schema change.
+ */
 async function resolveDirectConversation(userA: string, userB: string): Promise<string | null> {
-  const participants = [userA, userB].sort();
+  const [userLo, userHi] = [userA, userB].sort();
 
-  // Find existing direct conversation where both are participants and only 2 participants
-  const { data: convs } = await supabase
+  const { data: userAConvs } = await supabase
     .from('participants')
     .select('conversation_id')
-    .eq('user_id', participants[0]);
+    .eq('user_id', userLo);
+  if (!userAConvs || userAConvs.length === 0) return null;
 
-  if (convs && convs.length > 0) {
-    const convIds = convs.map(c => c.conversation_id);
-    // Find conversations where userB is also a participant
-    const { data: matched } = await supabase
-      .from('participants')
-      .select('conversation_id')
-      .in('conversation_id', convIds)
-      .eq('user_id', participants[1]);
+  const convIds = userAConvs.map(c => c.conversation_id);
+  const { data: matches } = await supabase
+    .from('participants')
+    .select('conversation_id')
+    .in('conversation_id', convIds)
+    .eq('user_id', userHi);
+  if (!matches || matches.length === 0) return null;
 
-    if (matched && matched.length > 0) {
-      for (const row of matched) {
-        // Verify it's a direct conversation (exactly 2 participants)
-        const { count } = await supabase
-          .from('participants')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', row.conversation_id);
-        if (count === 2) return row.conversation_id;
-      }
-    }
+  // Sort candidates by created_at ASC so the oldest wins deterministically.
+  const candidateIds = matches.map(m => m.conversation_id);
+  const { data: dated } = await supabase
+    .from('conversations')
+    .select('id, created_at')
+    .in('id', candidateIds)
+    .eq('is_group', false)
+    .order('created_at', { ascending: true });
+
+  if (!dated || dated.length === 0) return null;
+
+  // Single batch query: count all participants for all candidate convs.
+  // Old code did one PostgREST round-trip per candidate (N+1).
+  const { data: allParts } = await supabase
+    .from('participants')
+    .select('conversation_id')
+    .in('conversation_id', candidateIds);
+  const counts = new Map<string, number>();
+  for (const p of (allParts || [])) {
+    counts.set(p.conversation_id, (counts.get(p.conversation_id) || 0) + 1);
   }
-
-  return null;
+  const canonical = dated.find(row => counts.get(row.id) === 2);
+  return canonical?.id ?? null;
 }
 
 export function setupSocket(io: SocketServer): void {
