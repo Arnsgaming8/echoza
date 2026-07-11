@@ -38,6 +38,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const missedRef = useRef(false);
+  // Buffer remote ICE candidates that arrive BEFORE we've set the remote
+  // description. addIceCandidate throws InvalidStateError when called
+  // without one; queuing them and draining after setRemoteDescription
+  // resolves means host/srflx/relay candidates from the peer don't get
+  // silently dropped during the offer→answer chain.
+  const pendingIceCandidatesRef = useRef<RTCIceCandidate[]>([]);
+  const flushPendingIceCandidatesRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const playbackCtxRef = useRef<AudioContext | null>(null);
   const playbackGainRef = useRef<GainNode | null>(null);
@@ -284,6 +291,38 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       pc.onicecandidate = handleIceCandidate;
       pc.ontrack = handleTrack;
 
+      // ICE failure recovery. WebRTC's standard fix is restartIce() — the
+      // browser re-gathers using the existing ICE config and (re)negotiates.
+      // This is what actually achieves the "100% reach" goal when one side
+      // is behind a NAT that needed a relay candidate that wasn't ready at
+      // the original gathering time.
+      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'failed') {
+          try { pc.restartIce(); } catch {}
+          // After 6s, if still failed, surface as a setup error so the
+          // caller sees the same UX as a permission/mic failure rather than
+          // a silent hang.
+          setTimeout(() => {
+            const cur = pcRef.current;
+            if (cur && cur.iceConnectionState === 'failed') {
+              failCall(new Error('Network path could not be established'));
+            }
+          }, 6000);
+        }
+      };
+
+      const flushPendingIceCandidates = () => {
+        const pcNow = pcRef.current;
+        if (!pcNow) return;
+        const queued = pendingIceCandidatesRef.current;
+        if (queued.length === 0) return;
+        pendingIceCandidatesRef.current = [];
+        for (const candidate of queued) {
+          pcNow.addIceCandidate(candidate).catch(() => {});
+        }
+      };
+      flushPendingIceCandidatesRef.current = flushPendingIceCandidates;
+
       if (direction === 'outgoing') {
         setupLocalMedia().then(() => {
           return pc.createOffer();
@@ -299,14 +338,24 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
-          pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+          pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
+            .then(() => flushPendingIceCandidatesRef.current?.());
           socket.off('call:answer', onAnswer);
         };
         socket.on('call:answer', onAnswer);
 
         const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
           if (from !== contact.id) return;
-          pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+          const pcNow = pcRef.current;
+          if (!pcNow) return;
+          const c = new RTCIceCandidate(candidate);
+          // No remote description yet → queue; flushPendingIceCandidates()
+          // drains when the offer→answer setRemoteDescription completes.
+          if (!pcNow.remoteDescription && !pcNow.currentRemoteDescription) {
+            pendingIceCandidatesRef.current.push(c);
+            return;
+          }
+          pcNow.addIceCandidate(c).catch(() => {});
         };
         socket.on('call:ice-candidate', onIce);
 
@@ -335,12 +384,14 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
       const offer = new RTCSessionDescription({ type: 'offer', sdp: initialSdp });
       pc.setRemoteDescription(offer).then(() => {
+        flushPendingIceCandidatesRef.current?.();
         return setupLocalMedia();
       }).then(() => {
         return pc.createAnswer();
       }).then(answer => {
         return pc.setLocalDescription(answer);
       }).then(() => {
+        flushPendingIceCandidatesRef.current?.();
         socket.emit('call:answer', {
           receiverId: contact.id,
           sdp: pc.localDescription?.sdp || '',
@@ -351,7 +402,14 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
       const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
         if (from !== contact.id) return;
-        pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        const pcNow = pcRef.current;
+        if (!pcNow) return;
+        const c = new RTCIceCandidate(candidate);
+        if (!pcNow.remoteDescription && !pcNow.currentRemoteDescription) {
+          pendingIceCandidatesRef.current.push(c);
+          return;
+        }
+        pcNow.addIceCandidate(c).catch(() => {});
       };
       socket.on('call:ice-candidate', onIce);
 
@@ -375,6 +433,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       playbackGainRef.current = null;
       analyserRef.current = null;
       cancelAnimationFrame(rafRef.current);
+      pendingIceCandidatesRef.current = [];
+      flushPendingIceCandidatesRef.current = null;
     };
   }, []);
 

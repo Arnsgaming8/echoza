@@ -350,10 +350,23 @@ export default function Dashboard() {
 
     const handleSwUpdate = () => { subscribePush(true); };
     const handleSwMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'navigate-conversation') {
+      if (!event.data) return;
+      if (event.data.type === 'navigate-conversation') {
         const convId = event.data.conversationId;
         const conv = conversationsRef.current.find(c => c.id === convId);
         if (conv) handleSelectChatRef.current(convId, conv);
+        return;
+      }
+      if (event.data.type === 'incoming-call') {
+        // Push arrived with call metadata. The SW push handler in sw.js
+        // already showed the OS notification — we deliberately DO NOT
+        // re-fire `notify(...)` here because that would silently
+        // tag-collision-replace the same `call-${callerId}` notification
+        // (wasteful and can cause phantom sounds). The matching socket
+        // `call:offer` (with full SDP) typically arrives moments later if
+        // the user has Echoza foreground — Dashboard's call:offer handler
+        // is the source of truth for the rich IncomingCall UI.
+        return;
       }
     };
 

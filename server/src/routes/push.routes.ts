@@ -54,7 +54,14 @@ router.post('/subscribe', async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
-export async function sendPushNotification(userId: string, title: string, body: string, url?: string, conversationId?: string) {
+export async function sendPushNotification(
+  userId: string,
+  title: string,
+  body: string,
+  url?: string,
+  conversationId?: string,
+  extra?: { tag?: string; data?: Record<string, any> },
+) {
   if (!publicKey || !privateKey) return;
 
   const { data: subs } = await supabase
@@ -64,14 +71,25 @@ export async function sendPushNotification(userId: string, title: string, body: 
 
   if (!subs?.length) return;
 
-  const payload = JSON.stringify({ title, body, url: url || '/', conversationId });
+  const payloadData = {
+    title,
+    body,
+    url: url || '/',
+    conversationId,
+    ...(extra?.data || {}),
+  };
+  const payload = JSON.stringify(payloadData);
 
   for (const sub of subs) {
     try {
-      await webpush.sendNotification({
-        endpoint: sub.endpoint,
-        keys: { p256dh: sub.p256dh, auth: sub.auth },
-      }, payload);
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        payload,
+        extra?.tag ? { headers: { Urgency: 'high', Topic: extra.tag } } : undefined,
+      );
     } catch {
       await supabase
         .from('push_subscriptions')

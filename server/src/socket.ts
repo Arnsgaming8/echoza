@@ -12,6 +12,114 @@ interface AuthSocket extends Socket {
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
+// Server-side pending-call timers. Keyed on `${caller}_${callee}` so we
+// reliably fire a missed-call record even if the caller's tab closes
+// before its own client-side 60s timer can emit call:missed. The CLIENT
+// timer is still authoritative for the happy-path; this one is just the
+// safety net for the caller's tab/network dying mid-ringing.
+const pendingCallTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const PENDING_CALL_TIMEOUT_MS = 60_000;
+function pendingCallKey(a: string, b: string): string {
+  return [a, b].sort().join('_');
+}
+function clearPendingCall(a: string, b: string): void {
+  const k = pendingCallKey(a, b);
+  const t = pendingCallTimers.get(k);
+  if (t) { clearTimeout(t); pendingCallTimers.delete(k); }
+}
+
+/**
+ * Persist a "missed {type} call" record + update conversation preview +
+ * push the receiver. Emits the message to BOTH caller and receiver (so the
+ * caller's app — if still alive — also sees it in their chat next time
+ * they open) and lets the receiver know via push that the call timed out.
+ */
+async function emitAndPersistCallMissed(
+  io: SocketServer,
+  callerUserId: string,
+  callerUsername: string,
+  receiverId: string,
+  callType: string,
+): Promise<void> {
+  try {
+    let conversationId = await resolveDirectConversation(callerUserId, receiverId);
+
+    if (!conversationId) {
+      conversationId = uuidv4();
+      await supabase.from('conversations').insert({
+        id: conversationId,
+        is_group: false,
+      });
+      await supabase.from('participants').insert([
+        { conversation_id: conversationId, user_id: callerUserId },
+        { conversation_id: conversationId, user_id: receiverId },
+      ]);
+    }
+
+    // Deterministic message id keyed on (sorted pair + 60s bucket) so that
+    // when BOTH the client-side 60s timeout AND the server-side pendingCall
+    // safety-net fire in the same minute, the second insert collides on PK
+    // (Supabase throws 23505) and we don't double-write a "Missed call" row.
+    const bucket = Math.floor(Date.now() / 60_000);
+    const safeId = `callmissed:${[callerUserId, receiverId].sort().join('_')}:${bucket}`;
+    const messageId = safeId;
+    const createdAt = new Date().toISOString();
+    const icon = callType === 'video' ? '\uD83D\uDCF9' : '\uD83D\uDCDE';
+    const content = `${icon} Missed ${callType} call`;
+
+    // 23505 PK collision = another path (client-side timer or a prior
+    // server timer in this bucket) already wrote the missed row. Quietly
+    // bail; we've already pushed the message so the receiver was notified.
+    const { error: missedInsertErr } = await supabase.from('messages').insert({
+      id: messageId,
+      conversation_id: conversationId,
+      sender_id: callerUserId,
+      content,
+      created_at: createdAt,
+    });
+    if (missedInsertErr && missedInsertErr.code === '23505') {
+      return;
+    }
+    if (missedInsertErr) {
+      console.warn('[emitAndPersistCallMissed] insert failed:', missedInsertErr.message);
+    }
+
+    const { error: missedUpdateErr } = await supabase
+      .from('conversations')
+      .update({ last_message: content, last_message_at: createdAt, last_message_sender_id: callerUserId })
+      .eq('id', conversationId);
+    if (missedUpdateErr) console.warn('[call:missed] conversation update skipped:', missedUpdateErr.message);
+
+    const message = {
+      id: messageId,
+      conversationId,
+      senderId: callerUserId,
+      senderUsername: callerUsername,
+      content,
+      attachments: [],
+      read: false,
+      createdAt,
+      isGroup: false,
+    };
+    emitToUser(io, callerUserId, 'message:sent', message);
+    emitToUser(io, receiverId, 'message:new', message);
+    emitToUser(io, receiverId, 'conversation:update', { conversationId });
+    sendPushNotification(
+      receiverId,
+      `Missed ${callType} call from ${callerUsername}`,
+      '',
+      '/',
+      conversationId,
+      { tag: `missed-call-${callerUserId}`, data: { callType, callerId: callerUserId } },
+    );
+    if (await isReceiverMonitored(receiverId)) {
+      sendDiscordNotification(`**${callerUsername}** called but **${receiverId}** missed the **${callType}** call`);
+    }
+  } catch (err) {
+    console.error('[emitAndPersistCallMissed] failed:', err);
+  }
+}
+
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
   try {
     const { data } = await supabase
@@ -666,21 +774,34 @@ export function setupSocket(io: SocketServer): void {
     socket.on('call:offer', async ({ receiverId, type, sdp }: { receiverId: string; type?: string; sdp: string }) => {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
+      const callType = type || 'audio';
       emitToUser(io, receiverId, 'call:offer', {
         from: userId, username, avatar: userData?.avatar || '',
-        type: type || 'audio', sdp,
+        type: callType, sdp,
       });
       sendPushNotification(
         receiverId,
         `${username} is calling`,
-        `${type || 'Audio'} call`,
+        `${callType} call`,
         '/',
-        undefined
+        undefined,
+        { tag: `call-${userId}`, data: { callType, callerId: userId, callerUsername: username } },
       );
-      if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** is calling for a **${type || 'audio'}** call!`);
+      // Arm the server-side 60s safety-net timer. If neither call:answer nor
+      // call:end clears it within 60s, the receiver's chat auto-records a
+      // "Missed call" entry — even if the caller's tab is gone by then.
+      clearPendingCall(userId, receiverId);
+      const key = pendingCallKey(userId, receiverId);
+      const t = setTimeout(() => {
+        pendingCallTimers.delete(key);
+        emitAndPersistCallMissed(io, userId, username, receiverId, callType);
+      }, PENDING_CALL_TIMEOUT_MS);
+      pendingCallTimers.set(key, t);
+      if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** is calling for a **${callType}** call!`);
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
+      clearPendingCall(userId, receiverId);
       emitToUser(io, receiverId, 'call:answer', { from: userId, sdp });
     });
 
@@ -689,55 +810,15 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('call:end', ({ receiverId }: { receiverId: string }) => {
+      clearPendingCall(userId, receiverId);
       emitToUser(io, receiverId, 'call:end', { from: userId });
     });
 
     socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
-      let conversationId = await resolveDirectConversation(userId, receiverId);
-
-      if (!conversationId) {
-        conversationId = uuidv4();
-        await supabase.from('conversations').insert({
-          id: conversationId,
-          is_group: false,
-        });
-        await supabase.from('participants').insert([
-          { conversation_id: conversationId, user_id: userId },
-          { conversation_id: conversationId, user_id: receiverId },
-        ]);
-      }
-
-      const messageId = uuidv4();
-      const createdAt = new Date().toISOString();
-      const icon = type === 'video' ? '\uD83D\uDCF9' : '\uD83D\uDCDE';
-      const content = `${icon} Missed ${type} call`;
-
-      await supabase.from('messages').insert({
-        id: messageId,
-        conversation_id: conversationId,
-        sender_id: userId,
-        content,
-        created_at: createdAt,
-      });
-
-      const { error: missedUpdateErr } = await supabase
-        .from('conversations')
-        .update({ last_message: content, last_message_at: createdAt, last_message_sender_id: userId })
-        .eq('id', conversationId);
-      if (missedUpdateErr) console.warn('[call:missed] conversation update skipped:', missedUpdateErr.message);
-
-      const message = { id: messageId, conversationId, senderId: userId, senderUsername: username, content, attachments: [], read: false, createdAt, isGroup: false };
-      emitToUser(io, userId, 'message:sent', message);
-      emitToUser(io, receiverId, 'message:new', message);
-      emitToUser(io, receiverId, 'conversation:update', { conversationId });
-      sendPushNotification(
-        receiverId,
-        `Missed ${type} call from ${username}`,
-        '',
-        '/',
-        conversationId
-      );
-      if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** called but **${receiverId}** missed the **${type}** call`);
+      // Client-side timer fired first — record it AND clear the server-side
+      // safety net so we don't double-write.
+      clearPendingCall(userId, receiverId);
+      await emitAndPersistCallMissed(io, userId, username, receiverId, type);
     });
 
     socket.on('call:group-offer', async ({ groupId, type }: { groupId: string; type?: string }) => {
@@ -761,6 +842,24 @@ export function setupSocket(io: SocketServer): void {
         sockets.delete(socket.id);
         if (sockets.size === 0) {
           onlineUsers.delete(userId);
+        }
+      }
+      // Drop any pending-call timer this user was involved in. If the
+      // caller hung up (clean) the timer was already cleared; this catches
+      // the case where the caller's socket died mid-call setup. We let the
+      // OTHER side's safety net fire if the callee is alive (the other
+      // socket still has a timer pending; it expires cleanly), but if we
+      // were the CALLER half of the pair with the timer, the timer belongs
+      // to nobody useful now — clear it so we don't accidentally fire a
+      // stale "missed" record against a caller who is no longer there.
+      for (const key of [...pendingCallTimers.keys()]) {
+        const split = key.indexOf('_');
+        if (split < 0) continue;
+        const parts = [key.slice(0, split), key.slice(split + 1)];
+        if (parts.includes(userId)) {
+          const t = pendingCallTimers.get(key);
+          if (t) clearTimeout(t);
+          pendingCallTimers.delete(key);
         }
       }
       // Broadcast the updated online-users list to ALL remaining sockets so

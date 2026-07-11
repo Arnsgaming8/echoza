@@ -62,22 +62,58 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   if (!event.data) return;
 
+  let data;
   try {
-    const data = event.data.json();
-    const title = data.title || 'Echoza';
-    const options = {
-      body: data.body || '',
-      icon: '/vite.svg',
-      badge: '/vite.svg',
-      data: { url: data.url || '/', conversationId: data.conversationId },
-    };
-    event.waitUntil(self.registration.showNotification(title, options));
+    data = event.data.json();
   } catch {
     event.waitUntil(self.registration.showNotification('Echoza', {
       body: event.data.text(),
       icon: '/vite.svg',
     }));
+    return;
   }
+  const title = data.title || 'Echoza';
+  const callType = data.callType;
+  const callerId = data.callerId;
+  const callerUsername = data.callerUsername;
+  const options = {
+    body: data.body || '',
+    icon: '/vite.svg',
+    badge: '/vite.svg',
+    // tag + renotify collapses repeated calls from same caller instead of
+    // stacking. Missing tag falls back to a per-message unique id.
+    tag: data.tag || (callType ? `call-${callerId || 'unknown'}` : undefined),
+    renotify: !!callType,
+    data: {
+      url: data.url || '/',
+      conversationId: data.conversationId,
+      callType: callType || null,
+      callerId: callerId || null,
+      callerUsername: callerUsername || null,
+    },
+  };
+  event.waitUntil(
+    self.registration.showNotification(title, options).then(() => {
+      // Broadcast the call payload to any open Echoza tab so Dashboard can
+      // render its IncomingCall UI without requiring the user to click the
+      // notification first. If a socket `call:offer` is also in flight the
+      // full SDP version will arrive milliseconds later — Dashboard dedupes
+      // by caller id, so the second `setIncomingCall` is a no-op.
+      if (callType && callerId) {
+        return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+          for (const client of windowClients) {
+            client.postMessage({
+              type: 'incoming-call',
+              callType,
+              callerId,
+              callerUsername: callerUsername || null,
+            });
+          }
+        });
+      }
+      return undefined;
+    })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {
