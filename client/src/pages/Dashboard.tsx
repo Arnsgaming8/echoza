@@ -416,6 +416,13 @@ export default function Dashboard() {
 
     setConversationsLoaded(true);
 
+    // Ask for the conversation list on every (re)connect. Server only
+    // pushes conversations:list in response to this emit, so without it
+    // the sidebar stays empty until a new message triggers a refetch.
+    // Cheap (single batched query) and idempotent (dedupeConversations
+    // handles race with the HTTP /api/conversations fetch).
+    socket.emit('conversations:list');
+
     socket.on('server:diag', (diag: any) => {
       console.log('[SERVER DIAG]', diag);
     });

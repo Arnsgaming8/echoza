@@ -78,7 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     let retries = 0;
-    const MAX_RETRIES = 3;
+    // Bumped 3 → 35: Render free-tier cold-starts take 30-60s, and the
+    // old limit (3×2s = 6s) meant we'd nuke tokens before the backend
+    // could even respond. 35 × 2s = ~70s patience — generous but bounded.
+    const MAX_RETRIES = 35;
     const RETRY_DELAY = 2000;
 
     const runCheck = async (): Promise<void> => {
@@ -128,11 +131,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        // Out of retries on transient error — show login but keep tokens so
-        // a hard refresh can recover.
-        setToken(null);
-        setUser(null);
+        // Out of retries on transient error — keep tokens intact so a hard
+        // refresh can recover, but stop blocking the UI. If the user truly
+        // has an invalid token they'll see an empty dashboard; the cached
+        // token in localStorage lets the next mount re-attempt validation.
         setAuthLoading(false);
+        setUser((prev) => prev); // unchanged — preserve any partial state
       }
     };
 

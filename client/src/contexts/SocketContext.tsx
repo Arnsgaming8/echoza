@@ -97,7 +97,22 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       })
       .on('presence', { event: 'leave' }, ({ leftPresences }) => {
         if (cancelled) return;
-        const ids = leftPresences.map((p: any) => p?.userId).filter(Boolean);
+        // A single 'leave' doesn't necessarily mean the user is offline —
+        // they may have another tab open, or StrictMode may be tearing
+        // down and re-mounting this same channel. Validate against the
+        // current presence state before removing anyone, so the green
+        // dot doesn't flicker on first visit.
+        const current = channel.presenceState();
+        const stillPresent = new Set<string>();
+        for (const row of Object.values(current).flat()) {
+          const uid = (row as any)?.userId;
+          if (uid) stillPresent.add(uid);
+        }
+        const ids = leftPresences
+          .map((p: any) => p?.userId)
+          .filter((uid: string | undefined): uid is string =>
+            Boolean(uid) && !stillPresent.has(uid!)
+          );
         if (!ids.length) return;
         setOnlineUsers(prev => prev.filter(id => !ids.includes(id)));
       });
