@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import styled from 'styled-components';
-import { Button, Input } from '../components/common';
+import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
-import { FiEye, FiEyeOff } from 'react-icons/fi';
 
 const Wrapper = styled.div`
   min-height: 100vh;
@@ -68,31 +67,6 @@ const StyledLink = styled(Link)`
   }
 `;
 
-const PasswordWrapper = styled.div`
-  position: relative;
-  width: 100%;
-`;
-
-const EyeBtn = styled.button`
-  position: absolute;
-  right: 12px;
-  top: 34px;
-  background: none;
-  border: none;
-  color: ${({ theme }) => theme.colors.secondary.warmGray};
-  font-size: 18px;
-  padding: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: color ${({ theme }) => theme.transition};
-
-  &:hover {
-    color: ${({ theme }) => theme.colors.text.primary};
-  }
-`;
-
 const ErrorMsg = styled.div`
   background: ${({ theme }) => theme.colors.danger}15;
   color: ${({ theme }) => theme.colors.danger};
@@ -105,7 +79,6 @@ const ErrorMsg = styled.div`
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState('');
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
@@ -157,19 +130,13 @@ export default function Login() {
             onChange={setUsername}
             disabled={loading}
           />
-          <PasswordWrapper>
-            <Input
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              placeholder="Enter your password"
-              value={password}
-              onChange={setPassword}
-              disabled={loading}
-            />
-            <EyeBtn type="button" onClick={() => setShowPassword(!showPassword)}>
-              {showPassword ? <FiEyeOff /> : <FiEye />}
-            </EyeBtn>
-          </PasswordWrapper>
+          <PasswordInput
+            label="Password"
+            placeholder="Enter your password"
+            value={password}
+            onChange={setPassword}
+            disabled={loading}
+          />
           <Button type="submit" fullWidth disabled={loading}>
             {loading ? 'Signing In...' : 'Enter Echoza'}
           </Button>

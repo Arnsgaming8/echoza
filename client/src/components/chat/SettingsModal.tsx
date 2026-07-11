@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import styled, { keyframes } from 'styled-components';
-import { Avatar, Button, Input } from '../common';
+import { Avatar, Button, PasswordInput } from '../common';
 import { FiX, FiAlertTriangle, FiTrash2 } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiUrl } from '../../utils/api';
@@ -286,9 +286,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                   <FiAlertTriangle size={16} />
                   Confirm deletion
                 </DangerHeader>
-                <Input
+                <PasswordInput
                   label="Enter your password to confirm"
-                  type="password"
                   placeholder="Your password"
                   value={password}
                   onChange={setPassword}
