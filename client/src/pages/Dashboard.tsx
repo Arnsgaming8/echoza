@@ -18,6 +18,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { useRealtimeChat } from '../utils/useRealtimeChat';
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
+import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
+import { canMakeWebRTCCall } from '../utils/iosCapability';
+
+// crypto.randomUUID is supported on iOS Safari 16.4+ and every modern
+// desktop browser, so we don't need the `uuid` npm package here. The
+// iOS-PWA install requirement is 16.4+ (for Web Push) so this floor is
+// already guaranteed.
+function newClientId(): string {
+  return (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 interface Attachment {
   name: string;
@@ -536,15 +548,38 @@ export default function Dashboard() {
     };
     socket.io.on('reconnect', onReconnect);
 
-    // message:sent is echoed to the sender only — never triggers notification
+    // message:sent is echoed to the sender only — never triggers notification.
+    // The ack carries the original `clientId` so we can swap the optimistic
+    // outbox message (id=clientId) for the authoritative server message
+    // (id=server uuid). Dedupe on either id so a duplicate ack (server
+    // crash + retry) doesn't render the same message twice.
     socket.on('message:sent', (message: any) => {
+      if (message.clientId) removeFromOutbox(message.clientId);
       if (message.conversationId === activeChatRef.current) {
         setMessages(prev => {
-          if (prev.some(m => m.id === message.id)) return prev;
-          return [...prev, message];
+          const withoutOptimistic = message.clientId
+            ? prev.filter((m) => m.id !== message.clientId)
+            : prev;
+          if (withoutOptimistic.some((m) => m.id === message.id)) return withoutOptimistic;
+          return [...withoutOptimistic, { ...message, _sending: false }];
         });
       }
       socket.emit('conversations:list');
+    });
+
+    // On every socket connect (initial mount + every reconnect) replay
+    // any messages the outbox has been holding. This is the iOS PWA
+    // durability path: the user backgrounds the app, iOS kills the JS
+    // context, the message is in localStorage; on resume the socket
+    // reconnects and we drain the queue.
+    socket.on('connect', () => {
+      try {
+        const pending = loadOutbox();
+        for (const entry of pending) {
+          const { id, createdAt, ...rest } = entry;
+          socket.emit('message:send', { ...rest, clientId: id });
+        }
+      } catch { /* outbox corrupted — just skip */ }
     });
 
     socket.on('message:new', (message: any) => {
@@ -934,7 +969,14 @@ export default function Dashboard() {
     };
 
     processAttachments().then(processedAttachments => {
-      const payload: any = { content };
+      // Client-generated id travels with the message all the way to the
+      // server's `message:sent` ack. On ack we remove the matching
+      // outbox entry; on socket reconnect we drain the outbox and replay
+      // each entry with its original clientId. This is the durability
+      // layer that keeps iOS PWA messages from being silently dropped
+      // when iOS kills the JS context after a background.
+      const clientId = newClientId();
+      const payload: any = { content, clientId };
       if (processedAttachments) payload.attachments = processedAttachments;
 
       if (activeConv.isGroup) {
@@ -942,6 +984,35 @@ export default function Dashboard() {
       } else if (activeConv.contact) {
         payload.receiverId = activeConv.contact.id;
       }
+
+      addToOutbox({
+        id: clientId,
+        content,
+        receiverId: payload.receiverId,
+        groupId: payload.groupId,
+        attachments: processedAttachments,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Optimistic local render so the user sees their message instantly.
+      // The `_sending` flag is cleared when the server's `message:sent`
+      // ack lands (matched by clientId). If the JS context dies before
+      // the ack, the outbox still has the entry and replays on reconnect.
+      setMessages(prev => [
+        ...prev,
+        {
+          id: clientId,
+          conversationId: activeChat!,
+          senderId: user?.id || '',
+          senderUsername: user?.username,
+          content,
+          attachments: processedAttachments,
+          read: false,
+          createdAt: new Date().toISOString(),
+          isGroup: !!activeConv.isGroup,
+          _sending: true,
+        } as any,
+      ]);
 
       socket.emit('message:send', payload);
     });
@@ -1018,12 +1089,23 @@ export default function Dashboard() {
 
   const handleAudioCall = () => {
     if (!activeConv) return;
+    // iOS Safari in a regular tab occasionally drops WebRTC when the
+    // page is backgrounded. Require the user to install the PWA first
+    // for a much more reliable call experience.
+    if (!canMakeWebRTCCall()) {
+      alert('Calls work better when Echoza is installed to your home screen. Open in the installed app, or use the Share button to Add to Home Screen first.');
+      return;
+    }
     setCallContact(activeConv.contact || null);
     setShowAudioCall(true);
   };
 
   const handleVideoCall = () => {
     if (!activeConv) return;
+    if (!canMakeWebRTCCall()) {
+      alert('Calls work better when Echoza is installed to your home screen. Open in the installed app, or use the Share button to Add to Home Screen first.');
+      return;
+    }
     setCallContact(activeConv.contact || null);
     setShowVideoCall(true);
   };

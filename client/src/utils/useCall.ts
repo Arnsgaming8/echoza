@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { apiUrl } from './api';
+import { isIOS } from './iosCapability';
 
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
@@ -385,6 +386,14 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         setupLocalMedia().then(() => {
           return pc.createOffer();
         }).then(offer => {
+          // iOS Safari 17+ SDP hardening. Inject extmap-allow-mixed if
+          // the browser omitted it — required for some iOS interop paths
+          // and harmless on Chromium. The `replaceTrack` flow later in
+          // `flipCamera` benefits from this too because the relay
+          // candidate needs to be in the same bundle group.
+          if (isIOS() && offer.sdp && !offer.sdp.includes('a=extmap-allow-mixed')) {
+            return pc.setLocalDescription({ type: offer.type, sdp: 'a=extmap-allow-mixed\r\n' + offer.sdp });
+          }
           return pc.setLocalDescription(offer);
         }).then(() => {
           socket.emit('call:offer', {

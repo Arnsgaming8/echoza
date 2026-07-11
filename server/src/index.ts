@@ -332,6 +332,15 @@ app.get('/api/conversations', async (req, res) => {
         if (!url.includes('transport=')) {
           urls.push(`${url}?transport=tcp`);
         }
+        // iOS Safari 17+ tightened TURN-over-UDP/TCP requirements —
+        // many NATs now require a `turns:` (TLS) candidate for the
+        // browser to even try the relay. Mirror the first turn: URL
+        // as turns:<same-host-port>?transport=tcp so the browser has
+        // both options during ICE gathering. Harmless on Chromium.
+        if (url.startsWith('turn:') && !urls.some(u => u.startsWith('turns:'))) {
+          const tls = url.replace(/^turn:/, 'turns:');
+          urls.push(tls.includes('?') ? `${tls}&transport=tcp` : `${tls}?transport=tcp`);
+        }
       }
       iceServers.push({ urls, username: turnUsername, credential: turnCredential });
     }

@@ -297,6 +297,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthLoading(false);
     localStorage.removeItem('echoza-token');
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    // Clear the message outbox so a queued message from this user
+    // doesn't get re-emitted under a different identity (or a fresh
+    // registration) after the next login. The outbox is durable across
+    // iOS PWA background-kill, which is its job — but it should NOT
+    // survive an explicit logout.
+    try { localStorage.removeItem('echoza-message-outbox'); } catch { /* ignore */ }
   };
 
   const updateUser = (updates: Partial<User>): void => {

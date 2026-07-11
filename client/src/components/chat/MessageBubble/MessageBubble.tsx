@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../../../contexts/AuthContext';
-import { FiFile, FiImage, FiVideo, FiPhone, FiDownload, FiCheckCircle, FiCircle } from 'react-icons/fi';
+import { FiFile, FiImage, FiVideo, FiPhone, FiDownload, FiCheckCircle, FiCircle, FiClock, FiRotateCcw } from 'react-icons/fi';
 
 interface Attachment {
   name: string;
@@ -282,9 +282,21 @@ export default function MessageBubble({ message, showSenderName, deleteMode, isS
         <MetaRow $isSent={isSent}>
           <Time $isSent={isSent}>{formatTime(message.createdAt)}</Time>
           {isSent && (
-            <ReadLabel $read={message.read}>
-              {message.read ? 'Read' : 'Sent'}
-            </ReadLabel>
+            <>
+              {(message as any)._sending ? (
+                <ReadLabel $read={false} title="Sending…">
+                  <FiClock />
+                </ReadLabel>
+              ) : (message as any)._failed ? (
+                <ReadLabel $read={false} title="Failed — tap to retry">
+                  <FiRotateCcw />
+                </ReadLabel>
+              ) : (
+                <ReadLabel $read={message.read}>
+                  {message.read ? 'Read' : 'Sent'}
+                </ReadLabel>
+              )}
+            </>
           )}
         </MetaRow>
       </BubbleWrapper>

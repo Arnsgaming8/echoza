@@ -500,8 +500,15 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('group:created', { conversationId, name: name || `${allMembers.length} members` });
     });
 
-    socket.on('message:send', async ({ receiverId, content, groupId, attachments }: { receiverId?: string; content: string; groupId?: string; attachments?: any[] }) => {
+    socket.on('message:send', async ({ receiverId, content, groupId, attachments, clientId }: { receiverId?: string; content: string; groupId?: string; attachments?: any[]; clientId?: string }) => {
       if (!content.trim() && !attachments?.length) return;
+
+      // Cap the client-generated id to keep the PK column sane. A
+      // malicious client could otherwise send a multi-megabyte id and
+      // bloat the messages table.
+      const safeClientId = typeof clientId === 'string' && clientId.length > 0
+        ? clientId.slice(0, 64)
+        : null;
 
       let conversationId: string;
       let isGroup = false;
@@ -528,10 +535,15 @@ export function setupSocket(io: SocketServer): void {
         return;
       }
 
-      const messageId = uuidv4();
+      // Use the client-generated id as the server-side message id so
+      // duplicate sends (e.g. the outbox-replay path when an iOS PWA
+      // resumes after background-kill) collide on PK and we don't end
+      // up with two rows for the same logical message. Fall back to a
+      // server uuid when the client didn't send an id.
+      const messageId = safeClientId || uuidv4();
       const createdAt = new Date().toISOString();
 
-      await supabase.from('messages').insert({
+      const { error: insertErr } = await supabase.from('messages').insert({
         id: messageId,
         conversation_id: conversationId,
         sender_id: userId,
@@ -539,6 +551,36 @@ export function setupSocket(io: SocketServer): void {
         attachments: attachments || [],
         created_at: createdAt,
       });
+
+      // 23505 = unique_violation. The iOS outbox-replay path re-emits
+      // the same clientId after a background-kill; the row already
+      // exists, so we fetch it and ack the sender so the duplicate
+      // outbox entry clears. The receiver already received the original.
+      if (insertErr && insertErr.code === '23505' && safeClientId) {
+        const { data: existing } = await supabase
+          .from('messages')
+          .select('id, conversation_id, sender_id, content, attachments, created_at')
+          .eq('id', messageId)
+          .maybeSingle();
+        if (existing) {
+          emitToUser(io, userId, 'message:sent', {
+            id: existing.id,
+            conversationId: existing.conversation_id,
+            senderId: existing.sender_id,
+            senderUsername: username,
+            content: existing.content,
+            attachments: existing.attachments || [],
+            read: false,
+            createdAt: existing.created_at,
+            isGroup,
+            clientId: safeClientId,
+          });
+        }
+        return;
+      }
+      if (insertErr) {
+        console.warn('[message:send] insert failed:', insertErr.message);
+      }
 
       const preview = content.trim()
         ? content
@@ -562,6 +604,11 @@ export function setupSocket(io: SocketServer): void {
         senderUsername: username,
         content, attachments: attachments || [],
         read: false, createdAt, isGroup,
+        // Echo the client-generated id back so the sender's outbox entry
+        // can be removed on ack. This is the durability handshake for the
+        // iOS PWA case where the socket dies mid-send and the client
+        // re-emits from localStorage on reconnect.
+        clientId: safeClientId,
       };
 
       emitToUser(io, userId, 'message:sent', message);
