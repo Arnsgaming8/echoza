@@ -177,7 +177,7 @@ const ProfileLabel = styled.div`
 `;
 
 export default function SettingsModal({ onClose }: SettingsModalProps) {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [step, setStep] = useState<'initial' | 'confirm'>('initial');
   const [password, setPassword] = useState('');
   const [confirmed, setConfirmed] = useState(false);
@@ -211,7 +211,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
       setDeleted(true);
       setTimeout(() => {
-        logout();
+        window.location.href = 'https://echoza-5ysd.onrender.com/signup';
       }, 1500);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
