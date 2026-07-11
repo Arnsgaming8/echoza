@@ -371,7 +371,13 @@ async function main() {
 
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
-    app.use(express.static(clientDist, { maxAge: '1y', immutable: true }));
+    // `index: false` is intentional: without it, express.static serves
+    // index.html for `/` with `maxAge: 1y, immutable: true`, which forces
+    // the user's browser to keep the OLD index.html forever — so they
+    // never download the new JS bundle. With index: false, the
+    // `app.get('*')` catch-all below handles index.html and applies the
+    // `no-store, no-cache` headers below.
+    app.use(express.static(clientDist, { maxAge: '1y', immutable: true, index: false }));
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
