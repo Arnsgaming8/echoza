@@ -392,7 +392,18 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           // `flipCamera` benefits from this too because the relay
           // candidate needs to be in the same bundle group.
           if (isIOS() && offer.sdp && !offer.sdp.includes('a=extmap-allow-mixed')) {
-            return pc.setLocalDescription({ type: offer.type, sdp: 'a=extmap-allow-mixed\r\n' + offer.sdp });
+            // Insert the attribute at the correct SDP position: just
+            // before the first m= line (session-level attributes belong
+            // there). A previous version prepended the attribute to the
+            // ENTIRE SDP, placing it before v=0 — invalid SDP, the
+            // browser rejected the local description, no media flowed.
+            const lines = offer.sdp.split(/\r\n|\n/);
+            let insertIdx = lines.length;
+            for (let i = 0; i < lines.length; i++) {
+              if (lines[i].startsWith('m=')) { insertIdx = i; break; }
+            }
+            lines.splice(insertIdx, 0, 'a=extmap-allow-mixed');
+            return pc.setLocalDescription({ type: offer.type, sdp: lines.join('\r\n') });
           }
           return pc.setLocalDescription(offer);
         }).then(() => {

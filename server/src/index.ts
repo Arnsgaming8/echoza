@@ -337,11 +337,16 @@ app.get('/api/conversations', async (req, res) => {
         // browser to even try the relay. Mirror the first turn: URL
         // as turns:<same-host-port>?transport=tcp so the browser has
         // both options during ICE gathering. Harmless on Chromium.
-        if (url.startsWith('turn:') && !urls.some(u => u.startsWith('turns:'))) {
-          const tls = url.replace(/^turn:/, 'turns:');
-          urls.push(tls.includes('?') ? `${tls}&transport=tcp` : `${tls}?transport=tcp`);
-        }
+        // (Removed: auto-mirror turn: -> turns:. It produced
+        // turns:3478?transport=tcp which most TURN servers don't
+        // serve on TLS — the browser tried it, failed, and added
+        // noise to ICE gathering. Set TURN_TLS_URL explicitly below
+        // to enable a TLS TURN candidate on port 443.)
       }
+      // Optional TLS TURN URL. Set TURN_TLS_URL (e.g.
+      // "turns:turn.example.com:443?transport=tcp") to enable it.
+      const turnTlsUrl = process.env.TURN_TLS_URL;
+      if (turnTlsUrl) urls.push(turnTlsUrl);
       iceServers.push({ urls, username: turnUsername, credential: turnCredential });
     }
 

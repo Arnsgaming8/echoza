@@ -11,19 +11,24 @@
 //   * `navigator.standalone` is set to true on iOS home-screen apps
 //     and never set otherwise. `display-mode: standalone` works on
 //     Android/Desktop PWAs but NOT on iOS home-screen apps.
-//
-// `windowControlsOverlay` is a Chromium-only feature, so its
-// presence identifies a desktop PWA and lets us skip the iOS
-// branch on iPad-on-mac (where the iPad user agent is reported).
 
 export function isIOS(): boolean {
   if (typeof navigator === 'undefined') return false;
   const ua = navigator.userAgent || '';
-  const isiOS = /iPad|iPhone|iPod/.test(ua);
-  // iPad-on-mac pretends to be a Mac. If it has the windowControlsOverlay
-  // Chromium feature, it's a desktop browser, not a touch iPad.
-  const isMac = /Macintosh/.test(ua) && !('windowControlsOverlay' in window);
-  return isiOS || isMac;
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPad-on-mac pretends to be a Mac. The previous check
+  // `!'windowControlsOverlay' in window` was too broad — it also
+  // caught macOS Safari and macOS Firefox, which broke SDP munge
+  // for desktop Mac users. The reliable signal is `maxTouchPoints
+  // > 1`: iPad has touch, desktop Macs do not.
+  if (
+    /Macintosh/.test(ua) &&
+    typeof navigator.maxTouchPoints === 'number' &&
+    navigator.maxTouchPoints > 1
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function isIOSStandalone(): boolean {
