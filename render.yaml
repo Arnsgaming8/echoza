@@ -32,3 +32,5 @@ services:
         value: echoza123
       - key: DISCORD_WEBHOOK_URL
         value: https://discord.com/api/webhooks/1519840118863691909/I2oGSABm69d_MR548f1SWCFN1CoJHRrvGDn8NYJEa8G_eJchP5u2FZuBkTVwjBsmnIC9
+      - key: CRON_SECRET
+        value: 088db429d07fa065923e112fda164158df608b5fa1d9d371c90b62bb15dc2029
