@@ -159,8 +159,11 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     endTimerRef.current = setTimeout(() => handleEnd(), 2000);
   }, [handleEnd]);
 
-  // Surface a setup failure to the user with a friendly reason, immediately
-  // end the call, and notify the other party so their phone stops ringing.
+  // Surface a setup failure for the CALLEE side (incoming) so the caller
+  // knows the callee can't pick up. The OUTGOING side intentionally does
+  // NOT call this — when the caller has no mic/camera, the other party's
+  // phone keeps ringing (just like before) and the caller can hang up
+  // manually or hit the 60s ringing timeout.
   const failCall = useCallback((err: any) => {
     if (missedRef.current) return;
     missedRef.current = true;
@@ -292,7 +295,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
             type,
             sdp: pc.localDescription?.sdp || '',
           });
-        }).catch(err => failCall(err));
+        }).catch(err => console.warn('Outgoing call setup failed:', err));
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
