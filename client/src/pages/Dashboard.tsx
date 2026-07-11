@@ -265,15 +265,13 @@ export default function Dashboard() {
     if ('Notification' in window && Notification.permission === 'granted') {
       try { new Notification(title, opts); } catch {}
     }
-  }, []);
-
-  useEffect(() => {
+  }, []);  useEffect(() => {
     const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
 
-    // PushManager works independently of page-level Notification API (iOS PWA + desktop)
+    const initialUserId = user?.id ?? null;
     const subscribePush = (force = false) => {
-      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !user) return;
-
+      if (!initialUserId) return;
       navigator.serviceWorker.ready.then(reg => {
         const maybeUnsub = force
           ? reg.pushManager.getSubscription().then(s => { s?.unsubscribe().catch(() => {}); })
@@ -297,12 +295,10 @@ export default function Dashboard() {
       });
     };
 
-    // Always try push subscription (SW PushManager works without page Notification API)
+    // One-time initial subscribe (no [user] dep — previously re-ran 13+ times
+    // on a single page load because user object references fired across
+    // background refresh, presence sync, etc.)
     subscribePush();
-
-    // Re-subscribe when SW updates (new deploy) — unsubscribes old first
-    const handleSwUpdate = () => { subscribePush(true); };
-    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
 
     const requestNotifPermission = () => {
       if ('Notification' in window && Notification.permission === 'default') {
@@ -311,9 +307,9 @@ export default function Dashboard() {
         });
       }
     };
-
     requestNotifPermission();
 
+    const handleSwUpdate = () => { subscribePush(true); };
     const handleSwMessage = (event: MessageEvent) => {
       if (event.data?.type === 'navigate-conversation') {
         const convId = event.data.conversationId;
@@ -328,7 +324,12 @@ export default function Dashboard() {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
       navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
     };
-  }, [user]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally [] — user ref handles identity changes
+
+
+
+
 
 
 
@@ -381,8 +382,14 @@ export default function Dashboard() {
       console.log('[SERVER DIAG]', diag);
     });
 
-    socket.on('conversations:list', (data: Conversation[]) => {
-      setConversations(data);
+    socket.on('conversations:list', (data: any) => {
+      if (!Array.isArray(data)) {
+        console.error('[Dashboard] conversations:list payload not array, ignoring', data);
+        return;
+      }
+      const valid = data.filter((c: any) => c && typeof c.id === 'string');
+      if (valid.length === 0) return;
+      setConversations(valid as Conversation[]);
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
@@ -610,10 +617,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on('messages:list', (pkt: { conversationId: string; messages: Message[] }) => {
-      const { conversationId, messages: msgs } = pkt;
-
-      setMessages(msgs);
+    socket.on('messages:list', (pkt: any) => {
+      const { conversationId, messages: msgs } = pkt || {};
+      if (!Array.isArray(msgs) || typeof conversationId !== 'string') {
+        console.error('[Dashboard] messages:list payload missing/invalid, ignoring', pkt);
+        return;
+      }
+      const valid = msgs.filter((m: any) =>
+        m && typeof m.id === 'string' && typeof m.conversationId === 'string'
+      );
+      setMessages(valid);
       scrollToBottom(forceScrollNext.current);
       forceScrollNext.current = false;
 
