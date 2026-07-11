@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { apiUrl } from '../utils/api';
+import { supabase } from '../utils/supabase';
 
 interface User {
   id: string;
@@ -189,6 +190,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token: token || '',
       });
     }
+  }, [token]);
+
+  // Populate the Supabase JS session whenever the access token rotates (login,
+  // refresh, page reload). Without this, any `supabase.channel('…')` opened by
+  // the client connects with the ANON role and RLS denies every row event
+  // (causing `postgres_changes` to deliver nothing). With setSession, the
+  // underlying Realtime WebSocket authenticates with the user's JWT and
+  // server-side policies like `auth.uid() = is_participant(...)` let the
+  // matching events through.
+  useEffect(() => {
+    if (!token) {
+      supabase.auth.signOut().catch(() => { /* already signed out */ });
+      return;
+    }
+    const refresh = localStorage.getItem(REFRESH_TOKEN_KEY);
+    if (!refresh) return;
+    supabase.auth
+      .setSession({ access_token: token, refresh_token: refresh })
+      .catch((err) => console.warn('[Auth] supabase.setSession failed:', err));
   }, [token]);
 
   const logout = () => {
