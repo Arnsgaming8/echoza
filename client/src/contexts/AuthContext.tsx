@@ -55,88 +55,147 @@ async function tryRefreshSession(): Promise<{
   }
 }
 
+/**
+ * Synchronously decode the cached Supabase JWT into a stub User. Runs
+ * entirely on the client — no network — and lets us authenticate the
+ * user INSTANTLY on app reopen even when the Render backend is still
+ * cold-starting. Returns null if the token is malformed or missing the
+ * `sub` claim (in which case ProtectedRoute will route to /login).
+ *
+ * Flags `needsRefresh: true` when the access token is within 5 minutes
+ * of expiry. Supabase refresh tokens are SINGLE-USE, so we must NOT
+ * refresh on every mount — only when the access token is actually close
+ * to expiring, otherwise we'd burn the refresh_token on cold-mount.
+ */
+function decodeLocalUser(token: string): {
+  user: User;
+  isExpired: boolean;
+  needsRefresh: boolean;
+} | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    // JWT base64url → standard base64 (Supabase tokens are URL-safe).
+    let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padding = '='.repeat((4 - (b64.length % 4)) % 4);
+    const payloadJson = atob(b64 + padding);
+    const payload = JSON.parse(payloadJson);
+    if (!payload?.sub || typeof payload.sub !== 'string') return null;
+    // Treat missing/non-positive exp as -1 ('unknown') and gate both flags
+    // on a known exp.  Otherwise we'd proactively refresh on every mount
+    // for any token with no exp claim (e.g. hand-rolled test JWTs) and
+    // burn Supabase's single-use refresh token.
+    const expMs = typeof payload.exp === 'number' && payload.exp > 0
+      ? payload.exp * 1000
+      : -1;
+    const now = Date.now();
+    return {
+      user: {
+        id: payload.sub,
+        username: payload.user_metadata?.username || '',
+        avatar: '',
+        online: false,
+      },
+      isExpired: expMs > 0 && expMs < now,
+      needsRefresh: expMs > 0 && expMs < now + 60_000,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('echoza-token'));
-  const [authLoading, setAuthLoading] = useState(!!localStorage.getItem('echoza-token'));
+  // Synchronously derive the initial user from the cached JWT — NO
+  // network round-trip — so ProtectedRoute never sees an unauthenticated
+  // user just because the Render backend is cold-starting. The Dashboard
+  // renders with a stub user within ~5 ms of mount; a background effect
+  // then refines avatar/username via /api/users/me. If the cached token
+  // is malformed we fall through to user=null (login screen).
+  const initialStoredToken = localStorage.getItem('echoza-token');
+  const initialDecoded = initialStoredToken
+    ? decodeLocalUser(initialStoredToken)
+    : null;
+
+  const [user, setUser] = useState<User | null>(initialDecoded?.user ?? null);
+  const [token, setToken] = useState<string | null>(initialStoredToken);
+  const [authLoading, setAuthLoading] = useState(false);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ── Initial auth check ──────────────────────────────────────────────────
-  // Strategy: try /api/users/me FIRST with the stored access token.
-  // The old approach of calling /api/auth/refresh on EVERY page load always
-  // fails because Supabase refresh tokens expire and are single-use.  That
-  // wasted HTTP call also logged a confusing 401 in the console every time.
-  //
-  // If /api/users/me fails (access token expired), THEN try refresh as a
-  // recovery mechanism.  If both fail, the user is shown the login screen.
+  // ── Background refinement + proactive refresh (background-only — UI is
+  // already authenticated via the stub user from localStorage at mount).
+  // Failures here DO NOT bounce the user to /login; the cached token lets
+  // a hard refresh re-attempt validation safely.
   useEffect(() => {
-    if (!token) {
-      setAuthLoading(false);
-      return;
-    }
+    if (!token) return;
 
     let cancelled = false;
     let retries = 0;
-    // Bumped 3 → 35: Render free-tier cold-starts take 30-60s, and the
-    // old limit (3×2s = 6s) meant we'd nuke tokens before the backend
-    // could even respond. 35 × 2s = ~70s patience — generous but bounded.
     const MAX_RETRIES = 35;
     const RETRY_DELAY = 2000;
 
+    const decoded = decodeLocalUser(token);
+
     const runCheck = async (): Promise<void> => {
       if (cancelled) return;
-      try {
-        const res = await fetch(apiUrl('/api/users/me'), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const err: any = new Error(`HTTP ${res.status}`);
-          err.status = res.status;
-          throw err;
-        }
-        const data = await res.json();
-        if (!cancelled) {
-          setUser(data);
-          setAuthLoading(false);
-        }
-      } catch (err: any) {
-        if (cancelled) return;
 
-        // ── Access token expired — try refresh as recovery ──
-        if (err?.status === 401) {
-          const refreshData = await tryRefreshSession();
-          if (refreshData && !cancelled) {
-            localStorage.setItem('echoza-token', refreshData.token);
-            localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
-            setToken(refreshData.token);
-            setUser(refreshData.user);
-            setAuthLoading(false);
-            return;
-          }
-
-          // Both access token AND refresh failed — nuke everything
+      // Step 1: refresh proactively only when the access token is near
+      // expiry. setToken(new) re-runs this effect with the fresh token.
+      if (decoded?.needsRefresh) {
+        const refreshData = await tryRefreshSession();
+        if (refreshData) {
+          localStorage.setItem('echoza-token', refreshData.token);
+          localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
+          setToken(refreshData.token);
+          setUser(prev => prev ? { ...prev, ...refreshData.user } : refreshData.user);
+          return;
+        }
+        // Refresh failed. If the token is genuinely expired, force re-login.
+        // If the token is still valid by clock (just below 5-min buffer),
+        // fall through and try /me with the original token.
+        if (decoded.isExpired) {
           localStorage.removeItem('echoza-token');
           localStorage.removeItem(REFRESH_TOKEN_KEY);
           setToken(null);
           setUser(null);
-          setAuthLoading(false);
           return;
         }
+      }
 
-        // Transient error — retry a few times
+      // Step 2: best-effort /api/users/me to refine avatar/username.
+      // Stand on a 401 with a refresh-and-retry once; otherwise treat as
+      // transient and retry up to 35×2s = ~70s (Render cold-start budget).
+      try {
+        const activeToken = localStorage.getItem('echoza-token') || token;
+        const res = await fetch(apiUrl('/api/users/me'), {
+          headers: { Authorization: `Bearer ${activeToken}` },
+        });
+        if (!res.ok) {
+          if (res.status === 401) {
+            const refreshData = await tryRefreshSession();
+            if (refreshData) {
+              localStorage.setItem('echoza-token', refreshData.token);
+              localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
+              setToken(refreshData.token);
+              setUser(prev => prev ? { ...prev, ...refreshData.user } : refreshData.user);
+              return;
+            }
+          }
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!cancelled && data?.id) {
+          setUser(prev => prev ? { ...prev, ...data } : data);
+        }
+      } catch {
+        if (cancelled) return;
         retries += 1;
         if (retries < MAX_RETRIES) {
           retryTimeoutRef.current = setTimeout(runCheck, RETRY_DELAY);
           return;
         }
-
-        // Out of retries on transient error — keep tokens intact so a hard
-        // refresh can recover, but stop blocking the UI. If the user truly
-        // has an invalid token they'll see an empty dashboard; the cached
-        // token in localStorage lets the next mount re-attempt validation.
-        setAuthLoading(false);
-        setUser((prev) => prev); // unchanged — preserve any partial state
+        // Out of retries on transient error — KEEP the stub user from
+        // localStorage. Tokens preserved so a hard refresh re-attempts.
       }
     };
 
