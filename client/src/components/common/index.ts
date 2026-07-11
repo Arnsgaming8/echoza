@@ -4,3 +4,4 @@ export { default as Input } from './Input';
 export { default as PasswordInput } from './PasswordInput';
 export { default as Badge } from './Badge';
 export { default as StatusDot } from './StatusDot';
+export { default as SessionExpiredBanner } from './SessionExpiredBanner';

@@ -5,13 +5,13 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { verifyAccessToken } from './auth.js';
+import { verifyAccessToken, getOrCreateEchozaSecurityId, getOrCreateDirectConversation, warningMessageId, SESSION_DURATION_MS } from './auth.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket } from './socket.js';
 import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
-import pushRoutes from './routes/push.routes.js';
+import pushRoutes, { sendPushNotification } from './routes/push.routes.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
 
@@ -70,15 +70,123 @@ async function main() {
     res.json({ sent: true });
   });
 
-  app.post('/api/heartbeat', async (req, res) => {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    const decoded = await verifyAccessToken(authHeader.slice(7));
-    if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
-    res.json({ ok: true });
-  });
+app.post('/api/heartbeat', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
+  const decoded = await verifyAccessToken(authHeader.slice(7));
+  if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
+  res.json({ ok: true });
+});
 
-  app.get('/api/conversations', async (req, res) => {
+// ── Daily cron entry for pre-expiry warnings ────────────────────────────────
+// Called from cron-job.org (or any uptime pinger) once a day. Auth via shared
+// secret header; iterates Supabase Auth users and notifies those whose
+// 30-day window ends in the next 24h. Idempotent via UUIDv5 message-ids.
+app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
+  const expected = process.env.CRON_SECRET;
+  if (!expected) {
+    console.error('[security-cron] CRITICAL: CRON_SECRET env var is not configured on this server. The daily expiry-warning cron CANNOT run. Set it via Render > Environment > Add CRON_SECRET (e.g. `openssl rand -hex 32`).');
+    res.status(503).json({
+      error: 'CRON_SECRET env var not configured on server',
+      remediation: 'Set CRON_SECRET in Render Environment Variables. Generate with: openssl rand -hex 32',
+    });
+    return;
+  }
+  const provided = req.headers['x-cron-secret'];
+  if (provided !== expected) {
+    res.status(401).json({ error: 'Invalid cron secret' });
+    return;
+  }
+
+  try {
+    const botId = await getOrCreateEchozaSecurityId();
+    const now = Date.now();
+    const tomorrowStart = now + 24 * 60 * 60 * 1000;
+    const warningContent =
+      '⚠️ Heads up! Echoza will log you out tomorrow for security. Re-sign-in to keep your session.';
+
+    let page = 1;
+    let notified = 0;
+    let skippedDuplicate = 0;
+    let pushFailed = 0;
+    let errors = 0;
+    while (true) {
+      const { data, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+      if (listErr) throw listErr;
+      const users = data.users;
+      if (!users.length) break;
+
+      for (const u of users) {
+        if (!u.last_sign_in_at) continue;
+        const expiresAt = new Date(u.last_sign_in_at).getTime() + SESSION_DURATION_MS;
+        // Window: expiry is in the next 24h AND still in the future.
+        if (expiresAt <= now || expiresAt > tomorrowStart) continue;
+
+        try {
+          // 1. Resolve or create 1:1 conversation between bot and user.
+          const convId = await getOrCreateDirectConversation(botId, u.id);
+          // 2. Deterministic message id keyed on the user's EXPIRY DATE (not
+          // the cron's run date) — guarantees a single message per 30-day
+          // window per user regardless of which cron runs hit it. Multiple
+          // crons across days produce the same id and collide on PK.
+          const expiryIsoDay = new Date(expiresAt).toISOString().slice(0, 10);
+          const msgId = warningMessageId(u.id, expiryIsoDay);
+          const { error: insertErr } = await supabase.from('messages').insert({
+            id: msgId,
+            conversation_id: convId,
+            sender_id: botId,
+            content: warningContent,
+            created_at: new Date().toISOString(),
+          });
+          // 23505 = unique_violation = already warned for this expiry → skip.
+          if (insertErr && insertErr.code === '23505') {
+            skippedDuplicate++;
+            continue;
+          }
+          if (insertErr) {
+            console.warn(`[security-cron] message insert failed for ${u.id}: ${insertErr.message}`);
+            errors++;
+            continue;
+          }
+
+          // 3. Update conversation preview for sidebar ordering.
+          await supabase.from('conversations').update({
+            last_message: warningContent,
+            last_message_at: new Date().toISOString(),
+            last_message_sender_id: botId,
+          }).eq('id', convId);
+
+          // 4. Push notification — best-effort. The in-app message is the
+          // source of truth; push failure bumps `pushFailed` not `errors`.
+          try {
+            await sendPushNotification(
+              u.id,
+              'Echoza Security',
+              "You'll be logged out tomorrow. Re-sign-in to keep your session.",
+              '/',
+              convId,
+            );
+          } catch (pushErr) {
+            pushFailed++;
+            console.warn(`[security-cron] push failed for ${u.id}:`, pushErr);
+          }
+          notified++;
+        } catch (perUserErr) {
+          console.error(`[security-cron] failed for user ${u.id}:`, perUserErr);
+          errors++;
+        }
+      }
+      if (users.length < 1000) break;
+      page++;
+    }
+    res.json({ notified, skippedDuplicate, pushFailed, errors });
+  } catch (err: any) {
+    console.error('[security-cron] failed:', err);
+    res.status(500).json({ error: err?.message || 'Cron endpoint failed' });
+  }
+});
+
+app.get('/api/conversations', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       res.status(401).json({ error: 'Unauthorized' });

@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { registerUser, loginUser, verifyAccessToken, usernameToEmail } from '../auth.js';
+import { registerUser, loginUser, verifyAccessToken, checkSessionExpiry, usernameToEmail } from '../auth.js';
 import { supabase, anonSupabase } from '../supabase.js';
 
 const router = Router();
@@ -71,6 +71,19 @@ router.get('/me', async (req: Request, res: Response) => {
   const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
+    return;
+  }
+
+  // ── 30-day rolling session-expiry check (security policy). ──
+  // Server returns 401 with `reason: 'session_expired_30_days'` when
+  // now > last_sign_in_at + 30d; the client AuthContext catches this,
+  // nuke-tokens, and hard-redirects to Landing for the banner UI.
+  const expiry = checkSessionExpiry(decoded.lastSignInAt);
+  if (expiry) {
+    res.status(401).json({
+      error: 'Session expired after 30 days for security',
+      ...expiry,
+    });
     return;
   }
 

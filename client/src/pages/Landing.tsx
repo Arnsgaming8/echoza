@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '../components/common';
+import { Button, SessionExpiredBanner } from '../components/common';
 
 const Wrapper = styled.div`
   min-height: 100vh;
@@ -147,6 +147,7 @@ export default function Landing() {
     <Wrapper>
       <BackgroundGlow />
       <BackgroundGlow2 />
+      <SessionExpiredBanner />
       <Content>
         <TextSection>
           <Title>Echoza</Title>
