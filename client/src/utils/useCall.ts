@@ -238,11 +238,22 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
     const run = async () => {
       let config: RTCConfiguration = FALLBACK_ICE_CONFIG;
-      try {
-        const res = await fetch(apiUrl('/api/ice-config'));
-        const data = await res.json();
-        if (data.iceServers) config = { iceServers: data.iceServers };
-      } catch {}
+      // ICE pre-warm: Dashboard mounts fetch /api/ice-config and stashes
+      // it on window._echozaIce. Use it instantly so we don't pay the
+      // 100–500 ms round-trip on every call. Fall back to FALLBACK_ICE_CONFIG
+      // if the cache is missing or the endpoint errored silently.
+      if ((window as any)._echozaIce) {
+        config = { iceServers: (window as any)._echozaIce };
+      } else {
+        try {
+          const res = await fetch(apiUrl('/api/ice-config'));
+          const data = await res.json();
+          if (data.iceServers) {
+            config = { iceServers: data.iceServers };
+            (window as any)._echozaIce = data.iceServers;
+          }
+        } catch {}
+      }
 
       if (cancelled) return;
 
@@ -250,17 +261,48 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
-      const setupLocalMedia = async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: type === 'video',
-        });
-        setLocalStream(stream);
-        localStreamRef.current = stream;
-        cleanupStream = stream;
-        stream.getTracks().forEach(track => {
-          pc.addTrack(track, stream);
-        });
+      // Setup local media with progressive constraint relaxation. NotFoundError
+      // on the first pass is the most common 'no mic/camera' symptom — it's
+      // triggered by (a) Chromium's tab-cold-start device-enumeration race,
+      // or (b) a hardware-with-no-camera plus an outgoing video call. We
+      // retry once after a short delay, then if STILL failing AND this is
+      // a video call, drop the video constraint and accept an audio-only
+      // call as a graceful fallback instead of failing the call entirely.
+      const setupLocalMedia = async (attempt = 0): Promise<void> => {
+        const wantVideo = type === 'video' && attempt < 2;
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: wantVideo,
+          });
+          setLocalStream(stream);
+          localStreamRef.current = stream;
+          cleanupStream = stream;
+          stream.getTracks().forEach(track => {
+            pc.addTrack(track, stream);
+          });
+          if (!wantVideo && type === 'video') {
+            // Camera unavailable but proceeding audio-only. Caller and
+            // peer both know the call is voice-only.
+            console.warn('[useCall] camera unavailable, proceeding audio-only');
+          }
+          return;
+        } catch (err: any) {
+          if (err?.name === 'NotFoundError') {
+            if (attempt === 0) {
+              // First NotFoundError: Chromium's tab-cold-start race.
+              // Wait briefly and retry — devices usually reappear.
+              await new Promise(r => setTimeout(r, 400));
+              return setupLocalMedia(1);
+            }
+            if (attempt === 1 && type === 'video') {
+              // Video caller's camera is genuinely missing. Drop video
+              // and run as audio-only so the call still succeeds.
+              return setupLocalMedia(2);
+            }
+          }
+          throw err;
+        }
       };
 
       const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
@@ -334,7 +376,31 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
             type,
             sdp: pc.localDescription?.sdp || '',
           });
-        }).catch(err => console.warn('Outgoing call setup failed:', err));
+        }).catch(err => {
+          console.warn('Outgoing call setup failed:', err);
+          // Surface the failure to the caller too — previously the chain
+          // swallowed setup errors and the UI stuck on a silent 'Calling...'
+          // with no progress indication. failCall() emits call:end to
+          // release the receiver (so they don't see a phantom ring) and
+          // shows a friendly error overlay on the caller side.
+          if (!missedRef.current) failCall(err);
+        });
+
+        // Re-emit the offer if the socket cycles mid-ringing. The receiver
+        // path is unaffected, but our local SDP is still valid, and a fresh
+        // socket means the server's pending-call timer tied to the old
+        // socket id may have been orphaned. Replaying the offer re-binds it.
+        const onSocketReconnect = () => {
+          const live = pcRef.current;
+          if (live?.localDescription?.sdp) {
+            socket.emit('call:offer', {
+              receiverId: contact.id,
+              type,
+              sdp: live.localDescription.sdp,
+            });
+          }
+        };
+        socket.io.on('reconnect', onSocketReconnect);
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
@@ -376,6 +442,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           socket.off('call:answer', onAnswer);
           socket.off('call:ice-candidate', onIce);
           socket.off('call:end', onEnd);
+          socket.io.off('reconnect', onSocketReconnect);
         };
         return;
       }

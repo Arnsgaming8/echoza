@@ -775,6 +775,16 @@ export function setupSocket(io: SocketServer): void {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
       const callType = type || 'audio';
+      // Acknowledge to the CALLER whether the receiver is currently
+      // socket-connected. Push always fires (below) as a fallback, but
+      // this ack lets the caller UI distinguish 'Ringing on X's phone'
+      // from 'Push notification sent to X' in <50 ms instead of waiting
+      // for the WebSocket round-trip to time out.
+      const receiverSockets = onlineUsers.get(receiverId);
+      socket.emit('call:ringing', {
+        offline: !receiverSockets || receiverSockets.size === 0,
+        callType,
+      });
       emitToUser(io, receiverId, 'call:offer', {
         from: userId, username, avatar: userData?.avatar || '',
         type: callType, sdp,

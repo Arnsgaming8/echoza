@@ -428,6 +428,18 @@ export default function Dashboard() {
     })();
   }, []);
 
+  // ── Pre-warm ICE config so call setup is instant ─────────────────────────
+  // useCall.ts reads `window._echozaIce` synchronously and uses it as the
+  // first-choice RTCConfiguration. Without this, every outgoing call pays
+  // the 100–500 ms round-trip to /api/ice-config before socket.emit fires,
+  // which surfaced as a noticeable delay before the receiver's phone rings.
+  useEffect(() => {
+    fetch(apiUrl('/api/ice-config'))
+      .then(r => r.json())
+      .then(d => { if (d?.iceServers) (window as any)._echozaIce = d.iceServers; })
+      .catch(() => { /* FALLBACK_ICE_CONFIG in useCall.ts already covers cold start */ });
+  }, []);
+
   // Fetch conversations via HTTP immediately — no need to wait for socket
   useEffect(() => {
     const token = localStorage.getItem('echoza-token');
@@ -1021,15 +1033,23 @@ export default function Dashboard() {
     };
   }, [incomingCall]);
 
-  const handleAcceptCall = () => {
+  const handleAcceptCall = async () => {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
     setIncomingSdp(incomingCall.sdp);
-    // Pre-warm media permission within user gesture (required by iOS Safari)
+    // Pre-warm media WITHIN the user gesture (required by iOS Safari)
+    // and AWAIT it so tracks are fully released before AudioCallUI /
+    // VideoCallUI mounts. Without awaiting, Chrome can briefly consider
+    // the device still held by this stream and return NotFoundError to
+    // setupLocalMedia() moments later — manifesting as a confusing
+    // 'no mic or camera available' error on a device the user JUST had
+    // working. setupLocalMedia() now also has its own retry/fallback
+    // for the rare case this still races.
     const needsVideo = incomingCall.type === 'video';
-    navigator.mediaDevices.getUserMedia({ audio: true, video: needsVideo })
-      .then(stream => stream.getTracks().forEach(t => t.stop()))
-      .catch(() => {});
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: needsVideo });
+      stream.getTracks().forEach(t => t.stop());
+    } catch { /* keep going — actual media setup will retry with constraint relaxation in useCall.ts */ }
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {
