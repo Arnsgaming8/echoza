@@ -14,6 +14,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(clients.claim());
 });
 
+let HEARTBEAT_TICK_COUNT = 0;
 function startHeartbeat() {
   if (HEARTBEAT_INTERVAL) clearInterval(HEARTBEAT_INTERVAL);
   HEARTBEAT_INTERVAL = setInterval(() => {
@@ -21,6 +22,21 @@ function startHeartbeat() {
     fetch('/api/heartbeat', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + HEARTBEAT_TOKEN, 'Content-Type': 'application/json' },
+    }).catch(() => {});
+    // Presence relay for iOS PWA background survival. The JS-side
+    // `setInterval(25s)` in SocketContext dies when iOS suspends the
+    // context (~30s after background); without this relay, the user's
+    // server-side heartbeat goes stale and friends see them as offline.
+    // We tick once per second; broadcasting every 5 ticks (~5s) is light
+    // enough that foregrounded tabs aren't spammed. When the JS context
+    // IS alive, the receiving client immediately emits socket
+    // 'presence:heartbeat' — same effect as the in-tab interval.
+    HEARTBEAT_TICK_COUNT++;
+    if (HEARTBEAT_TICK_COUNT % 5 !== 0) return;
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
+      for (const client of windowClients) {
+        client.postMessage({ type: 'presence:relay', ts: Date.now() });
+      }
     }).catch(() => {});
   }, 1000);
 }

@@ -12,6 +12,21 @@ interface AuthSocket extends Socket {
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
+// Heartbeat-driven presence freshness. The user is "stale" if no
+// `presence:heartbeat` has arrived in the last PRESENCE_STALE_MS. We
+// evict them from `onlineUsers` so the green dot drops the moment a
+// friend closes their tab / loses network. This is the Socket.IO
+// replacement for the previous Supabase Realtime `presence` channel.
+//
+// The previous `disconnect` handler also drops the user when their
+// LAST socket closes. Heartbeat eviction handles the rarer case of a
+// TCP keepalive holding the socket open while the JS context is dead
+// (e.g. iOS PWA backgrounded past the 30s socket-keepalive) or the
+// device is on cellular with a wedged router.
+const userHeartbeats = new Map<string, { lastSeen: number; hidden: boolean; online: boolean }>();
+const PRESENCE_STALE_MS = 60_000;
+const PRESENCE_SWEEP_MS = 15_000;
+
 // Server-side pending-call timers. Keyed on `${caller}_${callee}` so we
 // reliably fire a missed-call record even if the caller's tab closes
 // before its own client-side 60s timer can emit call:missed. The CLIENT
@@ -165,6 +180,46 @@ async function emitToGroupMembers(io: SocketServer, groupId: string, event: stri
 }
 
 /**
+ * Periodic sweep of stale heartbeats. Any user whose last heartbeat is
+ * older than PRESENCE_STALE_MS but who still has open sockets is
+ * "stale" — typically: iOS PWA backgrounded past 30s socket-keepalive,
+ * or cellular on a wedged router. The socket might still be open due
+ * to TCP keepalive; the absence of an Echoza-level heartbeat means the
+ * user is logically offline. Drop them and broadcast the new state.
+ *
+ * This replaces the Supabase Realtime `presence` channel that
+ * previously synced online status. With the consolidation to
+ * Socket.IO, this sweep is the authoritative freshness check.
+ */
+function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
+  return setInterval(() => {
+    const now = Date.now();
+    let changed = false;
+    for (const [userId, hb] of [...userHeartbeats.entries()]) {
+      const connected = onlineUsers.has(userId);
+      if (connected && now - hb.lastSeen > PRESENCE_STALE_MS) {
+        // Drop ALL of this user's sockets so the broadcast reflects
+        // them going offline. Clients will receive `online-users` with
+        // them removed.
+        const sockets = onlineUsers.get(userId);
+        if (sockets) {
+          for (const sid of sockets.keys()) {
+            const s = io.sockets.sockets.get(sid);
+            s?.disconnect(true);
+          }
+        }
+        onlineUsers.delete(userId);
+        userHeartbeats.delete(userId);
+        changed = true;
+      }
+    }
+    if (changed) {
+      io.emit('online-users', Array.from(onlineUsers.keys()));
+    }
+  }, PRESENCE_SWEEP_MS);
+}
+
+/**
  * Resolve the canonical direct (2-person) conversation for a user pair.
  * Picks the OLDEST existing direct conversation deterministically so that
  * if a historical TOCTOU race spawned duplicates between the same pair,
@@ -263,6 +318,29 @@ export function setupSocket(io: SocketServer): void {
 
     socket.on('user:myIp', () => {
       socket.emit('user:myIp', socket.handshake.address);
+    });
+
+    // Heartbeat. Client emits this every 25s while connected; on
+    // iOS PWA background the SW also pings so presence doesn't drop.
+    // Holding a socket open but not emitting heartbeats is treated as
+    // "maybe stale" — server tolerates up to PRESENCE_STALE_MS before
+    // evicting, which absorbs normal network jitter without
+    // incorrectly marking a user offline.
+    socket.on('presence:heartbeat', ({ hidden, online }: { hidden?: boolean; online?: boolean } = {}) => {
+      if (!userId) return;
+      userHeartbeats.set(userId, {
+        lastSeen: Date.now(),
+        hidden: hidden ?? false,
+        online: online ?? true,
+      });
+    });
+
+    // Initial heartbeat on connect so the server has a fresh timestamp
+    // even before the SW's first 25s tick lands.
+    userHeartbeats.set(userId, {
+      lastSeen: Date.now(),
+      hidden: false,
+      online: true,
     });
 
     socket.on('users:search', async ({ query: q }: { query: string }) => {
@@ -740,7 +818,14 @@ export function setupSocket(io: SocketServer): void {
         .from('participants')
         .insert({ conversation_id: groupId, user_id: newMemberId });
 
-      emitToUser(io, newMemberId, 'conversation:update', { conversationId: groupId });
+      // Notify EVERY group member. The new joiner needs the conv to appear
+      // in their sidebar; existing members need their sidebar to reflect
+      // the new member count / preview. Replaces the postgres_changes
+      // fallback that previously covered both.
+      emitToGroupMembers(io, groupId, 'participant:change', {
+        groupId, userId: newMemberId, op: 'INSERT',
+      });
+      emitToGroupMembers(io, groupId, 'conversation:update', { conversationId: groupId });
       socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
     });
 
@@ -919,11 +1004,10 @@ export function setupSocket(io: SocketServer): void {
           pendingCallTimers.delete(key);
         }
       }
-      // Broadcast the updated online-users list to ALL remaining sockets so
-      // they immediately mark the disconnected user as offline (no page
-      // refresh needed). Belt-and-suspenders with the Supabase presence
-      // round-trip — this is the fast path so the green dot drops the
-      // instant a friend closes their browser.
+      // Drop this user's heartbeat record so the sweep interval doesn't
+      // resurrect them after a clean disconnect. The previous 'online-users'
+      // broadcast remains the fast path — Supabase presence is gone.
+      userHeartbeats.delete(userId);
       io.emit('online-users', Array.from(onlineUsers.keys()));
     });
 
@@ -946,4 +1030,44 @@ export function setupSocket(io: SocketServer): void {
     }
 
   });
+}
+
+/**
+ * Expose the presence-sweep interval handle so the caller can attach
+ * cleanup to the server lifecycle (Render free tier rotates instances).
+ * Without this export, the sweep interval is anchored to `startPresenceSweep`'s
+ * scope and is garbage-collected when that scope exits. Doing it
+ * this way keeps the interval referenceable for SIGTERM cleanup.
+ */
+export const _serverPresenceSweep: { handle: NodeJS.Timeout | null } = { handle: null };
+
+/**
+ * Helper used by the REST routes (e.g. /api/security cron) to emit
+ * real-time events to a user via the same `onlineUsers` registry the
+ * socket handlers use, so DB-driven updates appear live even though
+ * the cron path can't open a socket itself. Reuses the top-of-file
+ * `SocketServer` import (no second `socket.io` import needed).
+ */
+export function emitToUserViaRegistry(io: SocketServer, userId: string, event: string, data: any): void {
+  emitToUser(io, userId, event, data);
+}
+
+/**
+ * Boot the heartbeat-driven presence sweep. Called once from
+ * `server/src/index.ts` after `setupSocket()` finishes wiring handlers.
+ * Stores the interval handle in `_serverPresenceSweep.handle` so
+ * SIGTERM cleanup can clearInterval it cleanly.
+ */
+export function startPresenceSweeper(io: SocketServer): NodeJS.Timeout {
+  _serverPresenceSweep.handle = startPresenceSweep(io);
+  return _serverPresenceSweep.handle;
+}
+
+/**
+ * Convenience helper used by REST routes that don't have a free `io`
+ * handle: look up the user in `onlineUsers` (read-only test) so the
+ * cron can skip `emitToUserViaRegistry` work for offline users.
+ */
+export function isUserConnected(userId: string): boolean {
+  return onlineUsers.has(userId);
 }

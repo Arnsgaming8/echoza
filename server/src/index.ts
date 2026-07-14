@@ -7,13 +7,18 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import { verifyAccessToken, getOrCreateEchozaSecurityId, getOrCreateDirectConversation, warningMessageId, SESSION_DURATION_MS } from './auth.js';
 import { sendDiscordNotification } from './discord.js';
-import { setupSocket } from './socket.js';
+import { setupSocket, startPresenceSweeper, emitToUserViaRegistry } from './socket.js';
 import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes, { sendPushNotification } from './routes/push.routes.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3001;
+
+// Module-scoped Socket.IO reference so REST routes (cron endpoints, push
+// endpoints) can emit real-time events using the same registry the socket
+// handlers use. Set this once after setupSocket() completes.
+let currentIo: SocketServer | null = null;
 
 async function main() {
   const app = express();
@@ -169,6 +174,27 @@ app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
           } catch (pushErr) {
             pushFailed++;
             console.warn(`[security-cron] push failed for ${u.id}:`, pushErr);
+          }
+          // 5. Real-time socket events for connected clients. Replaces the
+          // postgres_changes path Echoza previously relied on for cron-
+          // generated messages. Emits the same `message:new` /
+          // `conversation:update` events that socket.ts emits from the
+          // interactive `message:send` path, so the client sees the
+          // warning arrival in real time without polling.
+          if (currentIo) {
+            const liveMessage = {
+              id: msgId,
+              conversationId: convId,
+              senderId: botId,
+              senderUsername: 'Echoza Security',
+              content: warningContent,
+              attachments: [],
+              read: false,
+              createdAt: new Date().toISOString(),
+              isGroup: false,
+            };
+            emitToUserViaRegistry(currentIo, u.id, 'message:new', liveMessage);
+            emitToUserViaRegistry(currentIo, u.id, 'conversation:update', { conversationId: convId });
           }
           notified++;
         } catch (perUserErr) {
@@ -510,6 +536,8 @@ app.get('/api/conversations', async (req, res) => {
   }
 
   setupSocket(io);
+  startPresenceSweeper(io);
+  currentIo = io;
 
   httpServer.listen(PORT, () => {
     console.log(`Echoza server running on port ${PORT}`);

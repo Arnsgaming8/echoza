@@ -15,7 +15,11 @@ import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
-import { useRealtimeChat } from '../utils/useRealtimeChat';
+// useRealtimeChat was removed in the websocket-consolidation refactor.
+// Live DB deltas are delivered via Socket.IO events instead of
+// Supabase Realtime `postgres_changes`. The replacement effect lives
+// further down in this file under the "Realtime → Socket.IO events"
+// comment block.
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
@@ -220,24 +224,6 @@ function dedupeConversations(list: any[]): Conversation[] {
     out.push(c as Conversation);
   }
   return out;
-}
-
-/**
- * Realtime payloads arrive straight from Postgres. If the `attachments`
- * column is TEXT (storing `[]`-shaped JSON), the payload value is a string,
- * not an array. Returns a sane array either way.
- */
-function coerceAttachments(raw: unknown): Attachment[] {
-  if (Array.isArray(raw)) return raw as Attachment[];
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? (parsed as Attachment[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -870,102 +856,32 @@ export default function Dashboard() {
     return () => { socket.off('message:read-status', handler); };
   }, [socket]);
 
-  // ── Supabase Realtime → live DB deltas into React state ─────────────────────
-  // Runs in PARALLEL with the Socket.IO listeners above. State setters dedupe
-  // by `id`, so a message arriving via both socket AND realtime is rendered
-  // exactly once. Realtime is the FAST path (~100 ms RTT via websocket);
-  // Socket.IO remains the RELIABLE safety net for missed inserts during the
-  // brief window before RLS/auth is set up, or while the supabase websocket
-  // is reconnecting. RLS policies on `messages`, `conversations`,
-  // `participants`, `read_receipts` are responsible for filtering events to
-  // the current user's rows only — see server/src/scripts/secure-rls-and-realtime.sql.
-  useRealtimeChat({
-    onMessageInsert: (row) => {
-      // Self-sends come back via socket `message:sent` with the enriched
-      // payload (senderUsername, isGroup, …). Skip realtime for self to avoid
-      // double-render + a spurious READ emit.
-      if (row.sender_id === userRef.current?.id) return;
+  // ── Live DB deltas via Socket.IO (replaces Supabase Realtime) ────────────────
+  // The previous `useRealtimeChat({ ... })` subscriber list has been
+  // replaced with the socket listeners below. Both paths updated the same
+  // React state setters (setMessages, setConversations, setDeleteMode,
+  // setSelectedMessages), so the consolidation is purely a transport
+  // change — no UX regression. Socket events are slightly faster than
+  // postgres_changes (in-process emitToUser, no logical replication
+  // hop), which is what the user asked for.
+  //
+  // DEDUPLICATION: `message:new` is already handled by the message:new
+  // listener further up in the second [socket] useEffect. We only need
+  // to add the participant:change handler here because the previous
+  // realtime path was the only emitter for it. Other realtime events
+  // (message insert/delete, conversation update) already have equivalent
+  // socket-based paths via the existing handlers.
+  useEffect(() => {
+    if (!socket) return;
 
-      const isActive = row.conversation_id === activeChatRef.current;
-      const senderName = row.sender_id.slice(0, 8);
-      const newMsg: Message = {
-        id: row.id,
-        conversationId: row.conversation_id,
-        senderId: row.sender_id,
-        senderUsername: senderName,
-        content: row.content ?? '',
-        attachments: coerceAttachments(row.attachments),
-        read: false,
-        createdAt: row.created_at,
-        isGroup: row.is_group,
-      };
+    socket.on('participant:change', ({ groupId, userId: changedUserId, op }: { groupId: string; userId: string; op: 'INSERT' | 'DELETE' }) => {
+      const isAboutSelf = changedUserId === userRef.current?.id;
+      const isActive = groupId === activeChatRef.current;
 
-      if (isActive) {
-        setMessages(prev => {
-          if (prev.some(m => m.id === newMsg.id)) return prev;
-          return [...prev, newMsg];
-        });
-        setConversations(prev => prev.map(c =>
-          c.id === row.conversation_id ? { ...c, unread: 0 } : c
-        ));
-        // Don't emit `message:read` here — the socket `message:new` handler
-        // does it 500 ms later, and double-emitting wastes a round-trip
-        // (and risks a duplicate row in read_receipts if it lacks a PK).
-      } else {
-        // Do NOT bump local `unread` from realtime — server's
-        // conversations:list handler computes the canonical value using
-        // `last_read_at`, which we don't track locally. Socket refetch
-        // lands within ~100ms and overrides anyway. We DO update the
-        // preview/timestamp here so the sidebar feels instant.
-        setConversations(prev => prev.map(c =>
-          c.id === row.conversation_id
-            ? { ...c, lastMessage: newMsg.content || c.lastMessage, lastTime: newMsg.createdAt }
-            : c
-        ));
-        notify('Echoza', `${senderName}: ${newMsg.content || 'Sent an attachment'}`, newMsg.conversationId, { conversationId: newMsg.conversationId });
-      }
-    },
-
-    onMessageDelete: (msgId, conversationId) => {
-      setMessages(prev => prev.filter(m => m.id !== msgId));
-      setConversations(prev => prev.map(c =>
-        c.id === conversationId ? { ...c, unread: 0 } : c
-      ));
-      setDeleteMode(false);
-      setSelectedMessages(prev => {
-        const next = new Set(prev);
-        next.delete(msgId);
-        return next;
-      });
-    },
-
-    onConversationUpdate: (row) => {
-      // Realtime UPDATE payload only contains raw columns; merge the live
-      // `last_message*` preview/timestamp into our local Conversation
-      // without nuking the computed `contact`/`members`/`unread`. Move the
-      // updated conv to the top of the list in O(N) instead of sorting O(N
-      // log N) on every UPDATE.
-      setConversations(prev => {
-        const idx = prev.findIndex(c => c.id === row.id);
-        if (idx === -1) return prev;
-        const conv = prev[idx];
-        const newLastMessage = row.last_message ?? conv.lastMessage;
-        const newLastTime = row.last_message_at ?? conv.lastTime;
-        if (newLastTime === conv.lastTime && newLastMessage === conv.lastMessage) return prev;
-        const updated = { ...conv, lastMessage: newLastMessage, lastTime: newLastTime };
-        const rest = prev.filter(c => c.id !== row.id);
-        return [updated, ...rest];
-      });
-    },
-
-    onParticipantChange: ({ conversation_id, user_id, op }) => {
-      const isAboutSelf = user_id === userRef.current?.id;
-      const isActive = conversation_id === activeChatRef.current;
-
-      // I was removed from a conversation — drop it from my sidebar entirely,
+      // I was removed from a group — drop it from my sidebar entirely,
       // and close the active chat if I was viewing it.
       if (op === 'DELETE' && isAboutSelf) {
-        setConversations(prev => prev.filter(c => c.id !== conversation_id));
+        setConversations(prev => prev.filter(c => c.id !== groupId));
         if (isActive) {
           setActiveChat(null);
           setActiveConv(null);
@@ -975,10 +891,10 @@ export default function Dashboard() {
         return;
       }
 
-      // Membership changed (I was added, or someone else was added/removed
-      // from a conv I'm in). Refresh /api/conversations so the sidebar's
-      // member list / group-name stays current.
-      if (isAboutSelf || conversationsRef.current.some(c => c.id === conversation_id)) {
+      // I was added to a group, or someone else was added/removed in a
+      // group I'm in. Refresh the sidebar so member list / group name
+      // stays current.
+      if (isAboutSelf || conversationsRef.current.some(c => c.id === groupId)) {
         const t = localStorage.getItem('echoza-token');
         if (!t) return;
         fetch(apiUrl('/api/conversations'), { headers: { Authorization: `Bearer ${t}` } })
@@ -986,8 +902,12 @@ export default function Dashboard() {
           .then(data => setConversations(dedupeConversations(data)))
           .catch(() => {});
       }
-    },
-  });
+    });
+
+    return () => {
+      socket.off('participant:change');
+    };
+  }, [socket]);
 
   const handleSend = (content: string, attachments?: { file: File; preview?: string; type: string }[]) => {
     if (!socket || !activeConv) return;
