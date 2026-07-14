@@ -6,7 +6,7 @@ import App from './App';
 // cached bundles for all users (e.g. after a breaking change shipped only to
 // cached service-worker bundles). Auth tokens are NOT touched — only the
 // service-worker / cache layer is wiped so the next load picks up fresh JS.
-const STORAGE_VERSION = '6';
+const STORAGE_VERSION = '7';
 const storedVersion = localStorage.getItem('echoza-storage-version');
 if (storedVersion !== STORAGE_VERSION) {
   localStorage.setItem('echoza-storage-version', STORAGE_VERSION);

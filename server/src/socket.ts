@@ -694,6 +694,31 @@ export function setupSocket(io: SocketServer): void {
       if (isGroup) {
         emitToGroupMembers(io, conversationId, 'message:new', message, userId);
         emitToGroupMembers(io, conversationId, 'conversation:update', { conversationId }, userId);
+
+        // Group push fan-out. The realtime-only path left closed-PWA /
+        // backgrounded members silently in the dark — sockets are asleep
+        // so message:new never reached them, and there was no web-push
+        // fan-out either. Server-side fan-out is the durable delivery
+        // path: web-push wakes the closed iOS PWA via OS notification,
+        // and Socket.IO catches up any foregrounded tab on its next
+        // socket re-flush.
+        const [{ data: convRow }, { data: groupMembers }] = await Promise.all([
+          supabase.from('conversations').select('group_name').eq('id', conversationId).maybeSingle(),
+          supabase.from('participants').select('user_id').eq('conversation_id', conversationId).neq('user_id', userId),
+        ]);
+        const groupTitle = convRow?.group_name || username;
+        const bodyPreview = content.trim()
+          ? `${username}: ${preview}`
+          : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;
+        for (const m of (groupMembers || [])) {
+          sendPushNotification(
+            m.user_id,
+            groupTitle,
+            bodyPreview,
+            `/dashboard?conv=${conversationId}`,
+            conversationId,
+          );
+        }
       } else if (receiverId) {
         emitToUser(io, receiverId, 'message:new', message);
         emitToUser(io, receiverId, 'conversation:update', { conversationId });
@@ -701,8 +726,8 @@ export function setupSocket(io: SocketServer): void {
           receiverId,
           username,
           content || 'Sent an attachment',
-          '/',
-          conversationId
+          `/dashboard?conv=${conversationId}`,
+          conversationId,
         );
         if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
       }

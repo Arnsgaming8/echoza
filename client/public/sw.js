@@ -100,6 +100,11 @@ self.addEventListener('push', (event) => {
     // stacking. Missing tag falls back to a per-message unique id.
     tag: data.tag || (callType ? `call-${callerId || 'unknown'}` : undefined),
     renotify: !!callType,
+    // iOS ignores this (its own OS banner model), but desktop Chrome/
+    // Edge and Android Chrome honor it — important so direct-message
+    // banners don't auto-dismiss mid-scroll on Desktop while the user
+    // is reading something else.
+    requireInteraction: !callType,
     data: {
       url: data.url || '/',
       conversationId: data.conversationId,
@@ -134,23 +139,45 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const urlToOpen = event.notification.data?.url || '/';
-  const conversationId = event.notification.data?.conversationId;
-  const callType = event.notification.data?.callType;
+  const data = event.notification.data || {};
+  // Construct the deep-link from conversationId BEFORE falling back to
+  // data.url. The web-push fan-out above calls sendPushNotification with
+  // `/dashboard?conv=...` already, but the SW is the source of truth for
+  // any payload shape that arrives here (cron security warnings, test
+  // push, future call-site additions). Guarantees the closed-PWA
+  // resuscitates on the right chat thread instead of the bare sidebar.
+  const conversationId = data.conversationId;
+  const deepLink = conversationId
+    ? `/dashboard?conv=${encodeURIComponent(conversationId)}`
+    : (data.url || '/');
+  const callType = data.callType;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
       if (windowClients.length > 0) {
         const client = windowClients[0];
         client.focus();
+        // For a foregrounded PWA, route via postMessage so React state
+        // updates without a hard reload. Calls fire 'incoming-call' so
+        // Dashboard's IncomingCall UI lands; messages fire
+        // 'navigate-conversation' so the thread opens.
         if (callType) {
-          client.postMessage({ type: 'focus-app' });
+          client.postMessage({
+            type: 'incoming-call',
+            callType,
+            callerId: data.callerId || null,
+            callerUsername: data.callerUsername || null,
+          });
         } else if (conversationId) {
           client.postMessage({ type: 'navigate-conversation', conversationId });
         }
         return;
       }
-      clients.openWindow(urlToOpen);
+      // CLOSED PWA on iOS: clients.matchAll returns []. openWindow with
+      // an in-scope URL opens the installed PWA at that route; out-of-
+      // scope URLs open a regular Safari tab. /dashboard is the SPA root
+      // for authenticated users — correct in-scope deep-link.
+      clients.openWindow(deepLink);
     })
   );
 });

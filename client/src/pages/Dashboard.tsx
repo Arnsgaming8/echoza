@@ -451,6 +451,43 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Deep-link parser for closed-PWA notification taps. When the iOS PWA
+  // is fully closed and the user taps the OS banner, the SW's
+  // `notificationclick` calls `clients.openWindow('/dashboard?conv=...')`,
+  // iOS opens the PWA at that URL, and we land here with a populated
+  // query string. After conversations arrive over the socket we want
+  // to auto-select that thread so the user lands on the right chat —
+  // not on an empty sidebar.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const deepLinkConvId = params.get('conv');
+    // No deep-link param? Mark handled so this effect stops re-running
+    // on every `conversations` update.
+    if (!deepLinkConvId) {
+      deepLinkHandledRef.current = true;
+      return;
+    }
+    // Wait for the conversations list to be populated before resolving
+    // — `find` against an empty array on first render would silently miss.
+    if (conversations.length === 0) return;
+    const conv = conversations.find(c => c.id === deepLinkConvId);
+    if (!conv) {
+      // Conversation the push referenced doesn't exist on this device
+      // (different account, deleted, etc.) — still strip the param so
+      // reloads don't keep retrying.
+      window.history.replaceState({}, '', '/dashboard');
+      deepLinkHandledRef.current = true;
+      return;
+    }
+    handleSelectChatRef.current(deepLinkConvId, conv);
+    // Strip the query so reloading the page doesn't re-latch onto the
+    // deep-linked conversation (user navigated away after, for example).
+    window.history.replaceState({}, '', '/dashboard');
+    deepLinkHandledRef.current = true;
+  }, [conversations]);
+
 
 
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { Button, Input, PasswordInput, SessionExpiredBanner } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
@@ -83,6 +83,16 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  // Read the `next` query that ProtectedRoute encoded before redirecting
+  // us here. After signin we replay it so a notification-tap user lands
+  // back on `/dashboard?conv=ID` (closed-PWA push UX), not on a bare
+  // dashboard. Reject any `next` that points back at /login to defuse a
+  // redirect loop if some other path mis-encodes it.
+  const [searchParams] = useSearchParams();
+  const nextParam = searchParams.get('next');
+  const postLoginRedirect = nextParam && !nextParam.startsWith('/login')
+    ? nextParam
+    : '/dashboard';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +118,7 @@ export default function Login() {
       }
 
       login(data.token, data.refresh_token, data.user);
-      navigate('/dashboard');
+      navigate(postLoginRedirect);
     } catch {
       setServerError('Connection error. Please try again.');
     } finally {
