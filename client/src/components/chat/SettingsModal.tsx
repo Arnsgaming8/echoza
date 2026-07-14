@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Avatar, Button, PasswordInput } from '../common';
-import { FiX, FiAlertTriangle, FiTrash2 } from 'react-icons/fi';
+import { FiX, FiAlertTriangle, FiTrash2, FiBell, FiBellOff } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiUrl } from '../../utils/api';
+import { isIOS, isIOSStandalone, canIOSReceivePush } from '../../utils/iosCapability';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -176,6 +177,73 @@ const ProfileLabel = styled.div`
   color: ${({ theme }) => theme.colors.text.secondary};
 `;
 
+const NotifRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: ${({ theme }) => theme.colors.bg.hover};
+  border-radius: ${({ theme }) => theme.radius.md};
+  margin-bottom: 8px;
+`;
+
+const NotifIconBox = styled.div<{ $on?: boolean }>`
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: ${({ $on, theme }) =>
+    $on ? theme.colors.primary.echoBlue : theme.colors.bg.card};
+  color: ${({ $on }) => ($on ? 'white' : 'inherit')};
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+`;
+
+const NotifText = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const NotifTitle = styled.div`
+  font-size: ${({ theme }) => theme.font.size.sm};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.text.primary};
+`;
+
+const NotifDesc = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  margin-top: 2px;
+  line-height: 1.4;
+`;
+
+const StatusPill = styled.span<{ $kind: 'on' | 'off' | 'blocked' | 'unsupported' }>`
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: white;
+  background: ${({ $kind }) =>
+    $kind === 'on' ? '#22C55E'
+    : $kind === 'off' ? '#F59E0B'
+    : $kind === 'blocked' ? '#EF4444'
+    : '#6B7280'};
+`;
+
+const InstallHint = styled.div`
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: ${({ theme }) => theme.colors.text.secondary};
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  margin-bottom: 8px;
+  line-height: 1.4;
+`;
+
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { user } = useAuth();
   const [step, setStep] = useState<'initial' | 'confirm'>('initial');
@@ -184,6 +252,113 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
+
+  // Notification state. We re-read permission + push subscription state
+  // every time the modal opens or the user clicks "Enable" / "Test push" so
+  // the UI reflects reality without manual page refresh.
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
+    if (typeof Notification === 'undefined') return 'unsupported';
+    return Notification.permission;
+  });
+  const [subscribed, setSubscribed] = useState(false);
+  const [notifBusy, setNotifBusy] = useState(false);
+  const [notifMsg, setNotifMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const refreshNotifState = async () => {
+    if (typeof Notification === 'undefined') {
+      setPermission('unsupported');
+      setSubscribed(false);
+      return;
+    }
+    setPermission(Notification.permission);
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        setSubscribed(!!sub);
+      } catch {
+        setSubscribed(false);
+      }
+    } else {
+      setSubscribed(false);
+    }
+  };
+
+  useEffect(() => { refreshNotifState(); }, []);
+
+  const iOS = isIOS();
+  const standalone = isIOSStandalone();
+  const iosCapable = canIOSReceivePush(); // iOS + standalone + PushManager support
+
+  const enableNotifications = async () => {
+    setNotifMsg(null);
+    setNotifBusy(true);
+    try {
+      if (iOS && !standalone) {
+        setNotifMsg({ kind: 'err', text: 'Install Echoza to your home screen first (use Safari’s Share menu → Add to Home Screen), then re-open the installed app.' });
+        return;
+      }
+      if (typeof Notification === 'undefined') {
+        setNotifMsg({ kind: 'err', text: 'Notifications are not supported in this browser.' });
+        return;
+      }
+      const perm = await Notification.requestPermission();
+      setPermission(perm);
+      if (perm === 'granted') {
+        // Tell Dashboard to re-run the subscribe pipeline (it's listening
+        // for this exact event). Without it, the subscribe effect only
+        // re-runs on user.id change, login, or appinstalled — not on a
+        // permission grant that happened AFTER mount.
+        window.dispatchEvent(new Event('echoza:enable-push'));
+        // Wait briefly so Dashboard's async subscribe (fetch VAPID +
+        // pushManager.subscribe) can finish before we re-read state.
+        // Without this delay, the modal briefly shows the "On" badge
+        // while `subscribed` is still false.
+        await new Promise(resolve => setTimeout(resolve, 600));
+        await refreshNotifState();
+        setNotifMsg({ kind: 'ok', text: 'Notifications enabled. Use “Send test push” to confirm.' });
+      } else if (perm === 'denied') {
+        setNotifMsg({ kind: 'err', text: 'Permission was denied. To re-enable, open Safari Settings → Safari → Notifications for this website.' });
+      } else {
+        setNotifMsg({ kind: 'err', text: 'No response from the permission prompt.' });
+      }
+    } catch (err: any) {
+      setNotifMsg({ kind: 'err', text: `Error: ${err?.message || String(err)}` });
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+
+  const sendTestPush = async () => {
+    setNotifMsg(null);
+    setNotifBusy(true);
+    try {
+      const token = localStorage.getItem('echoza-token');
+      const r = await fetch(apiUrl('/api/push/test'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setNotifMsg({ kind: 'err', text: data.error || `Server error ${r.status}` });
+        return;
+      }
+      if (data.success === false && data.reason === 'no_subscriptions') {
+        setNotifMsg({ kind: 'err', text: 'No push subscription yet. Tap “Enable notifications” first, then try again.' });
+        return;
+      }
+      setNotifMsg({ kind: 'ok', text: `Test push sent to ${data.subscriptionCount ?? '?'} device(s). You should see an Echoza notification shortly.` });
+    } catch (err: any) {
+      setNotifMsg({ kind: 'err', text: `Network error: ${err?.message || String(err)}` });
+    } finally {
+      setNotifBusy(false);
+    }
+  };
+
+  const permKind: 'on' | 'off' | 'blocked' =
+    permission === 'granted' ? (subscribed ? 'on' : 'off')
+    : permission === 'denied' ? 'blocked'
+    : 'off';
 
   const handleDelete = async () => {
     if (!password || !confirmed) return;
@@ -253,6 +428,75 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
               <ProfileLabel>Your account</ProfileLabel>
             </ProfileInfo>
           </ProfileRow>
+
+          <Section>
+            <SectionTitle>Notifications</SectionTitle>
+            <SectionDesc>
+              Receive a push notification when someone messages or calls you.
+            </SectionDesc>
+
+            <NotifRow>
+              <NotifIconBox $on={permKind === 'on'}>
+                {permKind === 'on' ? <FiBell /> : <FiBellOff />}
+              </NotifIconBox>
+              <NotifText>
+                <NotifTitle>
+                  {permission === 'unsupported' && 'Notifications unsupported in this browser'}
+                  {permKind === 'on' && 'Notifications are on'}
+                  {permKind === 'off' && iOS && !standalone && 'Notifications require PWA install'}
+                  {permKind === 'off' && !(iOS && !standalone) && 'Notifications are off'}
+                  {permKind === 'blocked' && 'Notifications are blocked'}
+                </NotifTitle>
+                <NotifDesc>
+                  {permKind === 'on' && `Subscribed to push${subscribed ? ' on this device' : ' on another device'}.`}
+                  {permKind === 'off' && iOS && !standalone && 'Open this site in Safari, tap the Share button, then "Add to Home Screen". Open the installed app to grant notifications.'}
+                  {permKind === 'off' && !(iOS && !standalone) && 'Tap "Enable notifications" to receive messages and calls.'}
+                  {permKind === 'blocked' && 'To re-enable, change your notification settings for this website, then reload.'}
+                  {permission === 'unsupported' && 'Try Chrome, Firefox, Edge, or install Echoza as a PWA on iOS.'}
+                </NotifDesc>
+              </NotifText>
+              <StatusPill $kind={permKind}>
+                {permission === 'granted' ? 'On' : permission === 'denied' ? 'Blocked' : permission === 'default' ? 'Off' : 'N/A'}
+              </StatusPill>
+            </NotifRow>
+
+            {iOS && !standalone && (
+              <InstallHint>
+                iOS Safari restricts push notifications to apps installed to the home screen. Add Echoza to your home screen from the Share menu, then re-open the installed app.
+              </InstallHint>
+            )}
+
+            <Button
+              variant="primary"
+              onClick={enableNotifications}
+              disabled={notifBusy || permission === 'denied' || permission === 'unsupported'}
+              fullWidth
+              style={{ marginBottom: 8 }}
+            >
+              {permission === 'granted' ? 'Refresh notifications' : 'Enable notifications'}
+            </Button>
+
+            <Button
+              variant="secondary"
+              onClick={sendTestPush}
+              disabled={notifBusy || permission !== 'granted'}
+              fullWidth
+            >
+              Send test push
+            </Button>
+
+            {notifMsg && (
+              <SuccessMsg
+                style={{
+                  marginTop: 12,
+                  background: notifMsg.kind === 'ok' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  color: notifMsg.kind === 'ok' ? '#22C55E' : '#EF4444',
+                }}
+              >
+                {notifMsg.text}
+              </SuccessMsg>
+            )}
+          </Section>
 
           {step === 'initial' ? (
             <Section>

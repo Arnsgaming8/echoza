@@ -8,6 +8,7 @@ interface ButtonProps {
   children: React.ReactNode;
   onClick?: () => void;
   type?: 'button' | 'submit';
+  style?: React.CSSProperties;
 }
 
 const variants = {
@@ -89,6 +90,7 @@ export default function Button({
   children,
   onClick,
   type = 'button',
+  style,
 }: ButtonProps) {
   return (
     <StyledButton
@@ -98,6 +100,7 @@ export default function Button({
       disabled={disabled}
       onClick={onClick}
       type={type}
+      style={style}
     >
       {children}
     </StyledButton>

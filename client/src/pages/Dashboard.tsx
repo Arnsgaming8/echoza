@@ -19,7 +19,7 @@ import { useRealtimeChat } from '../utils/useRealtimeChat';
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
-import { canMakeWebRTCCall } from '../utils/iosCapability';
+import { canMakeWebRTCCall, canIOSReceivePush } from '../utils/iosCapability';
 
 // crypto.randomUUID is supported on iOS Safari 16.4+ and every modern
 // desktop browser, so we don't need the `uuid` npm package here. The
@@ -316,51 +316,137 @@ export default function Dashboard() {
     if ('Notification' in window && Notification.permission === 'granted') {
       try { new Notification(title, opts); } catch {}
     }
-  }, []);  useEffect(() => {
-    const VAPID_PUBLIC_KEY = 'BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E';
+  }, []);
+
+  // ── Push subscription ──────────────────────────────────────────────────
+  // Push subscribe is gated by THREE things, all of which must be true:
+  //   1. The user is logged in (we have a token + userId to bind the
+  //      subscription to server-side).
+  //   2. canIOSReceivePush() returns true — iOS Safari strictly requires
+  //      a home-screen PWA install before pushManager.subscribe() will
+  //      stop throwing NotAllowedError. We gate on this rather than
+  //      letting the silent throw happen 13+ times per page load as
+  //      before.
+  //   3. Notification.permission === 'granted'. iOS requires a
+  //      USER-INITIATED GESTURE to call requestPermission() — auto-
+  //      requesting on mount is silently denied by Safari. Settings now
+  //      exposes an "Enable Notifications" button which fires
+  //      window 'echoza:enable-push', which bumps subscribeNonce below
+  //      and triggers permission request from a real click handler.
+  const [subscribeNonce, setSubscribeNonce] = useState(0);
+
+  useEffect(() => {
+    if (!user?.id) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (!canIOSReceivePush()) return;
+    // If permission isn't granted, the Settings "Enable Notifications"
+    // button is the only path to a granted state on iOS (and the same
+    // UX is clearer on desktop too — silent permission prompts are
+    // hostile). Bail and wait for the user-initiated subscribe.
+    if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return;
 
-    const initialUserId = user?.id ?? null;
-    const subscribePush = (force = false) => {
-      if (!initialUserId) return;
-      navigator.serviceWorker.ready.then(reg => {
-        const maybeUnsub = force
-          ? reg.pushManager.getSubscription().then(s => { s?.unsubscribe().catch(() => {}); })
-          : Promise.resolve();
-        maybeUnsub.then(() => {
-          reg.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as any,
-          }).then(sub => {
-            fetch(apiUrl('/api/push/subscribe'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: 'Bearer ' + localStorage.getItem('echoza-token'),
-              },
-              body: JSON.stringify(sub.toJSON()),
-            }).then(r => r.ok && console.log('Push subscribed'))
-              .catch(e => console.warn('Push subscribe POST failed:', e));
-          }).catch(err => console.warn('Push subscribe failed:', err));
+    // Snapshot the userId at effect entry. After the async work completes
+    // (fetch VAPID + pushManager.subscribe can take 100s of ms on iOS),
+    // we verify the snapshot's userId still matches the active user
+    // before POSTing. Without this guard, a fast login→logout→login
+    // could fire the subscribe effect for user A, then a user-switch
+    // bumps subscribeNonce while we're mid-flight, and the POST would
+    // bind B's new push subscription to A's old JWT (server 401s, the
+    // subscription stays orphaned in the browser).
+    const snapshotUserId = user.id;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        // 1. Fetch VAPID public key from server (single source of truth,
+        //    not hardcoded — protects against client/server key drift, which
+        //    was a known iOS silent-failure mode: subscribe() succeeds in
+        //    browser, webpush.sendNotification() rejects with BadJwt on the
+        //    server, and the user never sees a notification).
+        const vapidRes = await fetch(apiUrl('/api/push/vapid-public-key'));
+        if (!vapidRes.ok || cancelled) return;
+        const { publicKey } = await vapidRes.json();
+        if (!publicKey || cancelled) return;
+
+        const reg = await navigator.serviceWorker.ready;
+        if (cancelled) return;
+
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey) as any,
         });
-      });
-    };
+        if (cancelled) {
+          sub.unsubscribe().catch(() => {});
+          return;
+        }
 
-    // One-time initial subscribe (no [user] dep — previously re-ran 13+ times
-    // on a single page load because user object references fired across
-    // background refresh, presence sync, etc.)
-    subscribePush();
+        // Verify the user/subscription pair is still coherent. If user.id
+        // swapped while we were awaiting the SW, abandon — the new user
+        // will trigger their own subscribe cycle on the next login or
+        // enable-push event.
+        const freshToken = localStorage.getItem('echoza-token');
+        const freshUserId = userRef.current?.id ?? null;
+        if (freshUserId !== snapshotUserId || !freshToken) {
+          sub.unsubscribe().catch(() => {});
+          return;
+        }
 
-    const requestNotifPermission = () => {
-      if ('Notification' in window && Notification.permission === 'default') {
-        Notification.requestPermission().then(perm => {
-          if (perm === 'granted') subscribePush();
+        const r = await fetch(apiUrl('/api/push/subscribe'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer ' + freshToken,
+          },
+          body: JSON.stringify(sub.toJSON()),
         });
+        if (r.ok) console.log('Push subscribed'); else console.warn('Push subscribe POST failed:', r.status);
+      } catch (err) {
+        if (!cancelled) console.warn('Push subscribe failed:', err);
       }
-    };
-    requestNotifPermission();
+    })();
 
-    const handleSwUpdate = () => { subscribePush(true); };
+    return () => { cancelled = true; };
+  }, [user?.id, subscribeNonce]);
+
+  useEffect(() => {
+    // PWA install complete → re-run subscribe flow. On iOS this is when
+    // the user has just installed Echoza from Safari to the home screen
+    // and re-opens it. The endpoint may have changed because iOS only
+    // returns a real endpoint AFTER install.
+    const onAppInstalled = () => setSubscribeNonce(n => n + 1);
+    window.addEventListener('appinstalled', onAppInstalled);
+    return () => window.removeEventListener('appinstalled', onAppInstalled);
+  }, []);
+
+  useEffect(() => {
+    // Settings "Enable Notifications" button dispatches this event after
+    // the user has just clicked through Safari's permission dialog.
+    // Bumping subscribeNonce forces the subscribe effect above to
+    // re-run with the now-granted permission state.
+    const onEnablePush = () => setSubscribeNonce(n => n + 1);
+    window.addEventListener('echoza:enable-push', onEnablePush);
+    return () => window.removeEventListener('echoza:enable-push', onEnablePush);
+  }, []);
+
+  useEffect(() => {
+    // SW controller replaced (browser updated the SW after a deploy) —
+    // re-subscribe under the new controller so the push endpoint stays
+    // bound to the active SW.
+    const handleSwUpdate = () => setSubscribeNonce(n => n + 1);
+    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
+  }, []);
+
+  useEffect(() => {
+    // SW → client messaging. Dashboard uses this to receive notification
+    // actions (e.g. when the user taps a notification, the SW opens/focuses
+    // Echoza and tells us which conversation to navigate to or whether the
+    // tap was an incoming call). The `incoming-call` case is a no-op
+    // because sw.js's push handler already showed the OS notification;
+    // re-firing `notify(...)` here would tag-collision-replace it.
+    // NOTE: `controllerchange` re-subscribe is handled in its OWN useEffect
+    // above (bumps subscribeNonce). Deliberately NOT duplicated here to
+    // avoid two listener registrations for the same event.
     const handleSwMessage = (event: MessageEvent) => {
       if (!event.data) return;
       if (event.data.type === 'navigate-conversation') {
@@ -370,26 +456,14 @@ export default function Dashboard() {
         return;
       }
       if (event.data.type === 'incoming-call') {
-        // Push arrived with call metadata. The SW push handler in sw.js
-        // already showed the OS notification — we deliberately DO NOT
-        // re-fire `notify(...)` here because that would silently
-        // tag-collision-replace the same `call-${callerId}` notification
-        // (wasteful and can cause phantom sounds). The matching socket
-        // `call:offer` (with full SDP) typically arrives moments later if
-        // the user has Echoza foreground — Dashboard's call:offer handler
-        // is the source of truth for the rich IncomingCall UI.
         return;
       }
     };
-
     navigator.serviceWorker.addEventListener('message', handleSwMessage);
-    navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleSwMessage);
-      navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally [] — user ref handles identity changes
+  }, []);
 
 
 
