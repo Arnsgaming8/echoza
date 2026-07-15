@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import styled from 'styled-components';
-import { Button, Input, PasswordInput, SessionExpiredBanner } from '../components/common';
+import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
 
@@ -128,7 +128,6 @@ export default function Login() {
 
   return (
     <Wrapper>
-      <SessionExpiredBanner />
       <Card>
         <Title>Welcome Back</Title>
         <Subtitle>Enter Echoza and continue chatting</Subtitle>

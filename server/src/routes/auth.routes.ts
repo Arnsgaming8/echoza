@@ -3,7 +3,6 @@ import {
   registerUser,
   loginUser,
   verifyAccessToken,
-  checkSessionExpiry,
   rotateRefreshToken,
   revokeRefreshToken,
   comparePassword,
@@ -82,16 +81,6 @@ router.get('/me', async (req: Request, res: Response) => {
   const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
-    return;
-  }
-
-  // 30-day rolling session-expiry check (security policy). Server returns
-  // 401 with `reason: session_expired_30_days`; the client AuthContext
-  // catches this, nuke-tokens, and hard-redirects to Landing for the
-  // re-sign-in banner UI.
-  const expiry = checkSessionExpiry(decoded.lastSignInAt);
-  if (expiry) {
-    res.status(401).json({ error: 'Session expired after 30 days for security', ...expiry });
     return;
   }
 

@@ -42,7 +42,8 @@ export const env = {
   ACCESS_TOKEN_TTL_MS: intWithDefault('ACCESS_TOKEN_TTL_MS', 15 * 60 * 1000), // 15m
   REFRESH_TOKEN_TTL_MS: intWithDefault(
     'REFRESH_TOKEN_TTL_MS',
-    30 * 24 * 60 * 60 * 1000, // 30d, mirrors the SESSION_DURATION_MS policy
+    365 * 24 * 60 * 60 * 1000, // 1y soft cap: users stay signed in (no auto-logout),
+                              // stolen refresh tokens still expire eventually
   ),
 
   // ── Supabase Auth hybrid migration window (optional, removable later) ──
@@ -56,7 +57,6 @@ export const env = {
 
   // ── Existing app env (passthrough) ──────────────────────────────────────
   RENDER_EXTERNAL_URL: optionalString('RENDER_EXTERNAL_URL'),
-  CRON_SECRET: optionalString('CRON_SECRET'),
   VAPID_PUBLIC_KEY: optionalString('VAPID_PUBLIC_KEY'),
   VAPID_PRIVATE_KEY: optionalString('VAPID_PRIVATE_KEY'),
   TURN_URL: optionalString('TURN_URL'),
@@ -74,7 +74,6 @@ export function logEnvSanity(): void {
   ok.push('DATABASE_URL', 'JWT_SECRET', 'PORT');
   for (const k of [
     'RENDER_EXTERNAL_URL',
-    'CRON_SECRET',
     'VAPID_PUBLIC_KEY',
     'VAPID_PRIVATE_KEY',
     'TURN_URL',
@@ -90,11 +89,6 @@ export function logEnvSanity(): void {
   void ok;
   void missing;
   console.log('[env] required OK; optional set:', set.join(', ') || 'none');
-  if (!env.CRON_SECRET) {
-    console.warn(
-      '[env] CRON_SECRET is not configured — /api/security/notify-upcoming-expirations will reject all requests (503).',
-    );
-  }
   if (!env.hasSupabaseFallback) {
     console.log(
       '[env] No SUPABASE_URL/SUPABASE_ANON_KEY set — sign-ins for users with NULL password_hash in profiles will fail. Run server/src/scripts/import_accounts_to_neon.ts BEFORE removing Supabase env vars.',

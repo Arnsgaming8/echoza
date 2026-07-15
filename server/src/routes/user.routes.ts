@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { verifyAccessToken, checkSessionExpiry } from '../auth.js';
+import { verifyAccessToken } from '../auth.js';
 import { fetchAll } from '../db.js';
 
 const router = Router();
@@ -15,12 +15,6 @@ router.get('/me', async (req: Request, res: Response) => {
   const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
-    return;
-  }
-  // 30-day rolling session-expiry check (security policy).
-  const expiry = checkSessionExpiry(decoded.lastSignInAt);
-  if (expiry) {
-    res.status(401).json({ error: 'Session expired after 30 days for security', ...expiry });
     return;
   }
   const profile = await fetchAll<{ id: string; username: string; avatar: string }>(

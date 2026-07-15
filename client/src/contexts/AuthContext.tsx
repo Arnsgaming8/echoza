@@ -169,26 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const activeToken = localStorage.getItem('echoza-token') || token;
         const res = await fetch(apiUrl('/api/users/me'), {
           headers: { Authorization: `Bearer ${activeToken}` },
-        });
-        if (!res.ok) {
-          // Capture response body on non-2xx so we can pattern-match on
-          // `body.reason` (e.g. the 30-day session expiry) downstream.
-          let body: any = null;
-          try { body = await res.json(); } catch { /* non-JSON or empty body */ }
-          // ── 30-day rolling session-expired error from /api/users/me. ──
-          // Server returns 401 with `body.reason === 'session_expired_30_days'`
-          // when now > last_sign_in_at + 30 days. Hard-redirect to Landing so
-          // the SessionExpiredBanner explains what happened; nuke tokens to
-          // prevent the redirect loop from re-firing on remount.
-          if (res.status === 401 && body?.reason === 'session_expired_30_days') {
-            try { sessionStorage.setItem('echoza:logout:reason', 'session_expired_30_days'); } catch { /* ignore */ }
-            try { localStorage.removeItem('echoza-token'); localStorage.removeItem('echoza-refresh-token'); } catch { /* ignore */ }
-            setToken(null);
-            setUser(null);
-            window.location.href = '/';
-            return;
-          }
-          if (res.status === 401) {
+        });          if (!res.ok) {
+            if (res.status === 401) {
             const refreshData = await tryRefreshSession();
             if (refreshData) {
               localStorage.setItem('echoza-token', refreshData.token);

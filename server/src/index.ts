@@ -14,10 +14,6 @@ import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
 import {
   verifyAccessToken,
-  getOrCreateEchozaSecurityId,
-  getOrCreateDirectConversation,
-  warningMessageId,
-  SESSION_DURATION_MS,
 } from './auth.js';
 import { env, logEnvSanity } from './env.js';
 import { pingDb, fetchOne, fetchAll } from './db.js';
@@ -25,14 +21,9 @@ import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
-import pushRoutes, { sendPushNotification } from './routes/push.routes.js';
+import pushRoutes from './routes/push.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-// Module-scoped Socket.IO reference so REST routes (cron endpoints, push
-// endpoints) can emit real-time events using the same registry the socket
-// handlers use. Set this once after setupSocket() completes.
-let currentIo: SocketServer | null = null;
 
 async function main() {
   logEnvSanity();
@@ -129,119 +120,6 @@ async function main() {
       return;
     }
     res.json({ ok: true });
-  });
-
-  // ── /api/security/notify-upcoming-expirations ───────────────────────────
-  // Daily cron. Iterates `profiles` with non-null last_sign_in_at and
-  // notifies users whose 30-day window ends in the next 24h. Idempotent
-  // via UUIDv5 message-id (single row per expiry-day per user).
-  app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
-    if (!env.CRON_SECRET) {
-      console.error('[security-cron] CRITICAL: CRON_SECRET env var is not configured. Cron CANNOT run.');
-      res.status(503).json({
-        error: 'CRON_SECRET env var not configured on server',
-        remediation: 'Set CRON_SECRET in Render Environment Variables. Generate with: openssl rand -hex 32',
-      });
-      return;
-    }
-    const provided = req.headers['x-cron-secret'];
-    if (provided !== env.CRON_SECRET) {
-      res.status(401).json({ error: 'Invalid cron secret' });
-      return;
-    }
-
-    try {
-      const botId = await getOrCreateEchozaSecurityId();
-      const now = Date.now();
-      const tomorrowStart = now + 24 * 60 * 60 * 1000;
-      const warningContent =
-        '⚠️ Heads up! Echoza will log you out tomorrow for security. Re-sign-in to keep your session.';
-
-      // Single-query candidate fetch — the WHERE clause filters to "expiry
-      // lands in the next 24h" so we don't pull the whole table. profiles
-      // is small (<10k) so even a brute-force full-table scan would be ~3ms,
-      // but the time-bound filter is cheap and ergonomic.
-      const candidates = await fetchAll<{
-        id: string;
-        last_sign_in_at: string;
-      }>(/* sql */ `
-        SELECT id, last_sign_in_at
-          FROM profiles
-         WHERE last_sign_in_at IS NOT NULL
-           AND (last_sign_in_at + INTERVAL '30 days') > TO_TIMESTAMP($1::bigint / 1000.0)
-           AND (last_sign_in_at + INTERVAL '30 days') <= TO_TIMESTAMP($2::bigint / 1000.0)
-      `, [now, tomorrowStart]);
-
-      let notified = 0;
-      let skippedDuplicate = 0;
-      let pushFailed = 0;
-      let errors = 0;
-      for (const u of candidates) {
-        const expiresAt = new Date(u.last_sign_in_at).getTime() + SESSION_DURATION_MS;
-
-        try {
-          const convId = await getOrCreateDirectConversation(botId, u.id);
-          const expiryIsoDay = new Date(expiresAt).toISOString().slice(0, 10);
-          const msgId = warningMessageId(u.id, expiryIsoDay);
-          const nowIso = new Date().toISOString();
-          const ins = await fetchOne(
-            /* sql */ `
-              INSERT INTO messages (id, conversation_id, sender_id, content, created_at)
-                VALUES ($1, $2, $3, $4, $5)
-              ON CONFLICT (id) DO NOTHING
-              RETURNING id`,
-            [msgId, convId, botId, warningContent, nowIso],
-          );
-          if (!ins) {
-            skippedDuplicate++;
-            continue;
-          }
-          await fetchOne(
-            /* sql */ `
-              UPDATE conversations
-                 SET last_message = $1,
-                     last_message_at = $2,
-                     last_message_sender_id = $3
-               WHERE id = $4`,
-            [warningContent, nowIso, botId, convId],
-          );
-          try {
-            await sendPushNotification(
-              u.id,
-              'Echoza Security',
-              "You'll be logged out tomorrow. Re-sign-in to keep your session.",
-              '/',
-              convId,
-            );
-          } catch {
-            pushFailed++;
-          }
-          if (currentIo) {
-            const liveMessage = {
-              id: msgId,
-              conversationId: convId,
-              senderId: botId,
-              senderUsername: 'Echoza Security',
-              content: warningContent,
-              attachments: [],
-              read: false,
-              createdAt: nowIso,
-              isGroup: false,
-            };
-            emitToUserViaRegistry(currentIo, u.id, 'message:new', liveMessage);
-            emitToUserViaRegistry(currentIo, u.id, 'conversation:update', { conversationId: convId });
-          }
-          notified++;
-        } catch (perUserErr) {
-          console.error(`[security-cron] failed for user ${u.id}:`, perUserErr);
-          errors++;
-        }
-      }
-      res.json({ notified, skippedDuplicate, pushFailed, errors });
-    } catch (err: any) {
-      console.error('[security-cron] failed:', err);
-      res.status(500).json({ error: err?.message || 'Cron endpoint failed' });
-    }
   });
 
   // ── /api/conversations ──────────────────────────────────────────────────
@@ -487,7 +365,6 @@ async function runTest(relayOnly=false){
 
   setupSocket(io);
   startPresenceSweeper(io);
-  currentIo = io;
 
   httpServer.listen(env.PORT, () => {
     console.log(`Echoza server running on port ${env.PORT}`);

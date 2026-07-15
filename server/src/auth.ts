@@ -3,7 +3,10 @@
 // Replaces Supabase Auth entirely. Three responsibilities:
 //   1. Password hashing + verification using bcryptjs (already a dep).
 //   2. JWT signing/verification for stateless access tokens (15m) plus
-//      stateful refresh tokens (30d, hash-stored) keyed in `refresh_tokens`.
+//      stateful refresh tokens (env.REFRESH_TOKEN_TTL_MS, default 1y —
+//      bounded refresh-token TTL is retained as a soft cap so stolen
+//      tokens expire eventually; we do NOT auto-log-out idle users
+//      because the user policy is "stay signed in").
 //   3. The "hybrid migration" path: when an account from the pre-Neon era
 //      exists in `profiles` with `password_hash IS NULL`, and SUPABASE_URL
 //      + SUPABASE_ANON_KEY env vars are configured, the login flow goes
@@ -16,16 +19,11 @@
 import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import jwt from 'jsonwebtoken';
-import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
+import { v4 as uuidv4 } from 'uuid';
 import { env } from './env.js';
 import { fetchOne, fetchAll, tx } from './db.js';
 
 // ── Constants ────────────────────────────────────────────────────────────────
-export const SESSION_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
-
-// RFC 4122 — used to derive deterministic v5 UUIDs (unchanged from the v2
-// Supabase era so existing deterministic message-ids still line up).
-const UUID_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Password hashing
@@ -82,6 +80,11 @@ export function signAccessToken(
  * plaintext) is persisted to Neon. The jti claim is baked into the token
  * so we can correlate the JWT to the row at rotation time, even though
  * the matching is by hash today.
+ *
+ * TTL is `env.REFRESH_TOKEN_TTL_MS` (1 year by default). Security note:
+ * we keep a long but bounded TTL so a stolen refresh token eventually
+ * expires — the user can stay signed in across browser sessions but a
+ * leaked refresh token's blast radius is capped at ~1 year, not infinity.
  */
 export function signRefreshToken(userId: string): {
   plaintext: string;
@@ -232,21 +235,6 @@ export async function revokeRefreshToken(token: string): Promise<void> {
   await tx(async (client) => {
     await client.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hash]);
   });
-}
-
-// ── 30-day rolling session policy ───────────────────────────────────────────
-export function checkSessionExpiry(
-  lastSignInAt: string | null | undefined,
-): null | { reason: 'session_expired_30_days'; accountExpiresAt: string } {
-  if (!lastSignInAt) return null;
-  const expiresAt = new Date(lastSignInAt).getTime() + SESSION_DURATION_MS;
-  if (Date.now() > expiresAt) {
-    return {
-      reason: 'session_expired_30_days',
-      accountExpiresAt: new Date(expiresAt).toISOString(),
-    };
-  }
-  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -426,37 +414,8 @@ export async function loginUser(username: string, password: string): Promise<Aut
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. Echoza Security bot (1:1 conversations / cron message sender)
+// 6. getOrCreateDirectConversation
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Idempotently ensure the "Echoza Security" bot profile exists. Replaces the
- * old Supabase auth.admin.createUser/listUsers dance with a simple SELECT +
- * conditional INSERT.
- */
-export async function getOrCreateEchozaSecurityId(): Promise<string> {
-  const existing = await fetchOne<{ id: string }>(
-    `SELECT id FROM profiles WHERE username = 'Echoza Security'`,
-  );
-  if (existing?.id) return existing.id;
-
-  const newId = uuidv4();
-  // ON CONFLICT covers the race between two concurrent crons.
-  const inserted = await fetchOne<{ id: string }>(
-    `INSERT INTO profiles (id, username, display_name, avatar)
-       VALUES ($1, 'Echoza Security', 'Echoza Security', '')
-       ON CONFLICT (username) DO NOTHING
-       RETURNING id`,
-    [newId],
-  );
-  if (inserted?.id) return inserted.id;
-  // Lost the race; re-SELECT.
-  const again = await fetchOne<{ id: string }>(
-    `SELECT id FROM profiles WHERE username = 'Echoza Security'`,
-  );
-  if (!again?.id) throw new Error('Failed to ensure Echoza Security user');
-  return again.id;
-}
 
 /**
  * Returns the direct conversation id between two users, creating one if
@@ -498,17 +457,6 @@ export async function getOrCreateDirectConversation(
     [convId, userAId, userBId],
   );
   return convId;
-}
-
-/**
- * Deterministic UUIDv5 message-id derived from (kind + isoDay + userId).
- * The `expiryIsoDay` should be the user's 30-day EXPIRATION date
- * (YYYY-MM-DD), NOT the cron's run date — this guarantees a single
- * message per 30-day window per user regardless of how many cron runs
- * hit them.
- */
-export function warningMessageId(userId: string, expiryIsoDay: string): string {
-  return uuidv5(`echoza-security-warning:${expiryIsoDay}:${userId}`, UUID_NAMESPACE);
 }
 
 // Keep db import trees happy if the linter greps for tx/fetchAll.
