@@ -1,73 +1,58 @@
 import { Router, Request, Response } from 'express';
-import { supabase, anonSupabase } from '../supabase.js';
 import { verifyAccessToken, checkSessionExpiry } from '../auth.js';
+import { fetchAll } from '../db.js';
 
 const router = Router();
 
+// ── /me (duplicate of /api/auth/me — kept for client backwards-compat) ──
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!authHeader) {
     res.status(401).json({ error: 'No token provided' });
     return;
   }
-
   const token = authHeader.split(' ')[1];
   const decoded = await verifyAccessToken(token);
   if (!decoded) {
     res.status(401).json({ error: 'Invalid token' });
     return;
   }
-
-  // ── 30-day rolling session-expiry check (security policy). ──
+  // 30-day rolling session-expiry check (security policy).
   const expiry = checkSessionExpiry(decoded.lastSignInAt);
   if (expiry) {
-    res.status(401).json({
-      error: 'Session expired after 30 days for security',
-      ...expiry,
-    });
+    res.status(401).json({ error: 'Session expired after 30 days for security', ...expiry });
     return;
   }
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('id, username, avatar')
-    .eq('id', decoded.userId)
-    .maybeSingle();
-
-  if (profile) {
-    res.json({ ...profile, online: false });
+  const profile = await fetchAll<{ id: string; username: string; avatar: string }>(
+    `SELECT id, username, avatar FROM profiles WHERE id = $1`,
+    [decoded.userId],
+  );
+  if (profile[0]) {
+    res.json({ ...profile[0], online: false });
     return;
   }
-
-  // Fallback to Auth metadata if DB is unreachable or profile row missing
-  const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
-  if (authUser) {
-    res.json({
-      id: authUser.id,
-      username: authUser.user_metadata?.username || '',
-      avatar: '',
-      online: false,
-    });
-    return;
-  }
-
   res.status(404).json({ error: 'User not found' });
 });
 
+// ── /search ──────────────────────────────────────────────────────────────
+// Case-insensitive username search. Echoza usernames are 3-20 letters,
+// no spaces — but users type partial matches. LOWER() on both sides hits
+// the idx_profiles_username_lower index.
 router.get('/search', async (req: Request, res: Response) => {
   const { q } = req.query;
   if (!q || typeof q !== 'string') {
     res.json([]);
     return;
   }
-
-  const { data: profiles } = await supabase
-    .from('profiles')
-    .select('id, username, avatar')
-    .ilike('username', `%${q}%`)
-    .limit(20);
-
-  res.json((profiles || []).map(p => ({ ...p, online: false })));
+  const like = '%' + q + '%';
+  const profiles = await fetchAll<{ id: string; username: string; avatar: string }>(
+    `SELECT id, username, avatar
+       FROM profiles
+       WHERE LOWER(username) LIKE LOWER($1)
+       LIMIT 20`,
+    [like],
+  );
+  res.json(profiles.map(p => ({ ...p, online: false })));
 });
 
 export default router;

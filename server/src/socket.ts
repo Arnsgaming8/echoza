@@ -1,37 +1,37 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// server/src/socket.ts
+// Socket.IO realtime plane. All "realtime DB access" was previously channeled
+// through @supabase/supabase-js — now it goes through our pg pool (db.ts).
+// Auth was previously Supabase Auth + anon-key JWT verification — now it's
+// pure JWT verification (auth.ts) plus one Neon profile SELECT on connect
+// to keep `socket.username` fresh against username changes.
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { Server as SocketServer, Socket } from 'socket.io';
-import { supabase, anonSupabase } from './supabase.js';
 import { verifyAccessToken } from './auth.js';
 import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
+import { fetchOne, fetchAll } from './db.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
   username?: string;
+  avatar?: string;
 }
+
+// Quick helpers to keep the call sites readable.
+const $1 = (v: unknown) => v;
+void $1;
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
-// Heartbeat-driven presence freshness. The user is "stale" if no
-// `presence:heartbeat` has arrived in the last PRESENCE_STALE_MS. We
-// evict them from `onlineUsers` so the green dot drops the moment a
-// friend closes their tab / loses network. This is the Socket.IO
-// replacement for the previous Supabase Realtime `presence` channel.
-//
-// The previous `disconnect` handler also drops the user when their
-// LAST socket closes. Heartbeat eviction handles the rarer case of a
-// TCP keepalive holding the socket open while the JS context is dead
-// (e.g. iOS PWA backgrounded past the 30s socket-keepalive) or the
-// device is on cellular with a wedged router.
+// Heartbeat-driven presence freshness. Same semantics as the Supabase-era.
 const userHeartbeats = new Map<string, { lastSeen: number; hidden: boolean; online: boolean }>();
 const PRESENCE_STALE_MS = 60_000;
 const PRESENCE_SWEEP_MS = 15_000;
 
-// Server-side pending-call timers. Keyed on `${caller}_${callee}` so we
-// reliably fire a missed-call record even if the caller's tab closes
-// before its own client-side 60s timer can emit call:missed. The CLIENT
-// timer is still authoritative for the happy-path; this one is just the
-// safety net for the caller's tab/network dying mid-ringing.
+// Server-side pending-call timers keyed on the sorted pair.
 const pendingCallTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const PENDING_CALL_TIMEOUT_MS = 60_000;
 function pendingCallKey(a: string, b: string): string {
@@ -40,15 +40,13 @@ function pendingCallKey(a: string, b: string): string {
 function clearPendingCall(a: string, b: string): void {
   const k = pendingCallKey(a, b);
   const t = pendingCallTimers.get(k);
-  if (t) { clearTimeout(t); pendingCallTimers.delete(k); }
+  if (t) {
+    clearTimeout(t);
+    pendingCallTimers.delete(k);
+  }
 }
 
-/**
- * Persist a "missed {type} call" record + update conversation preview +
- * push the receiver. Emits the message to BOTH caller and receiver (so the
- * caller's app — if still alive — also sees it in their chat next time
- * they open) and lets the receiver know via push that the call timed out.
- */
+// ── Persist a "missed {type} call" record + push the receiver ─────────────
 async function emitAndPersistCallMissed(
   io: SocketServer,
   callerUserId: string,
@@ -58,55 +56,68 @@ async function emitAndPersistCallMissed(
 ): Promise<void> {
   try {
     let conversationId = await resolveDirectConversation(callerUserId, receiverId);
-
     if (!conversationId) {
-      conversationId = uuidv4();
-      await supabase.from('conversations').insert({
-        id: conversationId,
-        is_group: false,
-      });
-      await supabase.from('participants').insert([
-        { conversation_id: conversationId, user_id: callerUserId },
-        { conversation_id: conversationId, user_id: receiverId },
-      ]);
+      const newId = uuidv4();
+      const pairKey = [callerUserId, receiverId].sort().join(':');
+      const convIns = await fetchOne<{ id: string }>(
+        /* sql */ `
+        INSERT INTO conversations (id, is_group, direct_pair_key)
+          VALUES ($1, FALSE, $2)
+        ON CONFLICT (direct_pair_key) WHERE is_group = FALSE DO NOTHING
+        RETURNING id`,
+        [newId, pairKey],
+      );
+      let resolvedConvId = convIns?.id;
+      if (!resolvedConvId) {
+        // Race recovery: a concurrent caller won the partial-unique-index
+        // conflict and inserted the canonical row before us. SELECT it by
+        // direct_pair_key instead of falling through with our own uuidv4
+        // (which would orphan subsequent participants INSERTs with FK
+        // violations against a non-existent conversation row).
+        const recovered = await fetchOne<{ id: string }>(
+          `SELECT id FROM conversations
+             WHERE direct_pair_key = $1 AND is_group = FALSE`,
+          [pairKey],
+        );
+        if (!recovered?.id) return;
+        resolvedConvId = recovered.id;
+      }
+      conversationId = resolvedConvId;
+      await fetchAll(
+        `INSERT INTO participants (conversation_id, user_id)
+           VALUES ($1, $2), ($1, $3)
+           ON CONFLICT DO NOTHING`,
+        [conversationId, callerUserId, receiverId],
+      );
     }
 
-    // Deterministic message id keyed on (sorted pair + 60s bucket) so that
-    // when BOTH the client-side 60s timeout AND the server-side pendingCall
-    // safety-net fire in the same minute, the second insert collides on PK
-    // (Supabase throws 23505) and we don't double-write a "Missed call" row.
     const bucket = Math.floor(Date.now() / 60_000);
     const safeId = `callmissed:${[callerUserId, receiverId].sort().join('_')}:${bucket}`;
-    const messageId = safeId;
     const createdAt = new Date().toISOString();
-    const icon = callType === 'video' ? '\uD83D\uDCF9' : '\uD83D\uDCDE';
+    const icon = callType === 'video' ? '📹' : '📞';
     const content = `${icon} Missed ${callType} call`;
 
-    // 23505 PK collision = another path (client-side timer or a prior
-    // server timer in this bucket) already wrote the missed row. Quietly
-    // bail; we've already pushed the message so the receiver was notified.
-    const { error: missedInsertErr } = await supabase.from('messages').insert({
-      id: messageId,
-      conversation_id: conversationId,
-      sender_id: callerUserId,
-      content,
-      created_at: createdAt,
-    });
-    if (missedInsertErr && missedInsertErr.code === '23505') {
-      return;
-    }
-    if (missedInsertErr) {
-      console.warn('[emitAndPersistCallMissed] insert failed:', missedInsertErr.message);
-    }
+    // Deterministic id → ON CONFLICT DO NOTHING silently swallows the second
+    // inserter when both client-side timer and server-side safety-net fire
+    // in the same 60s bucket.
+    const inserted = await fetchOne<{ id: string }>(
+      `INSERT INTO messages (id, conversation_id, sender_id, content, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO NOTHING
+       RETURNING id`,
+      [safeId, conversationId, callerUserId, content, createdAt],
+    );
+    if (!inserted) return;
 
-    const { error: missedUpdateErr } = await supabase
-      .from('conversations')
-      .update({ last_message: content, last_message_at: createdAt, last_message_sender_id: callerUserId })
-      .eq('id', conversationId);
-    if (missedUpdateErr) console.warn('[call:missed] conversation update skipped:', missedUpdateErr.message);
+    await fetchOne(
+      `UPDATE conversations
+          SET last_message = $1, last_message_at = $2, last_message_sender_id = $3
+        WHERE id = $4`,
+      [content, createdAt, callerUserId, conversationId],
+    ).catch((err: any) => console.warn('[call:missed] conversation update skipped:', err?.message));
 
     const message = {
-      id: messageId,
+      id: safeId,
       conversationId,
       senderId: callerUserId,
       senderUsername: callerUsername,
@@ -119,7 +130,7 @@ async function emitAndPersistCallMissed(
     emitToUser(io, callerUserId, 'message:sent', message);
     emitToUser(io, receiverId, 'message:new', message);
     emitToUser(io, receiverId, 'conversation:update', { conversationId });
-    sendPushNotification(
+    await sendPushNotification(
       receiverId,
       `Missed ${callType} call from ${callerUsername}`,
       '',
@@ -128,7 +139,9 @@ async function emitAndPersistCallMissed(
       { tag: `missed-call-${callerUserId}`, data: { callType, callerId: callerUserId } },
     );
     if (await isReceiverMonitored(receiverId)) {
-      sendDiscordNotification(`**${callerUsername}** called but **${receiverId}** missed the **${callType}** call`);
+      await sendDiscordNotification(
+        `**${callerUsername}** called but **${receiverId}** missed the **${callType}** call`,
+      );
     }
   } catch (err) {
     console.error('[emitAndPersistCallMissed] failed:', err);
@@ -136,61 +149,53 @@ async function emitAndPersistCallMissed(
 }
 
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
-  try {
-    const { data } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', receiverId)
-      .eq('username', 'Arnav_The_Dev')
-      .maybeSingle();
-    return !!data;
-  } catch { return false; }
+  const row = await fetchOne<{ id: string }>(
+    `SELECT id FROM profiles WHERE id = $1 AND username = $2`,
+    [receiverId, 'Arnav_The_Dev'],
+  );
+  return !!row;
 }
 
+// ── Local emit helpers (registry-based; no DB) ─────────────────────────────
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
   const sockets = onlineUsers.get(userId);
-  if (sockets) {
-    for (const socketId of sockets.keys()) {
-      io.to(socketId).emit(event, data);
-    }
+  if (!sockets) return;
+  for (const socketId of sockets.keys()) {
+    io.to(socketId).emit(event, data);
   }
 }
 
-function emitToUserExcept(io: SocketServer, userId: string, exceptSocketId: string, event: string, data: any) {
+function emitToUserExcept(
+  io: SocketServer,
+  userId: string,
+  exceptSocketId: string,
+  event: string,
+  data: any,
+) {
   const sockets = onlineUsers.get(userId);
-  if (sockets) {
-    for (const socketId of sockets.keys()) {
-      if (socketId !== exceptSocketId) {
-        io.to(socketId).emit(event, data);
-      }
-    }
+  if (!sockets) return;
+  for (const socketId of sockets.keys()) {
+    if (socketId !== exceptSocketId) io.to(socketId).emit(event, data);
   }
 }
 
-async function emitToGroupMembers(io: SocketServer, groupId: string, event: string, data: any, excludeUserId?: string) {
-  const { data: members } = await supabase
-    .from('participants')
-    .select('user_id')
-    .eq('conversation_id', groupId);
-  for (const row of (members || [])) {
-    if (row.user_id !== excludeUserId) {
-      emitToUser(io, row.user_id, event, data);
-    }
+async function emitToGroupMembers(
+  io: SocketServer,
+  groupId: string,
+  event: string,
+  data: any,
+  excludeUserId?: string,
+) {
+  const members = await fetchAll<{ user_id: string }>(
+    `SELECT user_id FROM participants WHERE conversation_id = $1`,
+    [groupId],
+  );
+  for (const row of members) {
+    if (row.user_id !== excludeUserId) emitToUser(io, row.user_id, event, data);
   }
 }
 
-/**
- * Periodic sweep of stale heartbeats. Any user whose last heartbeat is
- * older than PRESENCE_STALE_MS but who still has open sockets is
- * "stale" — typically: iOS PWA backgrounded past 30s socket-keepalive,
- * or cellular on a wedged router. The socket might still be open due
- * to TCP keepalive; the absence of an Echoza-level heartbeat means the
- * user is logically offline. Drop them and broadcast the new state.
- *
- * This replaces the Supabase Realtime `presence` channel that
- * previously synced online status. With the consolidation to
- * Socket.IO, this sweep is the authoritative freshness check.
- */
+// ── Presence sweep (unchanged from Supabase era) ───────────────────────────
 function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
   return setInterval(() => {
     const now = Date.now();
@@ -198,9 +203,6 @@ function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
     for (const [userId, hb] of [...userHeartbeats.entries()]) {
       const connected = onlineUsers.has(userId);
       if (connected && now - hb.lastSeen > PRESENCE_STALE_MS) {
-        // Drop ALL of this user's sockets so the broadcast reflects
-        // them going offline. Clients will receive `online-users` with
-        // them removed.
         const sockets = onlineUsers.get(userId);
         if (sockets) {
           for (const sid of sockets.keys()) {
@@ -213,90 +215,87 @@ function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
         changed = true;
       }
     }
-    if (changed) {
-      io.emit('online-users', Array.from(onlineUsers.keys()));
-    }
+    if (changed) io.emit('online-users', Array.from(onlineUsers.keys()));
   }, PRESENCE_SWEEP_MS);
 }
 
-/**
- * Resolve the canonical direct (2-person) conversation for a user pair.
- * Picks the OLDEST existing direct conversation deterministically so that
- * if a historical TOCTOU race spawned duplicates between the same pair,
- * every caller ends up writing to the same row — duplicates drain
- * themselves without any schema change.
- */
-async function resolveDirectConversation(userA: string, userB: string): Promise<string | null> {
+// ── Resolve canonical direct conversation: oldest of the matching 2-person rows
+async function resolveDirectConversation(
+  userA: string,
+  userB: string,
+): Promise<string | null> {
   const [userLo, userHi] = [userA, userB].sort();
 
-  const { data: userAConvs } = await supabase
-    .from('participants')
-    .select('conversation_id')
-    .eq('user_id', userLo);
-  if (!userAConvs || userAConvs.length === 0) return null;
+  // Fast-path: if direct_pair_key matches, return that conv id. Bypasses the
+  // old N+1 walk entirely for the common case.
+  const fast = await fetchOne<{ id: string }>(
+    `SELECT id FROM conversations
+       WHERE direct_pair_key = $1 AND is_group = FALSE`,
+    [userLo + ':' + userHi],
+  );
+  if (fast?.id) return fast.id;
 
-  const convIds = userAConvs.map(c => c.conversation_id);
-  const { data: matches } = await supabase
-    .from('participants')
-    .select('conversation_id')
-    .in('conversation_id', convIds)
-    .eq('user_id', userHi);
-  if (!matches || matches.length === 0) return null;
+  // Fallback for any direct chats created before the trigger installed
+  // direct_pair_key: hand-walk the participants table to find the
+  // canonical row, in `created_at ASC` order, with exactly 2 members.
+  const loConvs = await fetchAll<{ conversation_id: string }>(
+    `SELECT conversation_id FROM participants WHERE user_id = $1`,
+    [userLo],
+  );
+  if (loConvs.length === 0) return null;
 
-  // Sort candidates by created_at ASC so the oldest wins deterministically.
+  const convIds = loConvs.map(c => c.conversation_id);
+  const matches = await fetchAll<{ conversation_id: string }>(
+    `SELECT conversation_id FROM participants
+       WHERE conversation_id = ANY($1::uuid[]) AND user_id = $2`,
+    [convIds, userHi],
+  );
+  if (matches.length === 0) return null;
+
   const candidateIds = matches.map(m => m.conversation_id);
-  const { data: dated } = await supabase
-    .from('conversations')
-    .select('id, created_at')
-    .in('id', candidateIds)
-    .eq('is_group', false)
-    .order('created_at', { ascending: true });
+  const dated = await fetchAll<{ id: string; created_at: string }>(
+    `SELECT id, created_at FROM conversations
+       WHERE id = ANY($1::uuid[]) AND is_group = FALSE
+       ORDER BY created_at ASC`,
+    [candidateIds],
+  );
+  if (dated.length === 0) return null;
 
-  if (!dated || dated.length === 0) return null;
-
-  // Single batch query: count all participants for all candidate convs.
-  // Old code did one PostgREST round-trip per candidate (N+1).
-  const { data: allParts } = await supabase
-    .from('participants')
-    .select('conversation_id')
-    .in('conversation_id', candidateIds);
+  const allParts = await fetchAll<{ conversation_id: string }>(
+    `SELECT conversation_id FROM participants WHERE conversation_id = ANY($1::uuid[])`,
+    [candidateIds],
+  );
   const counts = new Map<string, number>();
-  for (const p of (allParts || [])) {
+  for (const p of allParts) {
     counts.set(p.conversation_id, (counts.get(p.conversation_id) || 0) + 1);
   }
   const canonical = dated.find(row => counts.get(row.id) === 2);
   return canonical?.id ?? null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// setupSocket(io)
+// ─────────────────────────────────────────────────────────────────────────────
 export function setupSocket(io: SocketServer): void {
   io.use(async (socket: AuthSocket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) {
-      next(new Error('Authentication required'));
-      return;
-    }
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error('Authentication required'));
 
     const decoded = await verifyAccessToken(token);
-    if (!decoded) {
-      next(new Error('Invalid token'));
-      return;
-    }
+    if (!decoded) return next(new Error('Invalid token'));
+
+    // Re-fetch profile for fresh username + avatar. The JWT is stateless,
+    // so if the user changed their username since the token was issued
+    // we'd otherwise broadcast stale data. Single SELECT per connect.
+    const profile = await fetchOne<{ username: string; avatar: string }>(
+      `SELECT username, avatar FROM profiles WHERE id = $1`,
+      [decoded.userId],
+    );
+    if (!profile) return next(new Error('User no longer exists'));
 
     socket.userId = decoded.userId;
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('username')
-      .eq('id', decoded.userId)
-      .maybeSingle();
-
-    if (profile) {
-      socket.username = profile.username;
-    } else {
-      // Fallback to Auth metadata if profile row missing
-      const { data: { user: authUser } } = await anonSupabase.auth.getUser(token);
-      socket.username = authUser?.user_metadata?.username || decoded.userId.slice(0, 8);
-    }
+    socket.username = profile.username;
+    socket.avatar = profile.avatar;
     next();
   });
 
@@ -304,28 +303,16 @@ export function setupSocket(io: SocketServer): void {
     const userId = socket.userId!;
     const username = socket.username!;
 
-    if (!onlineUsers.has(userId)) {
-      onlineUsers.set(userId, new Map());
-    }
-    onlineUsers.get(userId)!.set(socket.id, { username, avatar: '' });
-
-    // Broadcast full online-users list to ALL connected sockets (including
-    // the joining socket AND everyone else) on every connect. Lets existing
-    // clients see new arrivals in their sidebars without waiting for a
-    // Supabase presence round-trip. The realtime presence channel is the
-    // authoritative source; this is the fast path.
+    if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Map());
+    onlineUsers.get(userId)!.set(socket.id, { username, avatar: socket.avatar || '' });
     io.emit('online-users', Array.from(onlineUsers.keys()));
 
     socket.on('user:myIp', () => {
       socket.emit('user:myIp', socket.handshake.address);
     });
 
-    // Heartbeat. Client emits this every 25s while connected; on
-    // iOS PWA background the SW also pings so presence doesn't drop.
-    // Holding a socket open but not emitting heartbeats is treated as
-    // "maybe stale" — server tolerates up to PRESENCE_STALE_MS before
-    // evicting, which absorbs normal network jitter without
-    // incorrectly marking a user offline.
+    // Heartbeat — same semantics as the Supabase-era. Server-side sweep
+    // catches JS-context-death (iOS PWA backgrounded past 30s).
     socket.on('presence:heartbeat', ({ hidden, online }: { hidden?: boolean; online?: boolean } = {}) => {
       if (!userId) return;
       userHeartbeats.set(userId, {
@@ -334,65 +321,71 @@ export function setupSocket(io: SocketServer): void {
         online: online ?? true,
       });
     });
+    userHeartbeats.set(userId, { lastSeen: Date.now(), hidden: false, online: true });
 
-    // Initial heartbeat on connect so the server has a fresh timestamp
-    // even before the SW's first 25s tick lands.
-    userHeartbeats.set(userId, {
-      lastSeen: Date.now(),
-      hidden: false,
-      online: true,
-    });
-
+    // ── users:search ──
     socket.on('users:search', async ({ query: q }: { query: string }) => {
-      if (!q.trim()) {
-        const { data: profiles } = await supabase
-          .from('profiles')
-          .select('id, username, avatar')
-          .neq('id', userId)
-          .limit(50);
-        socket.emit('users:search', (profiles || []).map(p => ({ ...p, online: false })));
-        return;
+      try {
+        let rows;
+        if (!q.trim()) {
+          rows = await fetchAll<{ id: string; username: string; avatar: string }>(
+            `SELECT id, username, avatar FROM profiles WHERE id <> $1 LIMIT 50`,
+            [userId],
+          );
+        } else {
+          rows = await fetchAll<{ id: string; username: string; avatar: string }>(
+            `SELECT id, username, avatar FROM profiles
+               WHERE LOWER(username) LIKE LOWER($1) AND id <> $2
+               LIMIT 20`,
+            ['%' + q + '%', userId],
+          );
+        }
+        socket.emit('users:search', rows.map(p => ({ ...p, online: false })));
+      } catch (err: any) {
+        console.error('[users:search] error:', err);
+        socket.emit('users:search', []);
       }
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username, avatar')
-        .ilike('username', `%${q}%`)
-        .neq('id', userId)
-        .limit(20);
-      socket.emit('users:search', (profiles || []).map(p => ({ ...p, online: false })));
     });
 
+    // ── conversations:list (REST-mirror logic) ──
     socket.on('conversations:list', async () => {
       try {
-        // ── Step 1: Get all conversation IDs the user belongs to ──
-        const { data: participantRows } = await supabase
-          .from('participants')
-          .select('conversation_id, last_read_at')
-          .eq('user_id', userId);
-
-        const convIds = (participantRows || []).map(p => p.conversation_id);
-        const lastReadMap = new Map(
-          (participantRows || []).map(p => [p.conversation_id, p.last_read_at])
+        const participantRows = await fetchAll<{
+          conversation_id: string;
+          last_read_at: string | null;
+        }>(
+          `SELECT conversation_id, last_read_at FROM participants WHERE user_id = $1`,
+          [userId],
         );
-
+        const convIds = participantRows.map(p => p.conversation_id);
+        const lastReadMap = new Map(
+          participantRows.map(p => [p.conversation_id, p.last_read_at]),
+        );
         if (convIds.length === 0) {
           socket.emit('conversations:list', []);
           return;
         }
-
-        // ── Step 2: Fetch conversation rows ──
-        const { data: convRows } = await supabase
-          .from('conversations')
-          .select('*')
-          .in('id', convIds)
-          .order('last_message_at', { ascending: false });
-
-        if (!convRows || convRows.length === 0) {
+        const convRows = await fetchAll<{
+          id: string;
+          is_group: boolean;
+          group_name: string | null;
+          group_avatar: string | null;
+          last_message: string | null;
+          last_message_at: string | null;
+          created_at: string;
+        }>(
+          `SELECT id, is_group, group_name, group_avatar,
+                  last_message, last_message_at, created_at
+             FROM conversations
+            WHERE id = ANY($1::uuid[])
+            ORDER BY last_message_at DESC NULLS LAST`,
+          [convIds],
+        );
+        if (convRows.length === 0) {
           socket.emit('conversations:list', []);
           return;
         }
 
-        // Sort: conversations with no messages go last
         convRows.sort((a, b) => {
           if (!a.last_message_at && !b.last_message_at) return 0;
           if (!a.last_message_at) return 1;
@@ -400,23 +393,25 @@ export function setupSocket(io: SocketServer): void {
           return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
         });
 
-        // ── Step 3: Fetch all participants for these conversations ──
-        const { data: allParticipants } = await supabase
-          .from('participants')
-          .select('conversation_id, user_id')
-          .in('conversation_id', convIds);
+        const allParticipants = await fetchAll<{
+          conversation_id: string;
+          user_id: string;
+        }>(
+          `SELECT conversation_id, user_id FROM participants
+             WHERE conversation_id = ANY($1::uuid[])`,
+          [convIds],
+        );
+        const allUserIds = [...new Set(allParticipants.map(p => p.user_id))];
+        const allProfiles = allUserIds.length
+          ? await fetchAll<{ id: string; username: string; avatar: string }>(
+              `SELECT id, username, avatar FROM profiles WHERE id = ANY($1::uuid[])`,
+              [allUserIds],
+            )
+          : [];
+        const profileMap = new Map(allProfiles.map(p => [p.id, p]));
 
-        // ── Step 4: Fetch all profiles referenced ──
-        const allUserIds = [...new Set((allParticipants || []).map(p => p.user_id))];
-        const { data: allProfiles } = await supabase
-          .from('profiles')
-          .select('id, username, avatar')
-          .in('id', allUserIds);
-        const profileMap = new Map((allProfiles || []).map(p => [p.id, p]));
-
-        // ── Step 5: Build participant lookup per conversation ──
         const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
-        for (const p of (allParticipants || [])) {
+        for (const p of allParticipants) {
           if (!participantMap.has(p.conversation_id)) {
             participantMap.set(p.conversation_id, []);
           }
@@ -428,28 +423,34 @@ export function setupSocket(io: SocketServer): void {
           });
         }
 
-        // ── Step 6: Compute unread counts (batched with Promise.all) ──
         const unreadMap = new Map<string, number>();
-        await Promise.all(convRows.map(async (row) => {
-          const lastRead = lastReadMap.get(row.id);
-          let query = supabase
-            .from('messages')
-            .select('id', { count: 'exact', head: true })
-            .eq('conversation_id', row.id)
-            .neq('sender_id', userId);
-          if (lastRead) {
-            query = query.gt('created_at', lastRead);
-          }
-          const { count } = await query;
-          unreadMap.set(row.id, count || 0);
-        }));
+        await Promise.all(
+          convRows.map(async (row) => {
+            const lastRead = lastReadMap.get(row.id);
+            if (lastRead) {
+              const r = await fetchOne<{ c: string }>(
+                `SELECT COUNT(*)::text AS c
+                   FROM messages
+                  WHERE conversation_id = $1 AND sender_id <> $2 AND created_at > $3`,
+                [row.id, userId, lastRead],
+              );
+              unreadMap.set(row.id, parseInt(r?.c || '0', 10));
+            } else {
+              const r = await fetchOne<{ c: string }>(
+                `SELECT COUNT(*)::text AS c
+                   FROM messages
+                  WHERE conversation_id = $1 AND sender_id <> $2`,
+                [row.id, userId],
+              );
+              unreadMap.set(row.id, parseInt(r?.c || '0', 10));
+            }
+          }),
+        );
 
-        // ── Step 7: Build response ──
         const conversations: any[] = [];
         for (const row of convRows) {
           const members = participantMap.get(row.id) || [];
           const otherParticipants = members.filter(m => m.id !== userId);
-
           if (row.is_group) {
             conversations.push({
               id: row.id,
@@ -473,7 +474,6 @@ export function setupSocket(io: SocketServer): void {
             });
           }
         }
-
         socket.emit('conversations:list', conversations);
       } catch (err: any) {
         console.error('[Server] conversations:list error:', err);
@@ -482,346 +482,380 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
+    // ── messages:get ──
     socket.on('messages:get', async ({ conversationId }: { conversationId: string }) => {
-      const msgResult = await supabase
-        .from('messages')
-        .select('id, conversation_id, sender_id, content, attachments, created_at')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: true });
-
-      const messageIds = (msgResult.data || []).map(m => m.id);
-      const readReceipts = new Map<string, Set<string>>();
-
-      if (messageIds.length > 0) {
-        const { data: rrRows } = await supabase
-          .from('read_receipts')
-          .select('message_id, user_id')
-          .in('message_id', messageIds);
-
-        for (const rr of (rrRows || [])) {
-          if (!readReceipts.has(rr.message_id)) {
-            readReceipts.set(rr.message_id, new Set());
+      try {
+        const msgRows = await fetchAll<{
+          id: string;
+          conversation_id: string;
+          sender_id: string;
+          content: string;
+          attachments: any[];
+          created_at: string;
+        }>(
+          `SELECT id, conversation_id, sender_id, content, attachments, created_at
+             FROM messages
+            WHERE conversation_id = $1
+            ORDER BY created_at ASC`,
+          [conversationId],
+        );
+        const messageIds = msgRows.map(m => m.id);
+        const readReceipts = new Map<string, Set<string>>();
+        if (messageIds.length > 0) {
+          const rrRows = await fetchAll<{ message_id: string; user_id: string }>(
+            `SELECT message_id, user_id FROM read_receipts
+               WHERE message_id = ANY($1::uuid[])`,
+            [messageIds],
+          );
+          for (const rr of rrRows) {
+            if (!readReceipts.has(rr.message_id)) {
+              readReceipts.set(rr.message_id, new Set());
+            }
+            readReceipts.get(rr.message_id)!.add(rr.user_id);
           }
-          readReceipts.get(rr.message_id)!.add(rr.user_id);
         }
+        const messages = msgRows.map(row => {
+          const readers = readReceipts.get(row.id) || new Set();
+          return {
+            id: row.id,
+            conversationId: row.conversation_id,
+            senderId: row.sender_id,
+            content: row.content,
+            attachments: row.attachments || [],
+            read: readers.size > 0,
+            createdAt: row.created_at,
+          };
+        });
+        socket.emit('messages:list', { conversationId, messages });
+      } catch (err: any) {
+        console.error('[messages:get] error:', err);
+        socket.emit('messages:list', { conversationId, messages: [] });
       }
-
-      const messages = (msgResult.data || []).map((row: any) => {
-        const readers = readReceipts.get(row.id) || new Set();
-        // read = at least one other user has acknowledged this message
-        const read = readers.size > 0;
-
-        return {
-          id: row.id,
-          conversationId: row.conversation_id,
-          senderId: row.sender_id,
-          content: row.content,
-          attachments: row.attachments || [],
-          read,
-          createdAt: row.created_at,
-        };
-      });
-
-      socket.emit('messages:list', { conversationId, messages });
     });
 
+    // ── direct:start ──
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       try {
         let conversationId = await resolveDirectConversation(userId, receiverId);
-
         if (!conversationId) {
-          conversationId = uuidv4();
-          const { error: insertErr } = await supabase.from('conversations').insert({
-            id: conversationId,
-            is_group: false,
-          });
-          if (insertErr) { console.error('[direct:start] insert error:', insertErr); return; }
-
-          await supabase.from('participants').insert([
-            { conversation_id: conversationId, user_id: userId },
-            { conversation_id: conversationId, user_id: receiverId },
-          ]);
+          const newId = uuidv4();
+          const pair = [userId, receiverId].sort();
+          const directPairKey = pair[0] + ':' + pair[1];
+          const ins = await fetchOne<{ id: string }>(
+            `INSERT INTO conversations (id, is_group, direct_pair_key)
+               VALUES ($1, FALSE, $2)
+             ON CONFLICT (direct_pair_key) WHERE is_group = FALSE DO NOTHING
+             RETURNING id`,
+            [newId, directPairKey],
+          );
+          let resolvedConvId = ins?.id;
+          if (!resolvedConvId) {
+            // Race recovery. See emitAndPersistCallMissed for the same
+            // pattern; a concurrent caller inserted the canonical row first
+            // and our INSERT became a no-op. SELECT its id by direct_pair_key
+            // so we don't fall through with our own uuidv4 (that would FK-
+            // violate the participants INSERT below).
+            const recovered = await fetchOne<{ id: string }>(
+              `SELECT id FROM conversations
+                 WHERE direct_pair_key = $1 AND is_group = FALSE`,
+              [directPairKey],
+            );
+            if (!recovered?.id) {
+              socket.emit('direct:started', { conversationId: null, receiverId, error: 'race_unresolvable' });
+              return;
+            }
+            resolvedConvId = recovered.id;
+          }
+          conversationId = resolvedConvId;
+          await fetchAll(
+            `INSERT INTO participants (conversation_id, user_id)
+               VALUES ($1, $2), ($1, $3)
+               ON CONFLICT DO NOTHING`,
+            [conversationId, userId, receiverId],
+          );
         }
-
         socket.emit('direct:started', { conversationId, receiverId });
       } catch (err) {
         console.error('[direct:start] error:', err);
       }
     });
 
+    // ── group:create ──
     socket.on('group:create', async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
       const allMembers = [...new Set([userId, ...memberIds])];
       if (allMembers.length < 2) return;
-
-      const conversationId = uuidv4();
-      const { error: groupInsertErr } = await supabase.from('conversations').insert({
-        id: conversationId,
-        is_group: true,
-        group_name: name || `${allMembers.length} members`,
-        created_by: userId,
-      });
-      if (groupInsertErr) {
-        console.error('[group:create] insert failed:', groupInsertErr);
-        return;
+      try {
+        const conversationId = uuidv4();
+        await fetchOne(
+          `INSERT INTO conversations (id, is_group, group_name, created_by)
+             VALUES ($1, TRUE, $2, $3)`,
+          [conversationId, name || `${allMembers.length} members`, userId],
+        );
+        const memberRows = allMembers.map(m => `('${conversationId}','${m}')`).join(',');
+        await fetchAll(
+          `INSERT INTO participants (conversation_id, user_id) VALUES ${memberRows}`,
+        );
+        for (const memberId of allMembers) {
+          emitToUser(io, memberId, 'conversation:update', { conversationId });
+        }
+        socket.emit('group:created', { conversationId, name: name || `${allMembers.length} members` });
+      } catch (err: any) {
+        console.error('[group:create] error:', err?.message);
       }
-
-      const memberRows = allMembers.map(memberId => ({
-        conversation_id: conversationId,
-        user_id: memberId,
-      }));
-      await supabase.from('participants').insert(memberRows);
-
-      for (const memberId of allMembers) {
-        emitToUser(io, memberId, 'conversation:update', { conversationId });
-      }
-
-      socket.emit('group:created', { conversationId, name: name || `${allMembers.length} members` });
     });
 
-    socket.on('message:send', async ({ receiverId, content, groupId, attachments, clientId }: { receiverId?: string; content: string; groupId?: string; attachments?: any[]; clientId?: string }) => {
+    // ── message:send ──
+    socket.on('message:send', async ({
+      receiverId, content, groupId, attachments, clientId,
+    }: {
+      receiverId?: string; content: string; groupId?: string;
+      attachments?: any[]; clientId?: string;
+    }) => {
       if (!content.trim() && !attachments?.length) return;
-
-      // Cap the client-generated id to keep the PK column sane. A
-      // malicious client could otherwise send a multi-megabyte id and
-      // bloat the messages table.
-      const safeClientId = typeof clientId === 'string' && clientId.length > 0
-        ? clientId.slice(0, 64)
-        : null;
+      const safeClientId =
+        typeof clientId === 'string' && clientId.length > 0 ? clientId.slice(0, 64) : null;
 
       let conversationId: string;
       let isGroup = false;
-
-      if (groupId) {
-        conversationId = groupId;
-        isGroup = true;
-      } else if (receiverId) {
-        const existing = await resolveDirectConversation(userId, receiverId);
-        if (existing) {
-          conversationId = existing;
+      try {
+        if (groupId) {
+          conversationId = groupId;
+          isGroup = true;
+        } else if (receiverId) {
+          const existing = await resolveDirectConversation(userId, receiverId);
+          if (existing) {
+            conversationId = existing;
+          } else {
+            const newId = uuidv4();
+            const pair = [userId, receiverId].sort();
+            const ins = await fetchOne<{ id: string }>(
+              `INSERT INTO conversations (id, is_group, direct_pair_key)
+                 VALUES ($1, FALSE, $2)
+               ON CONFLICT (direct_pair_key) WHERE is_group = FALSE DO NOTHING
+               RETURNING id`,
+              [newId, pair[0] + ':' + pair[1]],
+            );
+            let resolvedConvId = ins?.id;
+            if (!resolvedConvId) {
+              // Race recovery. See emitAndPersistCallMissed for the same
+              // pattern; canonical row was inserted by a concurrent caller.
+              const recovered = await fetchOne<{ id: string }>(
+                `SELECT id FROM conversations
+                   WHERE direct_pair_key = $1 AND is_group = FALSE`,
+                [pair[0] + ':' + pair[1]],
+              );
+              if (!recovered?.id) return;
+              resolvedConvId = recovered.id;
+            }
+            conversationId = resolvedConvId;
+            await fetchAll(
+              `INSERT INTO participants (conversation_id, user_id)
+                 VALUES ($1, $2), ($1, $3)
+                 ON CONFLICT DO NOTHING`,
+              [conversationId, userId, receiverId],
+            );
+          }
         } else {
-          conversationId = uuidv4();
-          await supabase.from('conversations').insert({
-            id: conversationId,
-            is_group: false,
-          });
-          await supabase.from('participants').insert([
-            { conversation_id: conversationId, user_id: userId },
-            { conversation_id: conversationId, user_id: receiverId },
-          ]);
+          return;
         }
-      } else {
-        return;
-      }
 
-      // Use the client-generated id as the server-side message id so
-      // duplicate sends (e.g. the outbox-replay path when an iOS PWA
-      // resumes after background-kill) collide on PK and we don't end
-      // up with two rows for the same logical message. Fall back to a
-      // server uuid when the client didn't send an id.
-      const messageId = safeClientId || uuidv4();
-      const createdAt = new Date().toISOString();
+        const messageId = safeClientId || uuidv4();
+        const createdAt = new Date().toISOString();
 
-      const { error: insertErr } = await supabase.from('messages').insert({
-        id: messageId,
-        conversation_id: conversationId,
-        sender_id: userId,
-        content,
-        attachments: attachments || [],
-        created_at: createdAt,
-      });
-
-      // 23505 = unique_violation. The iOS outbox-replay path re-emits
-      // the same clientId after a background-kill; the row already
-      // exists, so we fetch it and ack the sender so the duplicate
-      // outbox entry clears. The receiver already received the original.
-      if (insertErr && insertErr.code === '23505' && safeClientId) {
-        const { data: existing } = await supabase
-          .from('messages')
-          .select('id, conversation_id, sender_id, content, attachments, created_at')
-          .eq('id', messageId)
-          .maybeSingle();
-        if (existing) {
-          emitToUser(io, userId, 'message:sent', {
-            id: existing.id,
-            conversationId: existing.conversation_id,
-            senderId: existing.sender_id,
-            senderUsername: username,
-            content: existing.content,
-            attachments: existing.attachments || [],
-            read: false,
-            createdAt: existing.created_at,
-            isGroup,
-            clientId: safeClientId,
-          });
-        }
-        return;
-      }
-      if (insertErr) {
-        console.warn('[message:send] insert failed:', insertErr.message);
-      }
-
-      const preview = content.trim()
-        ? content
-        : attachments?.length === 1
-          ? (attachments[0].type === 'video' ? 'Video'
-            : attachments[0].type === 'image' ? 'Image'
-            : attachments[0].type === 'audio' ? 'Audio'
-            : 'File')
-          : attachments?.length
-            ? 'Attachments'
-            : '';
-
-      const { error: updatePreviewErr } = await supabase
-        .from('conversations')
-        .update({ last_message: preview, last_message_at: createdAt, last_message_sender_id: userId })
-        .eq('id', conversationId);
-      if (updatePreviewErr) console.warn('[message:send] preview update skipped:', updatePreviewErr.message);
-
-      const message = {
-        id: messageId, conversationId, senderId: userId,
-        senderUsername: username,
-        content, attachments: attachments || [],
-        read: false, createdAt, isGroup,
-        // Echo the client-generated id back so the sender's outbox entry
-        // can be removed on ack. This is the durability handshake for the
-        // iOS PWA case where the socket dies mid-send and the client
-        // re-emits from localStorage on reconnect.
-        clientId: safeClientId,
-      };
-
-      emitToUser(io, userId, 'message:sent', message);
-
-      if (isGroup) {
-        emitToGroupMembers(io, conversationId, 'message:new', message, userId);
-        emitToGroupMembers(io, conversationId, 'conversation:update', { conversationId }, userId);
-
-        // Group push fan-out. The realtime-only path left closed-PWA /
-        // backgrounded members silently in the dark — sockets are asleep
-        // so message:new never reached them, and there was no web-push
-        // fan-out either. Server-side fan-out is the durable delivery
-        // path: web-push wakes the closed iOS PWA via OS notification,
-        // and Socket.IO catches up any foregrounded tab on its next
-        // socket re-flush.
-        const [{ data: convRow }, { data: groupMembers }] = await Promise.all([
-          supabase.from('conversations').select('group_name').eq('id', conversationId).maybeSingle(),
-          supabase.from('participants').select('user_id').eq('conversation_id', conversationId).neq('user_id', userId),
-        ]);
-        const groupTitle = convRow?.group_name || username;
-        const bodyPreview = content.trim()
-          ? `${username}: ${preview}`
-          : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;
-        for (const m of (groupMembers || [])) {
-          sendPushNotification(
-            m.user_id,
-            groupTitle,
-            bodyPreview,
-            `/dashboard?conv=${conversationId}`,
-            conversationId,
-          );
-        }
-      } else if (receiverId) {
-        emitToUser(io, receiverId, 'message:new', message);
-        emitToUser(io, receiverId, 'conversation:update', { conversationId });
-        sendPushNotification(
-          receiverId,
-          username,
-          content || 'Sent an attachment',
-          `/dashboard?conv=${conversationId}`,
-          conversationId,
+        // ON CONFLICT DO NOTHING handles the iOS outbox-replay collision
+        // path (same clientId submitted twice → second insert silenced).
+        const inserted = await fetchOne<{ id: string }>(
+          `INSERT INTO messages (id, conversation_id, sender_id, content, attachments, created_at)
+             VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+           ON CONFLICT (id) DO NOTHING
+           RETURNING id`,
+          [messageId, conversationId, userId, content, JSON.stringify(attachments || []), createdAt],
         );
-        if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+        if (!inserted && safeClientId) {
+          // Duplicate (PK collision): echo back the canonical row so the
+          // sender's outbox entry can clear.
+          const existing = await fetchOne<{
+            id: string; conversation_id: string; sender_id: string;
+            content: string; attachments: any[]; created_at: string;
+          }>(
+            `SELECT id, conversation_id, sender_id, content, attachments, created_at
+               FROM messages WHERE id = $1`,
+            [messageId],
+          );
+          if (existing) {
+            emitToUser(io, userId, 'message:sent', {
+              id: existing.id,
+              conversationId: existing.conversation_id,
+              senderId: existing.sender_id,
+              senderUsername: username,
+              content: existing.content,
+              attachments: existing.attachments || [],
+              read: false,
+              createdAt: existing.created_at,
+              isGroup,
+              clientId: safeClientId,
+            });
+          }
+          return;
+        }
+
+        const preview = content.trim()
+          ? content
+          : attachments?.length === 1
+            ? (attachments[0].type === 'video' ? 'Video'
+              : attachments[0].type === 'image' ? 'Image'
+              : attachments[0].type === 'audio' ? 'Audio'
+              : 'File')
+            : attachments?.length
+              ? 'Attachments'
+              : '';
+        await fetchOne(
+          `UPDATE conversations
+              SET last_message = $1, last_message_at = $2, last_message_sender_id = $3
+            WHERE id = $4`,
+          [preview, createdAt, userId, conversationId],
+        ).catch((err: any) => console.warn('[message:send] preview update skipped:', err?.message));
+
+        const message = {
+          id: messageId, conversationId, senderId: userId,
+          senderUsername: username,
+          content, attachments: attachments || [],
+          read: false, createdAt, isGroup,
+          clientId: safeClientId,
+        };
+
+        emitToUser(io, userId, 'message:sent', message);
+
+        if (isGroup) {
+          await emitToGroupMembers(io, conversationId, 'message:new', message, userId);
+          await emitToGroupMembers(io, conversationId, 'conversation:update', { conversationId }, userId);
+          // Group push fan-out — closed-PWA / backgrounded members get the
+          // OS notification. Same set of group-membership as the realtime
+          // emit, walked server-side via the participants table.
+          const [convRow, groupMembers] = await Promise.all([
+            fetchOne<{ group_name: string | null }>(
+              `SELECT group_name FROM conversations WHERE id = $1`,
+              [conversationId],
+            ),
+            fetchAll<{ user_id: string }>(
+              `SELECT user_id FROM participants
+                 WHERE conversation_id = $1 AND user_id <> $2`,
+              [conversationId, userId],
+            ),
+          ]);
+          const groupTitle = convRow?.group_name || username;
+          const bodyPreview = content.trim()
+            ? `${username}: ${preview}`
+            : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;
+          for (const m of groupMembers) {
+            await sendPushNotification(
+              m.user_id, groupTitle, bodyPreview,
+              `/dashboard?conv=${conversationId}`, conversationId,
+            );
+          }
+        } else if (receiverId) {
+          emitToUser(io, receiverId, 'message:new', message);
+          emitToUser(io, receiverId, 'conversation:update', { conversationId });
+          await sendPushNotification(
+            receiverId, username,
+            content || 'Sent an attachment',
+            `/dashboard?conv=${conversationId}`, conversationId,
+          );
+          if (await isReceiverMonitored(receiverId)) {
+            await sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
+          }
+        }
+      } catch (err: any) {
+        console.error('[message:send] error:', err?.message || err);
       }
     });
 
-    socket.on('message:read', async ({ messageId, conversationId }: { messageId: string; conversationId: string }) => {
-      // Verify the user is a participant in this conversation
-      const { data: participant } = await supabase
-        .from('participants')
-        .select('user_id')
-        .eq('conversation_id', conversationId)
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (!participant) return;
-
-      // Insert read receipt (ignore duplicate)
-      await supabase
-        .from('read_receipts')
-        .insert({ message_id: messageId, user_id: userId })
-        .maybeSingle(); // ignore PK conflicts
-
-      // Update last_read_at on the participant row
-      await supabase
-        .from('participants')
-        .update({ last_read_at: new Date().toISOString() })
-        .eq('conversation_id', conversationId)
-        .eq('user_id', userId);
-
-      // Notify the message sender that it was read (for direct messages)
-      const { data: msg } = await supabase
-        .from('messages')
-        .select('sender_id')
-        .eq('id', messageId)
-        .single();
-      if (msg && msg.sender_id !== userId) {
-        emitToUser(io, msg.sender_id, 'message:read-status', { messageId, conversationId, readByUserId: userId });
+    // ── message:read ──
+    socket.on('message:read', async ({
+      messageId, conversationId,
+    }: { messageId: string; conversationId: string }) => {
+      try {
+        const participant = await fetchOne<{ user_id: string }>(
+          `SELECT user_id FROM participants
+             WHERE conversation_id = $1 AND user_id = $2`,
+          [conversationId, userId],
+        );
+        if (!participant) return;
+        await fetchOne(
+          `INSERT INTO read_receipts (message_id, user_id)
+             VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [messageId, userId],
+        );
+        await fetchOne(
+          `UPDATE participants
+              SET last_read_at = $1
+            WHERE conversation_id = $2 AND user_id = $3`,
+          [new Date().toISOString(), conversationId, userId],
+        );
+        const msg = await fetchOne<{ sender_id: string }>(
+          `SELECT sender_id FROM messages WHERE id = $1`,
+          [messageId],
+        );
+        if (msg && msg.sender_id !== userId) {
+          emitToUser(io, msg.sender_id, 'message:read-status', { messageId, conversationId, readByUserId: userId });
+        }
+      } catch (err: any) {
+        console.warn('[message:read] error:', err?.message || err);
       }
     });
 
-    socket.on('messages:delete', async ({ messageIds, conversationId }: { messageIds: string[]; conversationId: string }) => {
+    // ── messages:delete ──
+    socket.on('messages:delete', async ({
+      messageIds, conversationId,
+    }: { messageIds: string[]; conversationId: string }) => {
       if (!messageIds.length) return;
-
-      await supabase
-        .from('messages')
-        .delete()
-        .in('id', messageIds)
-        .eq('sender_id', userId);
-
-      const { data: lastMsg } = await supabase
-        .from('messages')
-        .select('content, created_at')
-        .eq('conversation_id', conversationId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const { error: updateDelErr } = await supabase
-        .from('conversations')
-        .update({
-          last_message: lastMsg?.content || '',
-          last_message_at: lastMsg?.created_at || null,
-          last_message_sender_id: lastMsg ? undefined : null,
-        })
-        .eq('id', conversationId);
-      if (updateDelErr) console.warn('[messages:delete] conversation update skipped:', updateDelErr.message);
-
-      // Get all participants to notify
-      const { data: participants } = await supabase
-        .from('participants')
-        .select('user_id')
-        .eq('conversation_id', conversationId);
-
-      const msg = { messageIds, conversationId };
-      for (const row of (participants || [])) {
-        emitToUser(io, row.user_id, 'messages:deleted', msg);
-        emitToUser(io, row.user_id, 'conversation:update', { conversationId });
+      try {
+        await fetchOne(
+          `DELETE FROM messages WHERE id = ANY($1::uuid[]) AND sender_id = $2`,
+          [messageIds, userId],
+        );
+        const lastMsg = await fetchOne<{ content: string; created_at: string }>(
+          `SELECT content, created_at FROM messages
+             WHERE conversation_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1`,
+          [conversationId],
+        );
+        await fetchOne(
+          `UPDATE conversations
+              SET last_message = $1, last_message_at = $2,
+                  last_message_sender_id = CASE WHEN $1 = '' THEN NULL ELSE last_message_sender_id END
+            WHERE id = $3`,
+          [lastMsg?.content || '', lastMsg?.created_at || null, conversationId],
+        );
+        const participants = await fetchAll<{ user_id: string }>(
+          `SELECT user_id FROM participants WHERE conversation_id = $1`,
+          [conversationId],
+        );
+        const payload = { messageIds, conversationId };
+        for (const row of participants) {
+          emitToUser(io, row.user_id, 'messages:deleted', payload);
+          emitToUser(io, row.user_id, 'conversation:update', { conversationId });
+        }
+      } catch (err: any) {
+        console.error('[messages:delete] error:', err?.message || err);
       }
     });
 
-    socket.on('typing:start', ({ receiverId, conversationId, groupId }: { receiverId?: string; conversationId?: string; groupId?: string }) => {
-      const targetId = groupId || receiverId;
-      if (!targetId) return;
-
+    // ── typing signals ── (no DB)
+    socket.on('typing:start', ({ receiverId, conversationId, groupId }: {
+      receiverId?: string; conversationId?: string; groupId?: string;
+    }) => {
       if (groupId) {
         emitToGroupMembers(io, groupId, 'typing:start', { userId, conversationId: groupId }, userId);
       } else if (receiverId) {
         emitToUser(io, receiverId, 'typing:start', { userId, conversationId });
       }
     });
-
-    socket.on('typing:stop', ({ receiverId, conversationId, groupId }: { receiverId?: string; conversationId?: string; groupId?: string }) => {
-      const targetId = groupId || receiverId;
-      if (!targetId) return;
-
+    socket.on('typing:stop', ({ receiverId, conversationId, groupId }: {
+      receiverId?: string; conversationId?: string; groupId?: string;
+    }) => {
       if (groupId) {
         emitToGroupMembers(io, groupId, 'typing:stop', { userId, conversationId: groupId }, userId);
       } else if (receiverId) {
@@ -829,114 +863,117 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    socket.on('group:addMember', async ({ groupId, newMemberId }: { groupId: string; newMemberId: string }) => {
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('id')
-        .eq('id', groupId)
-        .eq('created_by', userId)
-        .eq('is_group', true)
-        .maybeSingle();
-      if (!conv) return;
-
-      await supabase
-        .from('participants')
-        .insert({ conversation_id: groupId, user_id: newMemberId });
-
-      // Notify EVERY group member. The new joiner needs the conv to appear
-      // in their sidebar; existing members need their sidebar to reflect
-      // the new member count / preview. Replaces the postgres_changes
-      // fallback that previously covered both.
-      emitToGroupMembers(io, groupId, 'participant:change', {
-        groupId, userId: newMemberId, op: 'INSERT',
-      });
-      emitToGroupMembers(io, groupId, 'conversation:update', { conversationId: groupId });
-      socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
+    // ── group:addMember ──
+    socket.on('group:addMember', async ({ groupId, newMemberId }: {
+      groupId: string; newMemberId: string;
+    }) => {
+      try {
+        const conv = await fetchOne<{ id: string }>(
+          `SELECT id FROM conversations
+             WHERE id = $1 AND created_by = $2 AND is_group = TRUE`,
+          [groupId, userId],
+        );
+        if (!conv) return;
+        await fetchOne(
+          `INSERT INTO participants (conversation_id, user_id)
+             VALUES ($1, $2)
+           ON CONFLICT DO NOTHING`,
+          [groupId, newMemberId],
+        );
+        await emitToGroupMembers(io, groupId, 'participant:change', {
+          groupId, userId: newMemberId, op: 'INSERT',
+        });
+        await emitToGroupMembers(io, groupId, 'conversation:update', { conversationId: groupId });
+        socket.emit('group:memberAdded', { groupId, memberId: newMemberId });
+      } catch (err: any) {
+        console.error('[group:addMember] error:', err?.message || err);
+      }
     });
 
+    // ── conversation:delete ──
     socket.on('conversation:delete', async ({ conversationId }: { conversationId: string }) => {
-      const { data: conv } = await supabase
-        .from('conversations')
-        .select('is_group, created_by')
-        .eq('id', conversationId)
-        .single();
-      if (!conv) return;
-
-      const isGroup = conv.is_group;
-
-      if (isGroup) {
-        if (conv.created_by !== userId) return;
-        const { data: participants } = await supabase
-          .from('participants')
-          .select('user_id')
-          .eq('conversation_id', conversationId);
-        const memberIds = (participants || []).map(r => r.user_id);
-
-        await supabase.from('messages').delete().eq('conversation_id', conversationId);
-        await supabase.from('participants').delete().eq('conversation_id', conversationId);
-        await supabase.from('conversations').delete().eq('id', conversationId);
-
-        for (const mid of memberIds) {
-          emitToUser(io, mid, 'conversation:deleted', { conversationId });
+      try {
+        const conv = await fetchOne<{ is_group: boolean; created_by: string | null }>(
+          `SELECT is_group, created_by FROM conversations WHERE id = $1`,
+          [conversationId],
+        );
+        if (!conv) return;
+        if (conv.is_group) {
+          if (conv.created_by !== userId) return;
+          const members = await fetchAll<{ user_id: string }>(
+            `SELECT user_id FROM participants WHERE conversation_id = $1`,
+            [conversationId],
+          );
+          const memberIds = members.map(r => r.user_id);
+          // FKs handle cascade: messages, participants get CASCADE-deleted.
+          await fetchOne(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+          for (const mid of memberIds) {
+            emitToUser(io, mid, 'conversation:deleted', { conversationId });
+          }
+        } else {
+          const other = await fetchOne<{ user_id: string }>(
+            `SELECT user_id FROM participants
+               WHERE conversation_id = $1 AND user_id <> $2`,
+            [conversationId, userId],
+          );
+          await fetchOne(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
+          emitToUser(io, userId, 'conversation:deleted', { conversationId });
+          if (other) emitToUser(io, other.user_id, 'conversation:deleted', { conversationId });
         }
-      } else {
-        const { data: otherParticipant } = await supabase
-          .from('participants')
-          .select('user_id')
-          .eq('conversation_id', conversationId)
-          .neq('user_id', userId)
-          .maybeSingle();
-
-        await supabase.from('messages').delete().eq('conversation_id', conversationId);
-        await supabase.from('participants').delete().eq('conversation_id', conversationId);
-        await supabase.from('conversations').delete().eq('id', conversationId);
-
-        emitToUser(io, userId, 'conversation:deleted', { conversationId });
-        if (otherParticipant) emitToUser(io, otherParticipant.user_id, 'conversation:deleted', { conversationId });
+      } catch (err: any) {
+        console.error('[conversation:delete] error:', err?.message || err);
       }
     });
 
-    socket.on('profile:update', async ({ username: newUsername, avatar }: { username: string; avatar?: string }) => {
-      if (!newUsername || !/^[A-Za-z_]{3,20}$/.test(newUsername)) {
-        socket.emit('profile:updateResult', { error: 'Username must be 3-20 letters' });
-        return;
-      }
-
-      const { data: existing } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('username', newUsername)
-        .neq('id', userId)
-        .maybeSingle();
-      if (existing) {
-        socket.emit('profile:updateResult', { error: 'Username already taken' });
-        return;
-      }
-
-      await supabase.from('profiles').update({ username: newUsername }).eq('id', userId);
-      if (avatar) {
-        await supabase.from('profiles').update({ avatar }).eq('id', userId);
-      }
-
-      const sockets = onlineUsers.get(userId);
-      if (sockets) {
-        for (const [sid, data] of sockets) {
-          sockets.set(sid, { ...data, username: newUsername });
+    // ── profile:update ──
+    socket.on('profile:update', async ({
+      username: newUsername, avatar,
+    }: { username: string; avatar?: string }) => {
+      try {
+        if (!newUsername || !/^[A-Za-z_]{3,20}$/.test(newUsername)) {
+          socket.emit('profile:updateResult', { error: 'Username must be 3-20 letters' });
+          return;
         }
+        const collision = await fetchOne<{ id: string }>(
+          `SELECT id FROM profiles WHERE username = $1 AND id <> $2`,
+          [newUsername, userId],
+        );
+        if (collision) {
+          socket.emit('profile:updateResult', { error: 'Username already taken' });
+          return;
+        }
+        const updates: string[] = ['username = $2'];
+        const params: unknown[] = [userId, newUsername];
+        if (avatar !== undefined) {
+          updates.push(`avatar = $${params.length + 1}`);
+          params.push(avatar);
+        }
+        await fetchOne(
+          `UPDATE profiles SET ${updates.join(', ')} WHERE id = $1`,
+          params,
+        );
+        const sockets = onlineUsers.get(userId);
+        if (sockets) {
+          for (const [sid, data] of sockets) {
+            sockets.set(sid, { ...data, username: newUsername });
+          }
+        }
+        emitToUser(io, userId, 'profile:updateResult', {
+          success: true, username: newUsername, avatar,
+        });
+      } catch (err: any) {
+        console.error('[profile:update] error:', err?.message || err);
+        socket.emit('profile:updateResult', { error: err?.message || 'Update failed' });
       }
-
-      emitToUser(io, userId, 'profile:updateResult', { success: true, username: newUsername, avatar });
     });
 
-    socket.on('call:offer', async ({ receiverId, type, sdp }: { receiverId: string; type?: string; sdp: string }) => {
+    // ── call signals (mostly emit + push; only call:missed / call:group-offer touch DB) ──
+    socket.on('call:offer', async ({
+      receiverId, type, sdp,
+    }: { receiverId: string; type?: string; sdp: string }) => {
       const sockets = onlineUsers.get(userId);
       const userData = sockets?.values().next().value;
       const callType = type || 'audio';
-      // Acknowledge to the CALLER whether the receiver is currently
-      // socket-connected. Push always fires (below) as a fallback, but
-      // this ack lets the caller UI distinguish 'Ringing on X's phone'
-      // from 'Push notification sent to X' in <50 ms instead of waiting
-      // for the WebSocket round-trip to time out.
       const receiverSockets = onlineUsers.get(receiverId);
       socket.emit('call:ringing', {
         offline: !receiverSockets || receiverSockets.size === 0,
@@ -946,17 +983,11 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: callType, sdp,
       });
-      sendPushNotification(
-        receiverId,
-        `${username} is calling`,
-        `${callType} call`,
-        '/',
-        undefined,
+      await sendPushNotification(
+        receiverId, `${username} is calling`, `${callType} call`,
+        '/', undefined,
         { tag: `call-${userId}`, data: { callType, callerId: userId, callerUsername: username } },
       );
-      // Arm the server-side 60s safety-net timer. If neither call:answer nor
-      // call:end clears it within 60s, the receiver's chat auto-records a
-      // "Missed call" entry — even if the caller's tab is gone by then.
       clearPendingCall(userId, receiverId);
       const key = pendingCallKey(userId, receiverId);
       const t = setTimeout(() => {
@@ -964,7 +995,9 @@ export function setupSocket(io: SocketServer): void {
         emitAndPersistCallMissed(io, userId, username, receiverId, callType);
       }, PENDING_CALL_TIMEOUT_MS);
       pendingCallTimers.set(key, t);
-      if (await isReceiverMonitored(receiverId)) sendDiscordNotification(`**${username}** is calling for a **${callType}** call!`);
+      if (await isReceiverMonitored(receiverId)) {
+        await sendDiscordNotification(`**${username}** is calling for a **${callType}** call!`);
+      }
     });
 
     socket.on('call:answer', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
@@ -982,24 +1015,24 @@ export function setupSocket(io: SocketServer): void {
     });
 
     socket.on('call:missed', async ({ receiverId, type }: { receiverId: string; type: string }) => {
-      // Client-side timer fired first — record it AND clear the server-side
-      // safety net so we don't double-write.
       clearPendingCall(userId, receiverId);
       await emitAndPersistCallMissed(io, userId, username, receiverId, type);
     });
 
     socket.on('call:group-offer', async ({ groupId, type }: { groupId: string; type?: string }) => {
-      const { data: members } = await supabase
-        .from('participants')
-        .select('user_id')
-        .eq('conversation_id', groupId)
-        .neq('user_id', userId);
-      for (const row of (members || [])) {
-        emitToUser(io, row.user_id, 'call:offer', {
-          from: userId, username,
-          type: type || 'audio',
-          sdp: '',
-        });
+      try {
+        const members = await fetchAll<{ user_id: string }>(
+          `SELECT user_id FROM participants
+             WHERE conversation_id = $1 AND user_id <> $2`,
+          [groupId, userId],
+        );
+        for (const row of members) {
+          emitToUser(io, row.user_id, 'call:offer', {
+            from: userId, username, type: type || 'audio', sdp: '',
+          });
+        }
+      } catch (err: any) {
+        console.error('[call:group-offer] error:', err?.message || err);
       }
     });
 
@@ -1007,18 +1040,9 @@ export function setupSocket(io: SocketServer): void {
       const sockets = onlineUsers.get(userId);
       if (sockets) {
         sockets.delete(socket.id);
-        if (sockets.size === 0) {
-          onlineUsers.delete(userId);
-        }
+        if (sockets.size === 0) onlineUsers.delete(userId);
       }
-      // Drop any pending-call timer this user was involved in. If the
-      // caller hung up (clean) the timer was already cleared; this catches
-      // the case where the caller's socket died mid-call setup. We let the
-      // OTHER side's safety net fire if the callee is alive (the other
-      // socket still has a timer pending; it expires cleanly), but if we
-      // were the CALLER half of the pair with the timer, the timer belongs
-      // to nobody useful now — clear it so we don't accidentally fire a
-      // stale "missed" record against a caller who is no longer there.
+      // Clear pending-call timers involving this user (catch caller socket death).
       for (const key of [...pendingCallTimers.keys()]) {
         const split = key.indexOf('_');
         if (split < 0) continue;
@@ -1029,70 +1053,23 @@ export function setupSocket(io: SocketServer): void {
           pendingCallTimers.delete(key);
         }
       }
-      // Drop this user's heartbeat record so the sweep interval doesn't
-      // resurrect them after a clean disconnect. The previous 'online-users'
-      // broadcast remains the fast path — Supabase presence is gone.
       userHeartbeats.delete(userId);
       io.emit('online-users', Array.from(onlineUsers.keys()));
     });
-
-    // Fetch avatar on connect
-    try {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('avatar')
-        .eq('id', userId)
-        .maybeSingle();
-      const avatar = profileData?.avatar || '';
-      const sockets = onlineUsers.get(userId);
-      if (sockets) {
-        for (const [sid, data] of sockets) {
-          sockets.set(sid, { ...data, avatar });
-        }
-      }
-    } catch (err) {
-      console.error('[Server] failed to fetch avatar for', userId, err);
-    }
-
   });
 }
 
-/**
- * Expose the presence-sweep interval handle so the caller can attach
- * cleanup to the server lifecycle (Render free tier rotates instances).
- * Without this export, the sweep interval is anchored to `startPresenceSweep`'s
- * scope and is garbage-collected when that scope exits. Doing it
- * this way keeps the interval referenceable for SIGTERM cleanup.
- */
 export const _serverPresenceSweep: { handle: NodeJS.Timeout | null } = { handle: null };
 
-/**
- * Helper used by the REST routes (e.g. /api/security cron) to emit
- * real-time events to a user via the same `onlineUsers` registry the
- * socket handlers use, so DB-driven updates appear live even though
- * the cron path can't open a socket itself. Reuses the top-of-file
- * `SocketServer` import (no second `socket.io` import needed).
- */
 export function emitToUserViaRegistry(io: SocketServer, userId: string, event: string, data: any): void {
   emitToUser(io, userId, event, data);
 }
 
-/**
- * Boot the heartbeat-driven presence sweep. Called once from
- * `server/src/index.ts` after `setupSocket()` finishes wiring handlers.
- * Stores the interval handle in `_serverPresenceSweep.handle` so
- * SIGTERM cleanup can clearInterval it cleanly.
- */
 export function startPresenceSweeper(io: SocketServer): NodeJS.Timeout {
   _serverPresenceSweep.handle = startPresenceSweep(io);
   return _serverPresenceSweep.handle;
 }
 
-/**
- * Convenience helper used by REST routes that don't have a free `io`
- * handle: look up the user in `onlineUsers` (read-only test) so the
- * cron can skip `emitToUserViaRegistry` work for offline users.
- */
 export function isUserConnected(userId: string): boolean {
   return onlineUsers.has(userId);
 }

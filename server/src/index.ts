@@ -1,3 +1,10 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// server/src/index.ts
+// Boot Express + Socket.IO on Neon-only data + self-hosted JWT auth.
+// No more @supabase/supabase-js; all data access goes through db.ts
+// (pg.Pool) and all auth through auth.ts (bcryptjs + JWT).
+// ─────────────────────────────────────────────────────────────────────────────
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
@@ -5,15 +12,22 @@ import cors from 'cors';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
-import { verifyAccessToken, getOrCreateEchozaSecurityId, getOrCreateDirectConversation, warningMessageId, SESSION_DURATION_MS } from './auth.js';
+import {
+  verifyAccessToken,
+  getOrCreateEchozaSecurityId,
+  getOrCreateDirectConversation,
+  warningMessageId,
+  SESSION_DURATION_MS,
+} from './auth.js';
+import { env, logEnvSanity } from './env.js';
+import { pingDb, fetchOne, fetchAll } from './db.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry } from './socket.js';
-import { supabase, anonSupabase } from './supabase.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes, { sendPushNotification } from './routes/push.routes.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PORT = process.env.PORT || 3001;
 
 // Module-scoped Socket.IO reference so REST routes (cron endpoints, push
 // endpoints) can emit real-time events using the same registry the socket
@@ -21,6 +35,13 @@ const PORT = process.env.PORT || 3001;
 let currentIo: SocketServer | null = null;
 
 async function main() {
+  logEnvSanity();
+  // Fail-fast on a bad DATABASE_URL. pingDb() opens one connection from
+  // the pool. Throws on misconfig so the server never "boots and serves
+  // 500 forever".
+  await pingDb();
+  console.log('[db] ping OK — Neon connection pool ready.');
+
   const app = express();
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, {
@@ -34,135 +55,156 @@ async function main() {
   app.use('/api/users', userRoutes);
   app.use('/api/push', pushRoutes);
 
+  // ── /api/health ────────────────────────────────────────────────────────
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
 
+  // ── /api/db-status ─────────────────────────────────────────────────────
+  // SELECT 1 ping. Used by DbPausedOverlay.tsx on the client. Returns
+  // 'ok' on success, 'paused' on connection failure or transaction
+  // rollback so the legacy overlay still gets a sensible signal during
+  // any temporary Neon unavailability.
   app.get('/api/db-status', async (_req, res) => {
-    const { data, error } = await supabase.from('profiles').select('id, username').limit(1);
-    if (error) {
-      const msg = error.message || '';
-      if (msg.toLowerCase().includes('database is paused') || error.code === 'PGRST000') {
-        res.json({ status: 'paused', message: 'Database is paused. Please contact the Developer: 319-359-5613. Thank you for your understanding.' });
+    try {
+      await pingDb();
+      res.json({ status: 'ok' });
+    } catch (e: any) {
+      const msg = (e?.message || '').toString().toLowerCase();
+      if (msg.includes('paused') || msg.includes('terminating')) {
+        res.json({
+          status: 'paused',
+          message: 'Database is paused. Please contact the Developer: 319-359-5613. Thank you for your understanding.',
+        });
         return;
       }
+      res.status(503).json({ status: 'unreachable', message: e?.message });
     }
-    res.json({ status: data && data.length > 0 ? 'ok' : 'empty' });
   });
 
+  // ── /api/debug-db ──────────────────────────────────────────────────────
+  // Diagnostic only. Kept for parity with the Supabase-era version but the
+  // info-shape is now Postgres-oriented (server-version, table sizes).
   app.get('/api/debug-db', async (_req, res) => {
     try {
-      const { data: profiles, error: listErr } = await supabase.from('profiles').select('id, username');
-      const { data: steph, error: stephErr } = await supabase.from('profiles').select('id, username').eq('username', 'Steph').maybeSingle();
-      const { data: anonCheck, error: anonErr } = await anonSupabase.from('profiles').select('id').limit(1);
+      const version = await fetchOne<{ server_version: string }>(`SHOW server_version`);
+      const profiles = await fetchAll(`SELECT id, username FROM profiles`);
+      const convCount = await fetchOne<{ c: string }>(`SELECT COUNT(*)::text AS c FROM conversations`);
+      const indexList = await fetchAll(/* sql */ `
+        SELECT schemaname, tablename, indexname
+          FROM pg_indexes
+         WHERE schemaname = 'public'
+         ORDER BY tablename, indexname
+      `).catch(() => [] as any[]);
       res.json({
-        profilesCount: profiles?.length ?? 0,
-        profiles: profiles ?? [],
-        listError: listErr?.message ?? null,
-        steph: steph ?? null,
-        stephError: stephErr?.message ?? null,
-        anonCanRead: !anonErr,
-        anonError: anonErr?.message ?? null,
-        url: (process.env.SUPABASE_URL || '').slice(0, 30) + '...',
+        postgresVersion: version?.server_version || '',
+        profilesCount: profiles.length,
+        profiles: profiles.slice(0, 20),
+        conversationCount: convCount?.c ?? '0',
+        indexes: indexList,
+        pool: 'Neon (pg.Pool)',
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || 'Unknown error' });
     }
   });
 
+  // ── /api/test-discord ──────────────────────────────────────────────────
   app.get('/api/test-discord', async (_req, res) => {
     await sendDiscordNotification('Test from Echoza server');
     res.json({ sent: true });
   });
 
-app.post('/api/heartbeat', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) { res.status(401).json({ error: 'Unauthorized' }); return; }
-  const decoded = await verifyAccessToken(authHeader.slice(7));
-  if (!decoded) { res.status(401).json({ error: 'Invalid token' }); return; }
-  res.json({ ok: true });
-});
+  // ── /api/heartbeat ──────────────────────────────────────────────────────
+  // JWT-decode only. No DB hit. Returns ok if the access token verifies.
+  app.post('/api/heartbeat', async (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const decoded = await verifyAccessToken(authHeader.slice(7));
+    if (!decoded) {
+      res.status(401).json({ error: 'Invalid token' });
+      return;
+    }
+    res.json({ ok: true });
+  });
 
-// ── Daily cron entry for pre-expiry warnings ────────────────────────────────
-// Called from cron-job.org (or any uptime pinger) once a day. Auth via shared
-// secret header; iterates Supabase Auth users and notifies those whose
-// 30-day window ends in the next 24h. Idempotent via UUIDv5 message-ids.
-app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) {
-    console.error('[security-cron] CRITICAL: CRON_SECRET env var is not configured on this server. The daily expiry-warning cron CANNOT run. Set it via Render > Environment > Add CRON_SECRET (e.g. `openssl rand -hex 32`).');
-    res.status(503).json({
-      error: 'CRON_SECRET env var not configured on server',
-      remediation: 'Set CRON_SECRET in Render Environment Variables. Generate with: openssl rand -hex 32',
-    });
-    return;
-  }
-  const provided = req.headers['x-cron-secret'];
-  if (provided !== expected) {
-    res.status(401).json({ error: 'Invalid cron secret' });
-    return;
-  }
+  // ── /api/security/notify-upcoming-expirations ───────────────────────────
+  // Daily cron. Iterates `profiles` with non-null last_sign_in_at and
+  // notifies users whose 30-day window ends in the next 24h. Idempotent
+  // via UUIDv5 message-id (single row per expiry-day per user).
+  app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
+    if (!env.CRON_SECRET) {
+      console.error('[security-cron] CRITICAL: CRON_SECRET env var is not configured. Cron CANNOT run.');
+      res.status(503).json({
+        error: 'CRON_SECRET env var not configured on server',
+        remediation: 'Set CRON_SECRET in Render Environment Variables. Generate with: openssl rand -hex 32',
+      });
+      return;
+    }
+    const provided = req.headers['x-cron-secret'];
+    if (provided !== env.CRON_SECRET) {
+      res.status(401).json({ error: 'Invalid cron secret' });
+      return;
+    }
 
-  try {
-    const botId = await getOrCreateEchozaSecurityId();
-    const now = Date.now();
-    const tomorrowStart = now + 24 * 60 * 60 * 1000;
-    const warningContent =
-      '⚠️ Heads up! Echoza will log you out tomorrow for security. Re-sign-in to keep your session.';
+    try {
+      const botId = await getOrCreateEchozaSecurityId();
+      const now = Date.now();
+      const tomorrowStart = now + 24 * 60 * 60 * 1000;
+      const warningContent =
+        '⚠️ Heads up! Echoza will log you out tomorrow for security. Re-sign-in to keep your session.';
 
-    let page = 1;
-    let notified = 0;
-    let skippedDuplicate = 0;
-    let pushFailed = 0;
-    let errors = 0;
-    while (true) {
-      const { data, error: listErr } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
-      if (listErr) throw listErr;
-      const users = data.users;
-      if (!users.length) break;
+      // Single-query candidate fetch — the WHERE clause filters to "expiry
+      // lands in the next 24h" so we don't pull the whole table. profiles
+      // is small (<10k) so even a brute-force full-table scan would be ~3ms,
+      // but the time-bound filter is cheap and ergonomic.
+      const candidates = await fetchAll<{
+        id: string;
+        last_sign_in_at: string;
+      }>(/* sql */ `
+        SELECT id, last_sign_in_at
+          FROM profiles
+         WHERE last_sign_in_at IS NOT NULL
+           AND (last_sign_in_at + INTERVAL '30 days') > TO_TIMESTAMP($1::bigint / 1000.0)
+           AND (last_sign_in_at + INTERVAL '30 days') <= TO_TIMESTAMP($2::bigint / 1000.0)
+      `, [now, tomorrowStart]);
 
-      for (const u of users) {
-        if (!u.last_sign_in_at) continue;
+      let notified = 0;
+      let skippedDuplicate = 0;
+      let pushFailed = 0;
+      let errors = 0;
+      for (const u of candidates) {
         const expiresAt = new Date(u.last_sign_in_at).getTime() + SESSION_DURATION_MS;
-        // Window: expiry is in the next 24h AND still in the future.
-        if (expiresAt <= now || expiresAt > tomorrowStart) continue;
 
         try {
-          // 1. Resolve or create 1:1 conversation between bot and user.
           const convId = await getOrCreateDirectConversation(botId, u.id);
-          // 2. Deterministic message id keyed on the user's EXPIRY DATE (not
-          // the cron's run date) — guarantees a single message per 30-day
-          // window per user regardless of which cron runs hit it. Multiple
-          // crons across days produce the same id and collide on PK.
           const expiryIsoDay = new Date(expiresAt).toISOString().slice(0, 10);
           const msgId = warningMessageId(u.id, expiryIsoDay);
-          const { error: insertErr } = await supabase.from('messages').insert({
-            id: msgId,
-            conversation_id: convId,
-            sender_id: botId,
-            content: warningContent,
-            created_at: new Date().toISOString(),
-          });
-          // 23505 = unique_violation = already warned for this expiry → skip.
-          if (insertErr && insertErr.code === '23505') {
+          const nowIso = new Date().toISOString();
+          const ins = await fetchOne(
+            /* sql */ `
+              INSERT INTO messages (id, conversation_id, sender_id, content, created_at)
+                VALUES ($1, $2, $3, $4, $5)
+              ON CONFLICT (id) DO NOTHING
+              RETURNING id`,
+            [msgId, convId, botId, warningContent, nowIso],
+          );
+          if (!ins) {
             skippedDuplicate++;
             continue;
           }
-          if (insertErr) {
-            console.warn(`[security-cron] message insert failed for ${u.id}: ${insertErr.message}`);
-            errors++;
-            continue;
-          }
-
-          // 3. Update conversation preview for sidebar ordering.
-          await supabase.from('conversations').update({
-            last_message: warningContent,
-            last_message_at: new Date().toISOString(),
-            last_message_sender_id: botId,
-          }).eq('id', convId);
-
-          // 4. Push notification — best-effort. The in-app message is the
-          // source of truth; push failure bumps `pushFailed` not `errors`.
+          await fetchOne(
+            /* sql */ `
+              UPDATE conversations
+                 SET last_message = $1,
+                     last_message_at = $2,
+                     last_message_sender_id = $3
+               WHERE id = $4`,
+            [warningContent, nowIso, botId, convId],
+          );
           try {
             await sendPushNotification(
               u.id,
@@ -171,16 +213,9 @@ app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
               '/',
               convId,
             );
-          } catch (pushErr) {
+          } catch {
             pushFailed++;
-            console.warn(`[security-cron] push failed for ${u.id}:`, pushErr);
           }
-          // 5. Real-time socket events for connected clients. Replaces the
-          // postgres_changes path Echoza previously relied on for cron-
-          // generated messages. Emits the same `message:new` /
-          // `conversation:update` events that socket.ts emits from the
-          // interactive `message:send` path, so the client sees the
-          // warning arrival in real time without polling.
           if (currentIo) {
             const liveMessage = {
               id: msgId,
@@ -190,7 +225,7 @@ app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
               content: warningContent,
               attachments: [],
               read: false,
-              createdAt: new Date().toISOString(),
+              createdAt: nowIso,
               isGroup: false,
             };
             emitToUserViaRegistry(currentIo, u.id, 'message:new', liveMessage);
@@ -202,17 +237,17 @@ app.post('/api/security/notify-upcoming-expirations', async (req, res) => {
           errors++;
         }
       }
-      if (users.length < 1000) break;
-      page++;
+      res.json({ notified, skippedDuplicate, pushFailed, errors });
+    } catch (err: any) {
+      console.error('[security-cron] failed:', err);
+      res.status(500).json({ error: err?.message || 'Cron endpoint failed' });
     }
-    res.json({ notified, skippedDuplicate, pushFailed, errors });
-  } catch (err: any) {
-    console.error('[security-cron] failed:', err);
-    res.status(500).json({ error: err?.message || 'Cron endpoint failed' });
-  }
-});
+  });
 
-app.get('/api/conversations', async (req, res) => {
+  // ── /api/conversations ──────────────────────────────────────────────────
+  // REST mirror of the socket-side `conversations:list` handler. Kept in
+  // sync intentionally — both call the same SQL patterns.
+  app.get('/api/conversations', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -226,59 +261,67 @@ app.get('/api/conversations', async (req, res) => {
     const userId = decoded.userId;
 
     try {
-      // ── Step 1: Get all conversation IDs the user belongs to ──
-      const { data: participantRows } = await supabase
-        .from('participants')
-        .select('conversation_id, last_read_at')
-        .eq('user_id', userId);
-
-      const convIds = (participantRows || []).map(p => p.conversation_id);
-      const lastReadMap = new Map(
-        (participantRows || []).map(p => [p.conversation_id, p.last_read_at])
+      // Step 1: conversations the user is in + last_read marker.
+      const participantRows = await fetchAll<{
+        conversation_id: string;
+        last_read_at: string | null;
+      }>(
+        `SELECT conversation_id, last_read_at FROM participants WHERE user_id = $1`,
+        [userId],
       );
-
+      const convIds = participantRows.map(p => p.conversation_id);
       if (convIds.length === 0) {
         res.json([]);
         return;
       }
+      const lastReadMap = new Map(
+        participantRows.map(p => [p.conversation_id, p.last_read_at]),
+      );
 
-      // ── Step 2: Fetch conversation rows ──
-      const { data: convRows } = await supabase
-        .from('conversations')
-        .select('*')
-        .in('id', convIds)
-        .order('last_message_at', { ascending: false });
-
-      if (!convRows || convRows.length === 0) {
+      // Step 2: conversation rows.
+      const convRows = await fetchAll<{
+        id: string;
+        is_group: boolean;
+        group_name: string | null;
+        group_avatar: string | null;
+        last_message: string | null;
+        last_message_at: string | null;
+        created_at: string;
+      }>(
+        `SELECT id, is_group, group_name, group_avatar,
+                last_message, last_message_at, created_at
+           FROM conversations
+          WHERE id = ANY($1::uuid[])
+          ORDER BY last_message_at DESC NULLS LAST`,
+        [convIds],
+      );
+      if (convRows.length === 0) {
         res.json([]);
         return;
       }
 
-      // Sort: conversations with no messages go last
-      convRows.sort((a, b) => {
-        if (!a.last_message_at && !b.last_message_at) return 0;
-        if (!a.last_message_at) return 1;
-        if (!b.last_message_at) return -1;
-        return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
-      });
+      // Step 3: all participants (single query for all conversations).
+      const allParticipants = await fetchAll<{
+        conversation_id: string;
+        user_id: string;
+      }>(
+        `SELECT conversation_id, user_id FROM participants WHERE conversation_id = ANY($1::uuid[])`,
+        [convIds],
+      );
 
-      // ── Step 3: Fetch all participants ──
-      const { data: allParticipants } = await supabase
-        .from('participants')
-        .select('conversation_id, user_id')
-        .in('conversation_id', convIds);
+      // Step 4: all referenced profiles.
+      const allUserIds = [...new Set(allParticipants.map(p => p.user_id))];
+      const allProfiles = allUserIds.length
+        ? await fetchAll<{ id: string; username: string; avatar: string }>(
+            `SELECT id, username, avatar FROM profiles WHERE id = ANY($1::uuid[])`,
+            [allUserIds],
+          )
+        : [];
+      const profileMap = new Map(allProfiles.map(p => [p.id, p]));
 
-      // ── Step 4: Fetch profiles ──
-      const allUserIds = [...new Set((allParticipants || []).map(p => p.user_id))];
-      const { data: allProfiles } = await supabase
-        .from('profiles')
-        .select('id, username, avatar')
-        .in('id', allUserIds);
-      const profileMap = new Map((allProfiles || []).map(p => [p.id, p]));
-
-      // ── Step 5: Build participant lookup ──
+      // Step 5: per-conversation participant list.
       const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
-      for (const p of (allParticipants || [])) {
+      for (const p of allParticipants) {
         if (!participantMap.has(p.conversation_id)) {
           participantMap.set(p.conversation_id, []);
         }
@@ -290,27 +333,40 @@ app.get('/api/conversations', async (req, res) => {
         });
       }
 
-      // ── Step 6: Unread counts (batched with Promise.all) ──
+      // Step 6: unread counts — one COUNT query per conversation
+      // (Promise.all parallel). The `last_last_read_at` is fetched inline
+      // so we don't re-query `participants` per conv.
       const unreadMap = new Map<string, number>();
-      await Promise.all(convRows.map(async (row) => {
-        const lastRead = lastReadMap.get(row.id);
-        let query = supabase
-          .from('messages')
-          .select('id', { count: 'exact', head: true })
-          .eq('conversation_id', row.id)
-          .neq('sender_id', userId);
-        if (lastRead) {
-          query = query.gt('created_at', lastRead);
-        }
-        const { count } = await query;
-        unreadMap.set(row.id, count || 0);
-      }));
+      await Promise.all(
+        convRows.map(async (row) => {
+          const lastRead = lastReadMap.get(row.id);
+          if (lastRead) {
+            const r = await fetchOne<{ c: string }>(
+              `SELECT COUNT(*)::text AS c
+                 FROM messages
+                WHERE conversation_id = $1
+                  AND sender_id <> $2
+                  AND created_at > $3`,
+              [row.id, userId, lastRead],
+            );
+            unreadMap.set(row.id, parseInt(r?.c || '0', 10));
+          } else {
+            const r = await fetchOne<{ c: string }>(
+              `SELECT COUNT(*)::text AS c
+                 FROM messages
+                WHERE conversation_id = $1
+                  AND sender_id <> $2`,
+              [row.id, userId],
+            );
+            unreadMap.set(row.id, parseInt(r?.c || '0', 10));
+          }
+        }),
+      );
 
-      // ── Step 7: Build response ──
+      // Step 7: assemble response.
       const conversations = convRows.map(row => {
         const members = participantMap.get(row.id) || [];
         const otherParticipants = members.filter(m => m.id !== userId);
-
         if (row.is_group) {
           return {
             id: row.id,
@@ -323,7 +379,6 @@ app.get('/api/conversations', async (req, res) => {
             unread: unreadMap.get(row.id) || 0,
           };
         }
-
         const contact = otherParticipants[0] || { id: '', username: '', avatar: '' };
         return {
           id: row.id,
@@ -342,14 +397,14 @@ app.get('/api/conversations', async (req, res) => {
     }
   });
 
+  // ── /api/ice-config + /api/debug/ice-test ───────────────────────────────
+  // Unchanged from the Supabase era.
   app.get('/api/ice-config', (_req, res) => {
-    const turnUrl = process.env.TURN_URL;
-    const turnUsername = process.env.TURN_USERNAME;
-    const turnCredential = process.env.TURN_CREDENTIAL;
+    const turnUrl = env.TURN_URL;
+    const turnUsername = env.TURN_USERNAME;
+    const turnCredential = env.TURN_CREDENTIAL;
 
-    const iceServers: RTCIceServer[] = [
-      { urls: 'stun:stun.l.google.com:19302' },
-    ];
+    const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
 
     if (turnUrl && turnUsername && turnCredential) {
       const urls: string[] = [];
@@ -358,20 +413,8 @@ app.get('/api/conversations', async (req, res) => {
         if (!url.includes('transport=')) {
           urls.push(`${url}?transport=tcp`);
         }
-        // iOS Safari 17+ tightened TURN-over-UDP/TCP requirements —
-        // many NATs now require a `turns:` (TLS) candidate for the
-        // browser to even try the relay. Mirror the first turn: URL
-        // as turns:<same-host-port>?transport=tcp so the browser has
-        // both options during ICE gathering. Harmless on Chromium.
-        // (Removed: auto-mirror turn: -> turns:. It produced
-        // turns:3478?transport=tcp which most TURN servers don't
-        // serve on TLS — the browser tried it, failed, and added
-        // noise to ICE gathering. Set TURN_TLS_URL explicitly below
-        // to enable a TLS TURN candidate on port 443.)
       }
-      // Optional TLS TURN URL. Set TURN_TLS_URL (e.g.
-      // "turns:turn.example.com:443?transport=tcp") to enable it.
-      const turnTlsUrl = process.env.TURN_TLS_URL;
+      const turnTlsUrl = env.TURN_TLS_URL;
       if (turnTlsUrl) urls.push(turnTlsUrl);
       iceServers.push({ urls, username: turnUsername, credential: turnCredential });
     }
@@ -381,150 +424,57 @@ app.get('/api/conversations', async (req, res) => {
 
   app.get('/api/debug/ice-test', (_req, res) => {
     res.send(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ICE Test</title>
-  <style>
-    body { font-family: monospace; background: #111; color: #0f0; padding: 16px; font-size: 14px; }
-    pre { white-space: pre-wrap; word-break: break-all; }
-    .relay { color: #0ff; }
-    .host { color: #0f0; }
-    .srflx { color: #ff0; }
-    .error { color: #f00; }
-    .info { color: #888; }
-    button { background: #0f0; color: #000; border: none; padding: 8px 16px; cursor: pointer; margin: 4px; }
-    #status { margin: 8px 0; }
-    hr { border-color: #333; }
-  </style>
-</head>
-<body>
-  <h3>ICE / TURN Diagnostic Tool</h3>
-  <button onclick="runTest()">Test (all candidates)</button>
-  <button onclick="runTest(true)">Test (relay only)</button>
-  <button onclick="clearLog()">Clear</button>
-  <div id="status">Ready. Click a test button to begin.</div>
-  <hr>
-  <pre id="log"></pre>
-  <script>
-    let pc1 = null, pc2 = null;
-    const log = document.getElementById('log');
-    const status = document.getElementById('status');
-
-    function addLog(msg, cls = '') {
-      log.innerHTML += '<span class="' + cls + '">' + new Date().toISOString().slice(11,19) + ' ' + msg + '</span>\\\\n';
-    }
-
-    function clearLog() { log.innerHTML = ''; }
-
-    async function fetchIceServers() {
-      const r = await fetch('/api/ice-config');
-      const d = await r.json();
-      addLog('ICE servers from server:', 'info');
-      d.iceServers.forEach(s => addLog('  ' + JSON.stringify(s.urls) + (s.username ? ' (auth)' : ''), 'info'));
-      return d.iceServers;
-    }
-
-    async function runTest(relayOnly = false) {
-      clearLog();
-      status.textContent = 'Running...';
-      const iceServers = await fetchIceServers();
-      const config = { iceServers };
-      if (relayOnly) {
-        config.iceTransportPolicy = 'relay';
-        addLog('*** RELAY-ONLY MODE ***', 'info');
-      }
-      addLog('--- Creating PeerConnection 1 ---', 'info');
-      pc1 = new RTCPeerConnection(config);
-      let pc1Candidates = [];
-      let pc2Candidates = [];
-
-      pc1.onicecandidate = e => {
-        if (e.candidate) {
-          pc1Candidates.push(e.candidate);
-          const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
-          const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
-          addLog('PC1 candidate: ' + e.candidate.candidate, cls);
-          if (pc2.localDescription && pc2.remoteDescription) {
-            pc2.addIceCandidate(e.candidate).catch(() => {});
-          }
-        } else {
-          addLog('PC1: all candidates gathered', 'info');
-        }
-      };
-      pc1.oniceconnectionstatechange = () => {
-        addLog('PC1 state: ' + pc1.iceConnectionState, pc1.iceConnectionState === 'connected' ? 'relay' : pc1.iceConnectionState === 'failed' ? 'error' : 'info');
-        if (pc1.iceConnectionState === 'connected' || pc1.iceConnectionState === 'completed') {
-          status.textContent = 'CONNECTED!';
-          status.style.color = '#0f0';
-        }
-        if (pc1.iceConnectionState === 'failed') {
-          status.textContent = 'FAILED';
-          status.style.color = '#f00';
-        }
-      };
-      pc1.onicecandidateerror = e => {
-        addLog('PC1 candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + e.url, 'error');
-      };
-
-      addLog('--- Creating PeerConnection 2 ---', 'info');
-      pc2 = new RTCPeerConnection({ iceServers });
-      pc2.onicecandidate = e => {
-        if (e.candidate) {
-          pc2Candidates.push(e.candidate);
-          const type = e.candidate.type || e.candidate.candidate.split(' ')[7];
-          const cls = type === 'relay' ? 'relay' : type === 'srflx' ? 'srflx' : 'host';
-          addLog('PC2 candidate: ' + e.candidate.candidate, cls);
-          if (pc1.localDescription && pc1.remoteDescription) {
-            pc1.addIceCandidate(e.candidate).catch(() => {});
-          }
-        } else {
-          addLog('PC2: all candidates gathered', 'info');
-        }
-      };
-      pc2.oniceconnectionstatechange = () => {
-        addLog('PC2 state: ' + pc2.iceConnectionState, pc2.iceConnectionState === 'connected' ? 'relay' : pc2.iceConnectionState === 'failed' ? 'error' : 'info');
-      };
-      pc2.onicecandidateerror = e => {
-        addLog('PC2 candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + e.url, 'error');
-      };
-
-      const dc = pc1.createDataChannel('test');
-      pc2.ondatachannel = e => {
-        addLog('PC2: data channel received', 'info');
-      };
-
-      try {
-        addLog('--- Creating offer ---', 'info');
-        const offer = await pc1.createOffer();
-        await pc1.setLocalDescription(offer);
-        addLog('PC1 local description set (type=' + offer.type + ')', 'info');
-        await pc2.setRemoteDescription(offer);
-        const answer = await pc2.createAnswer();
-        await pc2.setLocalDescription(answer);
-        addLog('PC2 local description set (type=' + answer.type + ')', 'info');
-        await pc1.setRemoteDescription(answer);
-        addLog('--- ICE negotiation complete, waiting for connection... ---', 'info');
-      } catch (err) {
-        addLog('ERROR: ' + err.message, 'error');
-        status.textContent = 'Error: ' + err.message;
-        status.style.color = '#f00';
-      }
-    }
-  </script>
-</body>
-</html>`);
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ICE Test</title><style>body{font-family:monospace;background:#111;color:#0f0;padding:16px;font-size:14px}
+pre{white-space:pre-wrap;word-break:break-all}.relay{color:#0ff}.host{color:#0f0}.srflx{color:#ff0}.error{color:#f00}.info{color:#888}
+button{background:#0f0;color:#000;border:none;padding:8px 16px;cursor:pointer;margin:4px}#status{margin:8px 0}hr{border-color:#333}</style>
+</head><body><h3>ICE / TURN Diagnostic Tool</h3>
+<button onclick="runTest()">Test (all candidates)</button>
+<button onclick="runTest(true)">Test (relay only)</button>
+<button onclick="clearLog()">Clear</button>
+<div id="status">Ready. Click a test button to begin.</div><hr><pre id="log"></pre>
+<script>
+let pc1=null,pc2=null;const log=document.getElementById('log'),status=document.getElementById('status');
+function addLog(msg,cls=''){log.innerHTML+='<span class="'+cls+'">'+new Date().toISOString().slice(11,19)+' '+msg+'</span>\\n';}
+function clearLog(){log.innerHTML='';}
+async function fetchIceServers(){const r=await fetch('/api/ice-config');const d=await r.json();
+ addLog('ICE servers from server:','info');d.iceServers.forEach(s=>addLog('  '+JSON.stringify(s.urls)+(s.username?' (auth)':''),'info'));return d.iceServers;}
+async function runTest(relayOnly=false){
+ clearLog();status.textContent='Running...';const iceServers=await fetchIceServers();
+ const config={iceServers};if(relayOnly){config.iceTransportPolicy='relay';addLog('*** RELAY-ONLY MODE ***','info');}
+ addLog('--- Creating PeerConnection 1 ---','info');pc1=new RTCPeerConnection(config);let pc1Candidates=[],pc2Candidates=[];
+ pc1.onicecandidate=e=>{if(e.candidate){pc1Candidates.push(e.candidate);
+  const type=e.candidate.type||e.candidate.candidate.split(' ')[7];
+  const cls=type==='relay'?'relay':type==='srflx'?'srflx':'host';
+  addLog('PC1 candidate: '+e.candidate.candidate,cls);if(pc2.localDescription&&pc2.remoteDescription){pc2.addIceCandidate(e.candidate).catch(()=>{});}
+ }else addLog('PC1: all candidates gathered','info');};
+ pc1.oniceconnectionstatechange=()=>{
+  addLog('PC1 state: '+pc1.iceConnectionState,pc1.iceConnectionState==='connected'?'relay':pc1.iceConnectionState==='failed'?'error':'info');
+  if(['connected','completed'].includes(pc1.iceConnectionState)){status.textContent='CONNECTED!';status.style.color='#0f0';}
+  if(pc1.iceConnectionState==='failed'){status.textContent='FAILED';status.style.color='#f00';}};
+ pc1.onicecandidateerror=e=>addLog('PC1 candidate error: code='+e.errorCode+' text='+(e.errorText||'')+' url='+e.url,'error');
+ addLog('--- Creating PeerConnection 2 ---','info');pc2=new RTCPeerConnection({iceServers});
+ pc2.onicecandidate=e=>{if(e.candidate){pc2Candidates.push(e.candidate);
+  const type=e.candidate.type||e.candidate.candidate.split(' ')[7];
+  const cls=type==='relay'?'relay':type==='srflx'?'srflx':'host';
+  addLog('PC2 candidate: '+e.candidate.candidate,cls);if(pc1.localDescription&&pc1.remoteDescription){pc1.addIceCandidate(e.candidate).catch(()=>{});}
+ }else addLog('PC2: all candidates gathered','info');};
+ pc2.oniceconnectionstatechange=()=>addLog('PC2 state: '+pc2.iceConnectionState,pc2.iceConnectionState==='connected'?'relay':pc2.iceConnectionState==='failed'?'error':'info');
+ pc2.onicecandidateerror=e=>addLog('PC2 candidate error: code='+e.errorCode+' text='+(e.errorText||'')+' url='+e.url,'error');
+ const dc=pc1.createDataChannel('test');pc2.ondatachannel=e=>addLog('PC2: data channel received','info');
+ try{
+  addLog('--- Creating offer ---','info');const offer=await pc1.createOffer();await pc1.setLocalDescription(offer);
+  addLog('PC1 local description set (type='+offer.type+')','info');
+  await pc2.setRemoteDescription(offer);const answer=await pc2.createAnswer();await pc2.setLocalDescription(answer);
+  addLog('PC2 local description set (type='+answer.type+')','info');
+  await pc1.setRemoteDescription(answer);addLog('--- ICE negotiation complete, waiting for connection... ---','info');
+ }catch(err){addLog('ERROR: '+err.message,'error');status.textContent='Error: '+err.message;status.style.color='#f00';}}
+</script></body></html>`);
   });
 
+  // ── Static client + SPA fallback ────────────────────────────────────────
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
-    // `index: false` is intentional: without it, express.static serves
-    // index.html for `/` with `maxAge: 1y, immutable: true`, which forces
-    // the user's browser to keep the OLD index.html forever — so they
-    // never download the new JS bundle. With index: false, the
-    // `app.get('*')` catch-all below handles index.html and applies the
-    // `no-store, no-cache` headers below.
     app.use(express.static(clientDist, { maxAge: '1y', immutable: true, index: false }));
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -539,13 +489,15 @@ app.get('/api/conversations', async (req, res) => {
   startPresenceSweeper(io);
   currentIo = io;
 
-  httpServer.listen(PORT, () => {
-    console.log(`Echoza server running on port ${PORT}`);
-    const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+  httpServer.listen(env.PORT, () => {
+    console.log(`Echoza server running on port ${env.PORT}`);
+    const baseUrl = env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT}`;
+    // Render free tier spins down on 15 min idle — keep-alive ping is the
+    // canonical workaround. Same as before.
     setInterval(async () => {
       try {
-        const res = await fetch(`${baseUrl}/api/health`);
-        if (!res.ok) console.warn('Keep-alive ping failed:', res.status);
+        const r = await fetch(`${baseUrl}/api/health`);
+        if (!r.ok) console.warn('Keep-alive ping failed:', r.status);
         else console.log('Keep-alive ping OK');
       } catch (err) {
         console.warn('Keep-alive ping error:', err);
@@ -560,4 +512,7 @@ app.get('/api/conversations', async (req, res) => {
   });
 }
 
-main().catch(console.error);
+main().catch(err => {
+  console.error('[boot] fatal:', err);
+  process.exit(1);
+});
