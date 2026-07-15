@@ -46,15 +46,6 @@ export const env = {
                               // stolen refresh tokens still expire eventually
   ),
 
-  // ── Supabase Auth hybrid migration window (optional, removable later) ──
-  // When set, server/src/auth.ts loginUser will fall through to Supabase
-  // Auth when an account exists in `profiles` but has no password_hash yet.
-  // Once every pre-migration account has signed in once (password_hash
-  // populated), these can be removed and @supabase/supabase-js uninstalled.
-  SUPABASE_URL: optionalString('SUPABASE_URL'),
-  SUPABASE_ANON_KEY: optionalString('SUPABASE_ANON_KEY'),
-  hasSupabaseFallback: !!optionalString('SUPABASE_URL') && !!optionalString('SUPABASE_ANON_KEY'),
-
   // ── Existing app env (passthrough) ──────────────────────────────────────
   RENDER_EXTERNAL_URL: optionalString('RENDER_EXTERNAL_URL'),
   VAPID_PUBLIC_KEY: optionalString('VAPID_PUBLIC_KEY'),
@@ -80,8 +71,6 @@ export function logEnvSanity(): void {
     'TURN_USERNAME',
     'TURN_CREDENTIAL',
     'TURN_TLS_URL',
-    'SUPABASE_URL',
-    'SUPABASE_ANON_KEY',
   ] as const) {
     if (env[k]) set.push(k);
   }
@@ -89,11 +78,6 @@ export function logEnvSanity(): void {
   void ok;
   void missing;
   console.log('[env] required OK; optional set:', set.join(', ') || 'none');
-  if (!env.hasSupabaseFallback) {
-    console.log(
-      '[env] No SUPABASE_URL/SUPABASE_ANON_KEY set — sign-ins for users with NULL password_hash in profiles will fail. Run server/src/scripts/import_accounts_to_neon.ts BEFORE removing Supabase env vars.',
-    );
-  }
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY) {
     console.warn('[env] VAPID keys missing — push notifications will be silently dropped.');
   }

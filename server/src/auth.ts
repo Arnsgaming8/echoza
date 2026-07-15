@@ -1,19 +1,19 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // auth.ts
-// Replaces Supabase Auth entirely. Three responsibilities:
+// Self-hosted auth only. No more Supabase Auth REST fallback.
+//
+// Responsibilities:
 //   1. Password hashing + verification using bcryptjs (already a dep).
 //   2. JWT signing/verification for stateless access tokens (15m) plus
 //      stateful refresh tokens (env.REFRESH_TOKEN_TTL_MS, default 1y —
 //      bounded refresh-token TTL is retained as a soft cap so stolen
-//      tokens expire eventually; we do NOT auto-log-out idle users
-//      because the user policy is "stay signed in").
-//   3. The "hybrid migration" path: when an account from the pre-Neon era
-//      exists in `profiles` with `password_hash IS NULL`, and SUPABASE_URL
-//      + SUPABASE_ANON_KEY env vars are configured, the login flow goes
-//      through Supabase Auth REST (over HTTPS, no @supabase/supabase-js)
-//      once, captures the plaintext password, writes a bcrypt-hash into
-//      Neon, then issues the regular local JWT. Subsequent logins are
-//      full Neon. Removes the need to mass-reset passwords.
+//      tokens expire eventually; we do NOT auto-log-out idle users).
+//   3. Account management (registerUser, loginUser, deleteAccount).
+//
+// Cutover note: a pre-deploy ONE-SHOT script (`scripts/_force_temp_passwords.ts`)
+// must have written bcrypt hashes into every profile whose `password_hash`
+// was NULL, otherwise the local-only loginUser path will refuse to authenticate
+// them — there's no longer any Supabase fallback to recover from NULL.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import bcrypt from 'bcryptjs';
@@ -78,10 +78,9 @@ export function signAccessToken(
  * Stateful refresh token. The plaintext token is returned for the caller
  * to keep in their localStorage; only `token_hash` (SHA-256 hex of the
  * plaintext) is persisted to Neon. The jti claim is baked into the token
- * so we can correlate the JWT to the row at rotation time, even though
- * the matching is by hash today.
+ * so we can correlate the JWT to the row at rotation time.
  *
- * TTL is `env.REFRESH_TOKEN_TTL_MS` (1 year by default). Security note:
+ * TTL is `env.REFRESH_TOKEN_TTL_MS` (1y default). Security note:
  * we keep a long but bounded TTL so a stolen refresh token eventually
  * expires — the user can stay signed in across browser sessions but a
  * leaked refresh token's blast radius is capped at ~1 year, not infinity.
@@ -93,8 +92,7 @@ export function signRefreshToken(userId: string): {
   expiresAt: Date;
 } {
   const jti = uuidv4();
-  // 256 bits of entropy keeps unguessable brute-force hopeless. Same secret-
-  // space randomness as a cryptographically strong session cookie.
+  // 256 bits of entropy keeps unguessable brute-force hopeless.
   const plaintext = randomBytes(32).toString('hex') + '.' + jti;
   const hash = createHash('sha256').update(plaintext).digest('hex');
   const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_MS);
@@ -112,9 +110,7 @@ export function signRefreshToken(userId: string): {
 }
 
 /**
- * Verify an access token. Pure JWT decode — no DB hit per call. This is
- * important because Socket.IO auth middleware fires this on EVERY connect,
- * and Express REST middleware fires it on EVERY request.
+ * Verify an access token. Pure JWT decode — no DB hit per call.
  */
 export async function verifyAccessToken(
   token: string,
@@ -160,13 +156,6 @@ export async function verifyRefreshToken(token: string): Promise<string | null> 
 /**
  * Atomically replace a refresh token with a new one and return a fresh
  * access/refresh pair. Used by POST /api/auth/refresh.
- *
- * Concurrency: two simultaneous refreshers each with their own copy of
- * the same old token must NOT both succeed — otherwise the legitimate user
- * ends up with two valid new tokens in circulation. We DO this with a
- * single `DELETE ... RETURNING user_id` claim: row-level locking inside
- * the tx makes it so only one refresher can capture the old row; the
- * loser returns `{ ok: false }` cleanly.
  */
 export async function rotateRefreshToken(
   oldTokenPlaintext: string,
@@ -174,8 +163,6 @@ export async function rotateRefreshToken(
   | { ok: true; userId: string; access: string; refresh: string; refreshExpiresAt: Date }
   | { ok: false }
 > {
-  // Verify the JWT signature FIRST (cheap, no DB hit) so a forged signature
-  // or wrong-type token never even touches the refresh_tokens table.
   let decoded: RefreshTokenClaims;
   try {
     decoded = jwt.verify(oldTokenPlaintext, env.JWT_SECRET) as RefreshTokenClaims;
@@ -186,10 +173,6 @@ export async function rotateRefreshToken(
 
   const oldHash = createHash('sha256').update(oldTokenPlaintext).digest('hex');
 
-  // Atomic claim: DELETE the old row inside a tx and INSERT the new row
-  // in the SAME tx. If two refreshers race, the second's DELETE will
-  // report zero rows (RETURNING empty) so `claimedUserId` is null and we
-  // bail with `{ ok: false }`. Zero orphan windows; no double-issuance.
   const swap = await tx(async (client) => {
     const claimR = await client.query<{ user_id: string }>(
       `DELETE FROM refresh_tokens
@@ -199,9 +182,6 @@ export async function rotateRefreshToken(
     );
     if (claimR.rows.length === 0) return null;
     const claimedUserId = claimR.rows[0].user_id;
-    // Defense-in-depth: the JWT sub must match the row's user_id. A row
-    // could in theory have been planted out-of-band in a stolen-DB world;
-    // this guard ensures the JWT itself endorses the claim.
     if (decoded.sub !== claimedUserId) return null;
     const next = signRefreshToken(claimedUserId);
     await client.query(
@@ -238,57 +218,7 @@ export async function revokeRefreshToken(token: string): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Account email helper (preserved for the Supabase Auth fallback only)
-// ─────────────────────────────────────────────────────────────────────────────
-const EMAIL_DOMAIN = '@echoza.app';
-
-/**
- * Convert an Echoza username to the synthetic email format Echoza used
- * under Supabase Auth. ONLY used during the hybrid migration window via
- * supabaseAuthSignInFallback() to talk to Supabase's REST API. New users
- * don't need an email at all.
- */
-export function usernameToEmail(username: string): string {
-  return `u.${username.toLowerCase()}${EMAIL_DOMAIN}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Hybrid Supabase Auth REST fallback (no @supabase/supabase-js dep)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Call Supabase Auth's password grant REST endpoint directly via fetch.
- * Returns the user-id on success, throws on failure. Only reachable when
- * the user's `password_hash IS NULL` in Neon (i.e. an unmigrated pre-Neon
- * account) AND env.hasSupabaseFallback === true.
- */
-async function supabaseAuthSignInFallback(
-  username: string,
-  password: string,
-): Promise<{ id: string } | null> {
-  if (!env.hasSupabaseFallback) {
-    throw new Error(
-      'Supabase Auth fallback is not configured (missing SUPABASE_URL or SUPABASE_ANON_KEY).',
-    );
-  }
-  const email = usernameToEmail(username);
-  const res = await fetch(`${env.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: env.SUPABASE_ANON_KEY!,
-      Authorization: `Bearer ${env.SUPABASE_ANON_KEY!}`,
-    },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) return null;
-  const body = (await res.json()) as { user?: { id: string }; access_token?: string };
-  if (!body.user?.id) return null;
-  return { id: body.user.id };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. registerUser / loginUser  (PUBLIC API — same shape as the Supabase era)
+// 3. registerUser / loginUser   (PUBLIC API)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface UserRecord {
@@ -309,8 +239,6 @@ export async function registerUser(username: string, password: string): Promise<
   const newId = uuidv4();
   const passwordHash = hashPassword(password);
 
-  // INSERT IGNORE on collision via ON CONFLICT (username). Conflict means
-  // the account already exists — surface that explicitly to the caller.
   const inserted = await fetchOne<{ id: string; username: string; avatar: string }>(
     `INSERT INTO profiles (id, username, password_hash, last_sign_in_at, created_at)
        VALUES ($1, $2, $3, $4, $4)
@@ -354,37 +282,17 @@ export async function loginUser(username: string, password: string): Promise<Aut
     throw new Error('Account does not exist');
   }
 
-  let passwordMatched: boolean;
-  if (profile.password_hash) {
-    // Fast path: full Neon.
-    passwordMatched = comparePassword(password, profile.password_hash);
-  } else {
-    // Hybrid path: pre-migration account, no local hash yet. Try Supabase
-    // Auth REST, and if it succeeds, write the bcrypt hash locally so the
-    // NEXT login is full Neon.
-    if (!env.hasSupabaseFallback) {
-      throw new Error(
-        'Account exists but password has not been migrated and Supabase Auth fallback is not configured. ' +
-          'Either set SUPABASE_URL + SUPABASE_ANON_KEY for the migration window, or have the user re-register.',
-      );
-    }
-    const fb = await supabaseAuthSignInFallback(username, password);
-    if (!fb || fb.id !== profile.id) {
-      throw new Error('Invalid credentials');
-    }
-    // Capture the plaintext → bcrypt → update Neon in-place. If the UPDATE
-    // races with another login, the bcrypt of the same password is
-    // idempotent, so a second writer just overwrites with the same hash.
-    const newHash = hashPassword(password);
-    await fetchOne(
-      `UPDATE profiles SET password_hash = $1 WHERE id = $2`,
-      [newHash, profile.id],
+  // Defensive: the pre-cutover script (_force_temp_passwords.ts) writes a
+  // bcrypt hash into every profile that was NULL, so this branch should be
+  // unreachable for active users. Keeps as a graceful reject — pass-through
+  // for a forgotten account is better than an opaque 500.
+  if (!profile.password_hash) {
+    throw new Error(
+      'Account requires a password reset. Please contact support to set your password.',
     );
-    profile.password_hash = newHash;
-    passwordMatched = true;
   }
 
-  if (!passwordMatched) {
+  if (!comparePassword(password, profile.password_hash)) {
     throw new Error('Invalid credentials');
   }
 
@@ -414,16 +322,9 @@ export async function loginUser(username: string, password: string): Promise<Aut
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. getOrCreateDirectConversation
+// 4. getOrCreateDirectConversation
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Returns the direct conversation id between two users, creating one if
- * none exists. The `direct_pair_key` partial-unique index enforces
- * no-duplicates at the DB layer; we explicitly pre-compute the key on
- * INSERT and rely on ON CONFLICT (direct_pair_key) to short-circuit a
- * parallel race.
- */
 export async function getOrCreateDirectConversation(
   userAId: string,
   userBId: string,
@@ -448,8 +349,6 @@ export async function getOrCreateDirectConversation(
   );
   const convId = inserted?.id ?? newId;
 
-  // Add participants idempotently via ON CONFLICT. If a concurrent call
-  // already wired them up we silently skip.
   await fetchAll(
     `INSERT INTO participants (conversation_id, user_id)
        VALUES ($1, $2), ($1, $3)
