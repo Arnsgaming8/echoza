@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
+import { withDeviceHeaders } from '../utils/deviceId';
 
 const Wrapper = styled.div`
   min-height: 100vh;
@@ -116,11 +117,14 @@ export default function Signup() {
 
     setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/auth/register'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      });
+      const res = await fetch(
+        apiUrl('/api/auth/register'),
+        withDeviceHeaders({
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        }),
+      );
       const data = await res.json();
 
       if (!res.ok) {

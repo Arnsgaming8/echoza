@@ -9,6 +9,7 @@ interface InputProps {
   error?: string;
   disabled?: boolean;
   onKeyDown?: (e: React.KeyboardEvent) => void;
+  autoFocus?: boolean;
 }
 
 const Wrapper = styled.div`
@@ -64,6 +65,7 @@ export default function Input({
   error,
   disabled,
   onKeyDown,
+  autoFocus,
 }: InputProps) {
   return (
     <Wrapper>
@@ -76,6 +78,7 @@ export default function Input({
         $hasError={!!error}
         disabled={disabled}
         onKeyDown={onKeyDown}
+        autoFocus={autoFocus}
       />
       {error && <ErrorText>{error}</ErrorText>}
     </Wrapper>

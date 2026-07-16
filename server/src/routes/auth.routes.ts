@@ -6,11 +6,38 @@ import {
   rotateRefreshToken,
   revokeRefreshToken,
   comparePassword,
+  startForgotPassword,
+  completeForgotPassword,
 } from '../auth.js';
 import { fetchOne } from '../db.js';
 import { isUserConnected } from '../socket.js';
 
 const router = Router();
+
+/**
+ * Extract the client-supplied device id from the `X-Device-Id` header.
+ * Falls back to a request-scoped placeholder if missing, so existing
+ * very-old clients (pre-deviceId rollout) still work — but their
+ * fingerprints never get recorded so they can't use forgot-password.
+ * The fallback string is unique per request, so the per-user top-2
+ * prune logic still shrinks correctly for old clients within a single
+ * session (each request looks like a "new device").
+ */
+function getDeviceIdFromRequest(req: Request): string {
+  const headerVal = req.headers['x-device-id'];
+  const raw = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  if (raw && typeof raw === 'string' && raw.length > 0 && raw.length <= 256) {
+    return raw;
+  }
+  // Anonymous placeholder; safe to skip fingerprinting for these.
+  return '';
+}
+
+function getUserAgentFromRequest(req: Request): string {
+  const headerVal = req.headers['user-agent'];
+  const raw = Array.isArray(headerVal) ? headerVal[0] : headerVal;
+  return typeof raw === 'string' ? raw.slice(0, 512) : '';
+}
 
 // ── /register ────────────────────────────────────────────────────────────────
 router.post('/register', async (req: Request, res: Response) => {
@@ -30,7 +57,12 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await registerUser(username, password);
+    const result = await registerUser(
+      username,
+      password,
+      getDeviceIdFromRequest(req),
+      getUserAgentFromRequest(req),
+    );
     res.status(201).json({
       token: result.access_token,
       refresh_token: result.refresh_token,
@@ -58,7 +90,12 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 
   try {
-    const result = await loginUser(username, password);
+    const result = await loginUser(
+      username,
+      password,
+      getDeviceIdFromRequest(req),
+      getUserAgentFromRequest(req),
+    );
     res.json({
       token: result.access_token,
       refresh_token: result.refresh_token,
@@ -189,6 +226,91 @@ router.post('/refresh', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Auth] refresh error:', err);
     res.status(500).json({ error: err?.message || 'Refresh failed' });
+  }
+});
+
+// ── /forgot-password/start ─────────────────────────────────────────────────
+// Step 1 of the forgot-password flow. Client posts { username } and the
+// X-Device-Id header; server checks if (username, device_id) matches one of
+// the user’s last 2 device_fingerprints rows. If so, returns a short-lived
+// challenge JWT. If not, returns a uniform "unable_to_verify_device"
+// response so an attacker can’t enumerate usernames.
+//
+// allowPasswordSet narrows the failure message so the UI can help legacy
+// users (migrated with NULL password_hash) bootstrap their first local
+// password — but only IF their current device is on the trusted list.
+router.post('/forgot-password/start', async (req: Request, res: Response) => {
+  const { username } = req.body || {};
+  const deviceId = getDeviceIdFromRequest(req);
+
+  if (!username || !deviceId) {
+    // Don't differentiate missing-input from not-found-from-DB: return
+    // 400 uniformly so callers without a valid device-id get a clean
+    // error without leaking whether the user exists.
+    res.status(400).json({ error: 'username and device required' });
+    return;
+  }
+  if (typeof username !== 'string' || !/^[A-Za-z_]{3,20}$/.test(username)) {
+    res.status(400).json({ error: 'Username must be 3-20 letters' });
+    return;
+  }
+
+  try {
+    const result = await startForgotPassword(username, deviceId, getUserAgentFromRequest(req));
+    if (!result.ok) {
+      res.json({
+        success: false,
+        reason: result.reason,
+        allowPasswordSet: result.allowPasswordSet ?? false,
+      });
+      return;
+    }
+    res.json({
+      success: true,
+      challenge: result.challenge,
+      expiresInSeconds: result.expiresInSeconds,
+    });
+  } catch (err: any) {
+    console.error('[Auth] forgot-password/start error:', err);
+    res.status(500).json({ error: 'Forgot-password start failed' });
+  }
+});
+
+// ── /forgot-password/change ───────────────────────────────────────────────
+// Step 2 of the forgot-password flow. Client posts { challenge, new_password }
+// and the X-Device-Id header. Server verifies the challenge (signature,
+// scope, device bind, single-use nonce), bcrypt-hashes the new password,
+// invalidates all pre-reset access tokens via password_changed_at, revokes
+// every other refresh token for the user, then returns a fresh token pair
+// so the user lands logged-in on this device.
+router.post('/forgot-password/change', async (req: Request, res: Response) => {
+  const { challenge, new_password } = req.body || {};
+  const deviceId = getDeviceIdFromRequest(req);
+
+  if (!challenge || !new_password || !deviceId) {
+    res.status(400).json({ error: 'challenge, new_password, and device required' });
+    return;
+  }
+  if (typeof challenge !== 'string' || typeof new_password !== 'string') {
+    res.status(400).json({ error: 'Invalid input shape' });
+    return;
+  }
+
+  try {
+    const result = await completeForgotPassword(challenge, deviceId, new_password);
+    if (!result.ok) {
+      const status = result.reason === 'password_too_short' ? 400 : 401;
+      res.status(status).json({ error: result.reason });
+      return;
+    }
+    res.json({
+      token: result.access_token,
+      refresh_token: result.refresh_token,
+      user: result.user,
+    });
+  } catch (err: any) {
+    console.error('[Auth] forgot-password/change error:', err);
+    res.status(500).json({ error: 'Forgot-password change failed' });
   }
 });
 

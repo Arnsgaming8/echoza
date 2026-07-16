@@ -10,6 +10,7 @@ interface PasswordInputProps {
   onChange: (value: string) => void;
   error?: string;
   disabled?: boolean;
+  autoFocus?: boolean;
 }
 
 const PasswordWrapper = styled.div`
@@ -50,6 +51,7 @@ export default function PasswordInput({
   onChange,
   error,
   disabled,
+  autoFocus,
 }: PasswordInputProps) {
   const [show, setShow] = useState(false);
 
@@ -63,6 +65,7 @@ export default function PasswordInput({
         onChange={onChange}
         error={error}
         disabled={disabled}
+        autoFocus={autoFocus}
       />
       <EyeBtn
         type="button"

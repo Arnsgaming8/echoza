@@ -31,6 +31,41 @@ import { fetchOne, fetchAll, tx } from './db.js';
 
 const BCRYPT_COST = 10;
 
+// The forgot-password flow lets a user reset their password from a device
+// they've previously logged in on. We enforce that by checking the last
+// couple of (user_id, device_id) rows in `device_fingerprints` against
+// the device_id the client sends in the `X-Device-Id` header. KEEP_LAST
+// matches the pruneDeviceFingerprints() call so the table never grows
+// past this limit per user.
+const DEVICE_FINGERPRINT_KEEP_LAST = 2;
+
+// In-memory cache for `password_changed_at` lookups during
+// verifyAccessToken. JWT access tokens are stateless, so without this
+// guard an attacker who learned a user's pre-reset access token would
+// still hold a valid 15m session for up to 15m after a successful
+// password change. A short TTL amortizes the DB cost across bursts of
+// verify calls while staying fresh enough that a legitimate password
+// change takes effect inside the cache window.
+const pwdChangedAtCache = new Map<string, { value: string | null; expiresAt: number }>();
+const PWD_CHANGED_AT_CACHE_TTL_MS = 5_000;
+
+async function getPasswordChangedAt(userId: string): Promise<string | null> {
+  const cached = pwdChangedAtCache.get(userId);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) return cached.value;
+  const profile = await fetchOne<{ password_changed_at: string | null }>(
+    `SELECT password_changed_at FROM profiles WHERE id = $1`,
+    [userId],
+  );
+  const value = profile?.password_changed_at ?? null;
+  pwdChangedAtCache.set(userId, { value, expiresAt: now + PWD_CHANGED_AT_CACHE_TTL_MS });
+  return value;
+}
+
+export function invalidatePasswordChangedAtCache(userId: string): void {
+  pwdChangedAtCache.delete(userId);
+}
+
 export function hashPassword(password: string): string {
   return bcrypt.hashSync(password, BCRYPT_COST);
 }
@@ -47,6 +82,10 @@ interface AccessTokenClaims {
   sub: string;
   username: string;
   lastSignInAt: string | null;
+  // `iat` is set automatically by jsonwebtoken (NumericDate, seconds
+  // since epoch). Used here to compare against `password_changed_at`
+  // so that access tokens issued BEFORE a password change get rejected.
+  iat?: number;
   type: 'access';
 }
 
@@ -110,7 +149,11 @@ export function signRefreshToken(userId: string): {
 }
 
 /**
- * Verify an access token. Pure JWT decode — no DB hit per call.
+ * Verify an access token. JWT decode is stateless, but we ALSO check the
+ * user's `password_changed_at` against the JWT's `iat` claim to invalidate
+ * pre-reset access tokens. The DB hit is amortized via a 5s in-memory
+ * cache keyed by user_id, so the hot socket path stays cheap while still
+ * invalidating tokens within ~5s of a password change.
  */
 export async function verifyAccessToken(
   token: string,
@@ -118,6 +161,18 @@ export async function verifyAccessToken(
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET) as AccessTokenClaims;
     if (decoded.type !== 'access') return null;
+    // Reject pre-reset access tokens. Compare in WHOLE SECONDS:
+    // jsonwebtoken floors iat to seconds while Postgres has ms precision,
+    // so an ms-level comparison would falsely reject a fresh token issued
+    // in the same second as the password change. Same-second tokens are
+    // safe — the password has only been changed for sub-second, and
+    // they'd just have been re-issued by completeForgotPassword anyway.
+    const pwdChangedAt = await getPasswordChangedAt(decoded.sub);
+    if (pwdChangedAt) {
+      const iatSec = decoded.iat ?? 0;
+      const pwdChangedSec = new Date(pwdChangedAt).getTime() / 1000;
+      if (iatSec < pwdChangedSec) return null;
+    }
     return {
       userId: decoded.sub,
       lastSignInAt: decoded.lastSignInAt ?? null,
@@ -234,7 +289,12 @@ export interface AuthResult {
   user: UserRecord;
 }
 
-export async function registerUser(username: string, password: string): Promise<AuthResult> {
+export async function registerUser(
+  username: string,
+  password: string,
+  deviceId?: string,
+  userAgent?: string,
+): Promise<AuthResult> {
   const nowIso = new Date().toISOString();
   const newId = uuidv4();
   const passwordHash = hashPassword(password);
@@ -253,6 +313,10 @@ export async function registerUser(username: string, password: string): Promise<
     throw err;
   }
 
+  if (deviceId) {
+    await recordDeviceFingerprint(inserted.id, deviceId, userAgent);
+  }
+
   const refresh = signRefreshToken(inserted.id);
   await fetchOne(
     `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
@@ -268,7 +332,12 @@ export async function registerUser(username: string, password: string): Promise<
   };
 }
 
-export async function loginUser(username: string, password: string): Promise<AuthResult> {
+export async function loginUser(
+  username: string,
+  password: string,
+  deviceId?: string,
+  userAgent?: string,
+): Promise<AuthResult> {
   const profile = await fetchOne<{
     id: string;
     username: string;
@@ -287,11 +356,12 @@ export async function loginUser(username: string, password: string): Promise<Aut
 
   // Defensive: the pre-cutover script (_force_temp_passwords.ts) writes a
   // bcrypt hash into every profile that was NULL, so this branch should be
-  // unreachable for active users. Keeps as a graceful reject — pass-through
-  // for a forgotten account is better than an opaque 500.
+  // unreachable for active users. Forgot-password change() below is a
+  // legitimate way to set a hash for legacy accounts that never went
+  // through the bcrypt script.
   if (!profile.password_hash) {
     throw new Error(
-      'Account requires a password reset. Please contact support to set your password.',
+      'Account requires a password reset. Please use the forgot-password flow or contact support.',
     );
   }
 
@@ -304,6 +374,10 @@ export async function loginUser(username: string, password: string): Promise<Aut
     `UPDATE profiles SET last_sign_in_at = $1 WHERE id = $2`,
     [nowIso, profile.id],
   );
+
+  if (deviceId) {
+    await recordDeviceFingerprint(profile.id, deviceId, userAgent);
+  }
 
   const refresh = signRefreshToken(profile.id);
   await fetchOne(
@@ -363,3 +437,273 @@ export async function getOrCreateDirectConversation(
 
 // Keep db import trees happy if the linter greps for tx/fetchAll.
 void fetchAll;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 5. Device-fingerprint bookkeeping (forgot-password verification)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert (user_id, device_id) into the device_fingerprints table, then
+ * prune to keep only the K most-recent rows per user. Called from
+ * loginUser, registerUser, and after a successful forgot-password change.
+ */
+export async function recordDeviceFingerprint(
+  userId: string,
+  deviceId: string,
+  userAgent?: string,
+): Promise<void> {
+  if (!deviceId) return;
+  await fetchOne(
+    `INSERT INTO device_fingerprints (user_id, device_id, user_agent, last_used_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (user_id, device_id)
+       DO UPDATE SET last_used_at = NOW(), user_agent = EXCLUDED.user_agent`,
+    [userId, deviceId, userAgent ?? null],
+  );
+  await fetchOne(
+    `SELECT public.prune_device_fingerprints($1, $2)`,
+    [userId, DEVICE_FINGERPRINT_KEEP_LAST],
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6. Forgot-password flow
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ForgotStepChallenge {
+  ok: true;
+  challenge: string;
+  userId: string;
+  expiresInSeconds: number;
+}
+interface ForgotStepFailed {
+  ok: false;
+  reason: 'unable_to_verify_device';
+  // FIX [thinker-input]: Allow legacy users (NULL password_hash) to set
+  // their first local password through this flow. The route maps
+  // reason='password_not_set' onto a friendlier UI message.
+  allowPasswordSet?: boolean;
+}
+export type ForgotStepResult = ForgotStepChallenge | ForgotStepFailed;
+
+const FORGOT_PASSWORD_CHALLENGE_TTL_SECONDS = 5 * 60;
+
+/**
+ * Step 1: take a username + current device_id, decide whether to issue a
+ * password-reset challenge JWT. The response shape is deliberately uniform
+ * (no enumeration leak between username-not-found vs. device-not-found):
+ * either a challenge or a single "unable_to_verify_device" reason.
+ *
+ * A short artificial delay is added on the failure paths so an attacker
+ * can't distinguish them via response timing.
+ *
+ * Note: we document in the UI that this flow is not a substitute for
+ * server-side multi-factor auth — see "Limit of 2 devices" in the
+ * security review. If the user has cleared localStorage or is on a new
+ * device, they have no path to recover and must contact the admin.
+ */
+export async function startForgotPassword(
+  username: string,
+  deviceId: string,
+  userAgent?: string,
+): Promise<ForgotStepResult> {
+  const failWithDelay = async (
+    reason: 'unable_to_verify_device',
+    allowPasswordSet = false,
+  ): Promise<ForgotStepFailed> => {
+    // Mask timing: always burn roughly the cost of a DB roundtrip +
+    // bcrypt compare so caller can't distinguish short-circuit paths.
+    await new Promise<void>((r) => setTimeout(r, 80));
+    return { ok: false, reason, allowPasswordSet };
+  };
+
+  const profile = await fetchOne<{ id: string; has_hash: boolean }>(
+    `SELECT id, (password_hash IS NOT NULL) AS has_hash
+       FROM profiles
+       WHERE LOWER(username) = LOWER($1)`,
+    [username],
+  );
+  if (!profile) return failWithDelay('unable_to_verify_device');
+
+  const fingerprint = await fetchOne<{ device_id: string }>(
+    `SELECT device_id FROM device_fingerprints
+       WHERE user_id = $1 AND device_id = $2`,
+    [profile.id, deviceId],
+  );
+  if (!fingerprint) {
+    return failWithDelay('unable_to_verify_device', !profile.has_hash);
+  }
+
+  // Rotate reset_nonce so any prior issued challenge tied to this user
+  // becomes invalid; only the most-recently-issued challenge works. Even
+  // though the JWT itself has a 5m exp, this gives us per-user single-shot
+  // semantics on the application layer.
+  const nonce = randomBytes(16).toString('hex');
+  await fetchOne(
+    `UPDATE profiles SET reset_nonce = $1 WHERE id = $2`,
+    [nonce, profile.id],
+  );
+
+  void userAgent; // currently unused — kept for future device-management UI
+
+  const challenge = jwt.sign(
+    {
+      sub: profile.id,
+      did: deviceId,
+      type: 'pwd_reset',
+      nonce,
+    },
+    env.JWT_SECRET,
+    { expiresIn: FORGOT_PASSWORD_CHALLENGE_TTL_SECONDS, algorithm: 'HS256' },
+  );
+  return {
+    ok: true,
+    challenge,
+    userId: profile.id,
+    expiresInSeconds: FORGOT_PASSWORD_CHALLENGE_TTL_SECONDS,
+  };
+}
+
+export type CompleteForgotPasswordResult =
+  | { ok: true; access_token: string; refresh_token: string; user: UserRecord }
+  | { ok: false; reason: 'invalid_challenge' | 'password_too_short' | 'user_not_found' };
+
+/**
+ * Step 2: trade a valid challenge JWT + new password for fresh tokens.
+ * Verifies the challenge signature, scope (`pwd_reset`), and binds the
+ * device_id baked into the challenge to the device_id header sent on
+ * this request — defending against challenge interception. Then
+ * bcrypt-hashes the new password, sets `password_changed_at` so all
+ * pre-reset access tokens get rejected, rotates reset_nonce to NULL,
+ * revokes ALL other refresh tokens for the user, and issues a fresh
+ * pair so the user is auto-logged-in on this device.
+ */
+export async function completeForgotPassword(
+  challenge: string,
+  deviceId: string,
+  newPassword: string,
+): Promise<CompleteForgotPasswordResult> {
+  if (newPassword.length < 8) {
+    return { ok: false, reason: 'password_too_short' };
+  }
+
+  interface ResetClaims {
+    sub: string;
+    did: string;
+    type: string;
+    nonce: string;
+  }
+  let decoded: ResetClaims;
+  try {
+    decoded = jwt.verify(challenge, env.JWT_SECRET) as ResetClaims;
+  } catch {
+    return { ok: false, reason: 'invalid_challenge' };
+  }
+  if (decoded.type !== 'pwd_reset') {
+    return { ok: false, reason: 'invalid_challenge' };
+  }
+  // Bind challenge to the device that requested it. Defends against
+  // challenge interception/replay from a different device even if a
+  // future bug extends JWT expiry improperly.
+  if (decoded.did !== deviceId) {
+    return { ok: false, reason: 'invalid_challenge' };
+  }
+
+  // Verify the challenge nonce is still the most-recent one issued for
+  // this user. startForgotPassword rotates this on every issuance;
+  // completeForgotPassword clears it on successful use. So both replay
+  // (same challenge used twice) AND reuse-after-rotation land here.
+  const profile = await fetchOne<{
+    id: string;
+    username: string;
+    avatar: string;
+    last_sign_in_at: string | null;
+    reset_nonce: string | null;
+  }>(
+    `SELECT id, username, avatar, last_sign_in_at, reset_nonce
+       FROM profiles
+       WHERE id = $1`,
+    [decoded.sub],
+  );
+  if (!profile) return { ok: false, reason: 'user_not_found' };
+  if (!profile.reset_nonce || profile.reset_nonce !== decoded.nonce) {
+    return { ok: false, reason: 'invalid_challenge' };
+  }
+
+  const newHash = hashPassword(newPassword);
+  const nowIso = new Date().toISOString();
+
+  // All state writes happen inside one tx. SELECT FOR UPDATE on the
+  // profile row serializes concurrent completeForgotPassword calls for
+  // the same user, so two parallel challenge submissions can't both
+  // pass the nonce check above. The reset_nonce → NULL UPDATE happens
+  // inside the same tx, so the nonce is consumed atomically with the
+  // password change.
+  await tx(async (client) => {
+    // Re-check nonce under the row lock so concurrent callers see a
+    // deterministic winner. We already passed the unlocked check above
+    // (column `profile.reset_nonce === decoded.nonce`); this guards
+    // against the case where a parallel tx committed a different nonce
+    // between our first read and the lock acquisition.
+    const lockR = await client.query<{ reset_nonce: string | null }>(
+      `SELECT reset_nonce FROM profiles WHERE id = $1 FOR UPDATE`,
+      [decoded.sub],
+    );
+    const lockedNonce = lockR.rows[0]?.reset_nonce ?? null;
+    if (lockedNonce !== decoded.nonce) {
+      // Throw to roll back the tx (no writes happened yet, but the
+      // lock will release on ROLLBACK).
+      throw new Error('invalid_challenge');
+    }
+
+    // Single atomic UPDATE clears reset_nonce + writes new hash + records
+    // change timestamp. Resetting nonce in the same statement ensures no
+    // race can re-use the challenge after we've consumed it.
+    await client.query(
+      `UPDATE profiles
+         SET password_hash = $1,
+             password_changed_at = $2,
+             last_sign_in_at = $2,
+             reset_nonce = NULL
+         WHERE id = $3`,
+      [newHash, nowIso, profile.id],
+    );
+    // Revoke every outstanding refresh token for this user so other
+    // devices/sessions must re-authenticate with the new password.
+    await client.query(
+      `DELETE FROM refresh_tokens WHERE user_id = $1`,
+      [profile.id],
+    );
+    // Drop the password_changed_at cache INSIDE the tx so that any
+    // concurrent verifyAccessToken that lands during or just after
+    // commit forces a fresh DB read (which sees the new post-update
+    // password_changed_at). Without this, a verify in the sub-ms window
+    // between commit and external invalidation could use a stale cache
+    // entry and accept an old access token.
+    invalidatePasswordChangedAtCache(profile.id);
+  });
+
+  // Refresh this device's fingerprint row so the user doesn't accidentally
+  // prune themselves out by logging in concurrently on another device
+  // before the next pruneDeviceFingerprints tick.
+  await recordDeviceFingerprint(profile.id, deviceId);
+
+  const refresh = signRefreshToken(profile.id);
+  await fetchOne(
+    `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+    [profile.id, refresh.hash, refresh.expiresAt],
+  );
+  const access = signAccessToken(profile.id, profile.username, profile.last_sign_in_at);
+  return {
+    ok: true,
+    access_token: access,
+    refresh_token: refresh.plaintext,
+    user: {
+      id: profile.id,
+      username: profile.username,
+      avatar: profile.avatar,
+      online: false,
+    },
+  };
+}

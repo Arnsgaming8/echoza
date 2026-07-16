@@ -21,6 +21,11 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- the FIRST time they sign in successfully (see server/src/auth.ts loginUser).
 -- `last_sign_in_at` is updated on every successful login so the 30-day
 -- rolling session policy stays accurate without depending on Auth metadata.
+-- `password_changed_at` is updated on password change (including via the
+-- forgot-password flow) so we can invalidate pre-reset access JWTs.
+-- `reset_nonce` is rotated every time the forgot-password flow issues a
+-- challenge token, so a successfully-used (or replayed) challenge can be
+-- detected by comparing it against the nonce stored at issue time.
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   username TEXT UNIQUE NOT NULL,
@@ -28,6 +33,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   display_name TEXT DEFAULT '',
   avatar TEXT DEFAULT '',
   last_sign_in_at TIMESTAMPTZ,
+  password_changed_at TIMESTAMPTZ,
+  reset_nonce TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -35,6 +42,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- bootstrap), add them idempotently.
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_hash TEXT;
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS last_sign_in_at TIMESTAMPTZ;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS password_changed_at TIMESTAMPTZ;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS reset_nonce TEXT;
 
 -- ── Refresh tokens (server-issued, stateful, hash-stored) ──────────────────
 -- Plaintext refresh tokens are only ever in transit (memory, JSON over HTTPS)
@@ -96,6 +105,48 @@ CREATE TABLE IF NOT EXISTS public.read_receipts (
   read_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (message_id, user_id)
 );
+
+-- ── Device fingerprints (forgot-password verification) ────────────────────
+-- Records the last K device_ids (client-generated UUIDs stored in
+-- localStorage) that successfully authenticated for a given user.
+-- The forgot-password start endpoint checks whether the current device's
+-- id is among these rows before issuing a password-reset challenge token.
+-- Server-issued randomBytes IDs would also work; we deliberately let the
+-- client generate so the same browser profile keeps the same id across
+-- machine reboots even if the server's id namespace is reset on rebuild.
+-- `last_used_at` is refreshed on every login; an admin/CLI pruner keeps
+-- only the K most-recent rows per user. K is fixed at 2 for now (mirrors
+-- the UX requirement "last two devices"). To loosen it later, edit the
+-- pruneDeviceFingerprints function call sites in server/src/auth.ts.
+CREATE TABLE IF NOT EXISTS public.device_fingerprints (
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  device_id TEXT NOT NULL,
+  user_agent TEXT,
+  last_used_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (user_id, device_id)
+);
+CREATE INDEX IF NOT EXISTS idx_device_fp_user_time
+  ON public.device_fingerprints(user_id, last_used_at DESC);
+
+-- Prune a user's fingerprints down to the K most-recent ones. Called from
+-- the application layer (server/src/auth.ts) after every login/register/
+-- forgot-password change so the DB stays bounded. Doing this in app code
+-- rather than a trigger avoids the deadlock surface that row-by-row
+-- triggers create during rapid login bursts.
+CREATE OR REPLACE FUNCTION public.prune_device_fingerprints (p_user_id UUID, p_keep INT)
+RETURNS VOID
+LANGUAGE SQL
+AS $$
+  DELETE FROM public.device_fingerprints
+    WHERE user_id = p_user_id
+      AND (user_id, device_id) NOT IN (
+        SELECT user_id, device_id FROM public.device_fingerprints
+          WHERE user_id = p_user_id
+          ORDER BY last_used_at DESC
+          LIMIT p_keep
+      );
+$$;
 
 -- ── Push subscriptions (Web Push) ──────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS public.push_subscriptions (
