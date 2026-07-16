@@ -630,7 +630,10 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         </>
       )}
 
-      {!ended && isCameraOn && localStream && (
+      {/* FIX #2: Guard on getVideoTracks().length > 0 — prevents empty
+          black tile when video-call falls back to audio-only after
+          setupLocalMedia(attempt=2) succeeds with no video track. */}
+      {!ended && isCameraOn && localStream && localStream.getVideoTracks().length > 0 && (
         <LocalVideo
           ref={localVideoRef}
           autoPlay playsInline muted

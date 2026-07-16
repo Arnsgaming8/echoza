@@ -8,6 +8,7 @@ import {
   comparePassword,
 } from '../auth.js';
 import { fetchOne } from '../db.js';
+import { isUserConnected } from '../socket.js';
 
 const router = Router();
 
@@ -38,9 +39,10 @@ router.post('/register', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Auth] register error:', err);
     // `Username already taken` is a 409; everything else is a 500.
+    // FIX #15: Check structured error code first, fall back to string match.
     const msg = (err?.message || 'Registration failed').toString();
-    if (msg.toLowerCase().includes('already taken')) {
-      res.status(409).json({ error: msg });
+    if (err?.code === 'USERNAME_TAKEN' || msg.toLowerCase().includes('already taken')) {
+      res.status(409).json({ error: 'Username already taken' });
     } else {
       res.status(500).json({ error: msg });
     }
@@ -90,7 +92,8 @@ router.get('/me', async (req: Request, res: Response) => {
   );
 
   if (profile) {
-    res.json({ ...profile, online: false });
+    // FIX #6: Use actual socket presence instead of hardcoded online: false.
+    res.json({ ...profile, online: isUserConnected(profile.id) });
     return;
   }
   res.status(404).json({ error: 'User not found' });
@@ -177,10 +180,11 @@ router.post('/refresh', async (req: Request, res: Response) => {
       res.status(401).json({ error: 'User no longer exists' });
       return;
     }
+    // FIX #6: Use actual socket presence instead of hardcoded online: false.
     res.json({
       token: result.access,
       refresh_token: result.refresh,
-      user: { ...profile, online: false },
+      user: { ...profile, online: isUserConnected(profile.id) },
     });
   } catch (err: any) {
     console.error('[Auth] refresh error:', err);

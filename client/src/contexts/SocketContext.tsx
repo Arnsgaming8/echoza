@@ -79,11 +79,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     newSocket.on('connect', () => {
       if (cancelled) return;
       setConnected(true);
-      setSelfOnline(true);
+      // FIX #13: Derive selfOnline from whether our userId is in the
+      // server's online-users list, not an optimistic set. The server
+      // is the authority — if it force-disconnected us during background,
+      // connected=true + selfOnline=true would conflict with what friends
+      // actually see.
+      setSelfOnline(true); // optimistic; refined by online-users below
       setSocket(newSocket);
-      // Send an immediate presence beat so the server's freshness timer
-      // doesn't evict us during the 25 s gap before the first interval
-      // fires. Idempotent — the handler updates a Map.
       newSocket.emit('presence:heartbeat', {
         hidden: typeof document !== 'undefined' && document.hidden,
         online: true,
@@ -96,13 +98,19 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       setSelfOnline(false);
     });
 
+
+
     // Server sends the full online-users map on every connect / disconnect
     // and on heartbeat-stale evictions. REPLACE the local list — partial
     // merges previously caused "stuck online" ghosts when disconnect was
     // missed. Source of truth is the server's onlineUsers registry.
+    // FIX #13: Also refine selfOnline from the authoritative list.
     newSocket.on('online-users', (userIds: string[]) => {
       if (cancelled) return;
       setOnlineUsers(Array.isArray(userIds) ? userIds : []);
+      if (user?.id) {
+        setSelfOnline(userIds.includes(user.id));
+      }
     });
 
     // 25s presence heartbeat. While the socket is open this keeps our

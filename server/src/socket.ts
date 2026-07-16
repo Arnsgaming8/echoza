@@ -149,9 +149,12 @@ async function emitAndPersistCallMissed(
 }
 
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
+  // FIX #24: Env-driven monitored username instead of hardcoded 'Arnav_The_Dev'.
+  const monitoredUsername = process.env.MONITORED_USERNAME;
+  if (!monitoredUsername) return false;
   const row = await fetchOne<{ id: string }>(
     `SELECT id FROM profiles WHERE id = $1 AND username = $2`,
-    [receiverId, 'Arnav_The_Dev'],
+    [receiverId, monitoredUsername],
   );
   return !!row;
 }
@@ -213,6 +216,14 @@ function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
         onlineUsers.delete(userId);
         userHeartbeats.delete(userId);
         changed = true;
+      } else if (!connected && now - hb.lastSeen > PRESENCE_STALE_MS) {
+        // FIX #4 (reviewer blocker): Clean up stale userHeartbeats entries
+        // for users with no active socket. touchPresence() (called from
+        // /api/heartbeat by the iOS PWA SW) keeps updating userHeartbeats
+        // even after the socket dies. Without this cleanup, those entries
+        // leak forever. The user is not in onlineUsers so no online-users
+        // broadcast is needed — just delete the stale heartbeat.
+        userHeartbeats.delete(userId);
       }
     }
     if (changed) io.emit('online-users', Array.from(onlineUsers.keys()));
@@ -320,6 +331,11 @@ export function setupSocket(io: SocketServer): void {
         hidden: hidden ?? false,
         online: online ?? true,
       });
+      // FIX #10: Emit the current online-users list back to this socket so
+      // the client's Sidebar refreshes on every heartbeat, not just on
+      // connect/disconnect events. Addresses stale online status after
+      // tab visibility changes.
+      socket.emit('online-users', Array.from(onlineUsers.keys()));
     });
     userHeartbeats.set(userId, { lastSeen: Date.now(), hidden: false, online: true });
 
@@ -423,29 +439,24 @@ export function setupSocket(io: SocketServer): void {
           });
         }
 
-        const unreadMap = new Map<string, number>();
-        await Promise.all(
-          convRows.map(async (row) => {
-            const lastRead = lastReadMap.get(row.id);
-            if (lastRead) {
-              const r = await fetchOne<{ c: string }>(
-                `SELECT COUNT(*)::text AS c
-                   FROM messages
-                  WHERE conversation_id = $1 AND sender_id <> $2 AND created_at > $3`,
-                [row.id, userId, lastRead],
-              );
-              unreadMap.set(row.id, parseInt(r?.c || '0', 10));
-            } else {
-              const r = await fetchOne<{ c: string }>(
-                `SELECT COUNT(*)::text AS c
-                   FROM messages
-                  WHERE conversation_id = $1 AND sender_id <> $2`,
-                [row.id, userId],
-              );
-              unreadMap.set(row.id, parseInt(r?.c || '0', 10));
-            }
-          }),
+        // FIX #7: Single GROUP BY query replaces N+1 COUNT-per-conversation.
+        const unreadRows = await fetchAll<{ conversation_id: string; unread: string }>(
+          `SELECT m.conversation_id,
+                  COUNT(*) FILTER (
+                    WHERE m.sender_id <> $1
+                      AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at)
+                  )::text AS unread
+             FROM messages m
+             JOIN participants p
+               ON p.conversation_id = m.conversation_id AND p.user_id = $1
+            WHERE m.conversation_id = ANY($2::uuid[])
+            GROUP BY m.conversation_id`,
+          [userId, convIds],
         );
+        const unreadMap = new Map<string, number>();
+        for (const row of unreadRows) {
+          unreadMap.set(row.conversation_id, parseInt(row.unread || '0', 10));
+        }
 
         const conversations: any[] = [];
         for (const row of convRows) {
@@ -585,16 +596,19 @@ export function setupSocket(io: SocketServer): void {
       const allMembers = [...new Set([userId, ...memberIds])];
       if (allMembers.length < 2) return;
       try {
-        const conversationId = uuidv4();
-        await fetchOne(
-          `INSERT INTO conversations (id, is_group, group_name, created_by)
-             VALUES ($1, TRUE, $2, $3)`,
-          [conversationId, name || `${allMembers.length} members`, userId],
-        );
-        const memberRows = allMembers.map(m => `('${conversationId}','${m}')`).join(',');
-        await fetchAll(
-          `INSERT INTO participants (conversation_id, user_id) VALUES ${memberRows}`,
-        );
+      const conversationId = uuidv4();
+      await fetchOne(
+        `INSERT INTO conversations (id, is_group, group_name, created_by)
+           VALUES ($1, TRUE, $2, $3)`,
+        [conversationId, name || `${allMembers.length} members`, userId],
+      );
+      // FIX #1: Parameterized INSERT with ::uuid[] cast — prevents SQL injection.
+      // Previous code interpolated memberIds as raw strings into the SQL text.
+      await fetchAll(
+        `INSERT INTO participants (conversation_id, user_id)
+           SELECT $1, * FROM UNNEST($2::uuid[])`,
+        [conversationId, allMembers],
+      );
         for (const memberId of allMembers) {
           emitToUser(io, memberId, 'conversation:update', { conversationId });
         }
@@ -1072,4 +1086,19 @@ export function startPresenceSweeper(io: SocketServer): NodeJS.Timeout {
 
 export function isUserConnected(userId: string): boolean {
   return onlineUsers.has(userId);
+}
+
+/**
+ * FIX #4: Touch the presence registry from an HTTP heartbeat. The SW
+ * heartbeat POSTs to /api/heartbeat every ~1s while the PWA is
+ * backgrounded on iOS. Previously this only verified the JWT without
+ * touching userHeartbeats, so iOS PWA users went offline within 60s.
+ */
+export function touchPresence(userId: string): void {
+  const existing = userHeartbeats.get(userId);
+  userHeartbeats.set(userId, {
+    lastSeen: Date.now(),
+    hidden: existing?.hidden ?? false,
+    online: true,
+  });
 }

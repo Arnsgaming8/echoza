@@ -512,30 +512,12 @@ export default function Dashboard() {
     }, 50);
   }, []);
 
-  // ── One-time mic + camera permission prompt (fires once per session). ──
-  // The browser shows its native permission popup on the first getUserMedia
-  // call per origin; subsequent calls reuse the cached decision. We stop
-  // all tracks immediately because we only wanted the permission grant —
-  // actual capture happens during real calls. The sessionStorage flag
-  // prevents us from re-asking after a denial within the same session,
-  // even if the user might be willing to grant on a second ask.
-  useEffect(() => {
-    if (typeof navigator === 'undefined') return;
-    if (!navigator.mediaDevices?.getUserMedia) return;
-    try {
-      if (sessionStorage.getItem('echoza:media-prompted') === '1') return;
-    } catch { /* sessionStorage may throw on disabled cookies */ }
-    (async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        });
-        stream.getTracks().forEach(t => t.stop());
-      } catch { /* denied or unavailable — browser is authority, don't retry */ }
-      try { sessionStorage.setItem('echoza:media-prompted', '1'); } catch { /* ignore */ }
-    })();
-  }, []);
+  // FIX #16: Removed the one-time getUserMedia prompt at mount. It was
+  // hostile UX — firing both audio + video permission dialogs on first
+  // paint before the user even opened Settings or initiated a call.
+  // Permissions are now requested naturally when the user starts a call
+  // (useCall.ts setupLocalMedia), which is a user-initiated gesture and
+  // the correct context for Safari/iOS permission prompts.
 
   // ── Pre-warm ICE config so call setup is instant ─────────────────────────
   // useCall.ts reads `window._echozaIce` synchronously and uses it as the
@@ -680,7 +662,11 @@ export default function Dashboard() {
     });
 
     socket.on('message:new', (message: any) => {
-      if (message.senderId === userRef.current?.id) return;
+      // FIX #14: Also check senderUsername as a fallback in case the
+      // server schema ever renames senderId. Previously only senderId
+      // was checked — a schema drift would cause duplicate renders.
+      if (message.senderId === userRef.current?.id ||
+          (message.senderUsername && message.senderUsername === userRef.current?.username)) return;
 
       const isActive = message.conversationId === activeChatRef.current;
       const senderName = message.senderUsername || message.senderId.slice(0, 6);

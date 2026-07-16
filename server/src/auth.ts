@@ -247,7 +247,10 @@ export async function registerUser(username: string, password: string): Promise<
     [newId, username, passwordHash, nowIso],
   );
   if (!inserted) {
-    throw new Error('Username already taken');
+    // FIX #15: Structured error code for 409 detection instead of string match.
+    const err = new Error('Username already taken');
+    (err as any).code = 'USERNAME_TAKEN';
+    throw err;
   }
 
   const refresh = signRefreshToken(inserted.id);

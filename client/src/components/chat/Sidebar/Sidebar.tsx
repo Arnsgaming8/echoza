@@ -353,6 +353,24 @@ export default function Sidebar({
   const { onlineUsers, selfOnline } = useSocket();
   const [searchQuery, setSearchQuery] = useState('');
 
+  // FIX #10: Refresh online status when tab regains visibility.
+  // The socket onlineUsers list only refreshes on connect/disconnect/stale-
+  // sweep. When the user returns to the tab, we force a re-render using
+  // a counter (setSearchQuery(prev => prev) bails out in React 18 because
+  // the value hasn't changed).
+  const [, setVisibilityTick] = useState(0);
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        // Force re-render via a counter — React won't bail out because
+        // the value actually changes.
+        setVisibilityTick(t => t + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
   const isOnline = user ? selfOnline : false;
 
   const handleSearch = (val: string) => {

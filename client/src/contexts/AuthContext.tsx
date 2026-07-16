@@ -88,6 +88,15 @@ function decodeLocalUser(token: string): {
       ? payload.exp * 1000
       : -1;
     const now = Date.now();
+    // NOTE on #5: We intentionally DO NOT return null for expired JWTs.
+    // The background effect below handles expired tokens by attempting
+    // a refresh via tryRefreshSession(). If the refresh succeeds, the
+    // user stays on the Dashboard with no login flash. If it fails AND
+    // the token is expired, the effect clears tokens + bounces to /login.
+    // Returning null here would cause a login-page flash for every user
+    // whose access token expired but whose refresh token is still valid —
+    // a UX regression. The stub user lets the Dashboard mount instantly,
+    // and the background effect refines or clears it within milliseconds.
     return {
       user: {
         id: payload.sub,

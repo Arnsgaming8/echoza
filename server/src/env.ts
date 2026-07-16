@@ -54,6 +54,9 @@ export const env = {
   TURN_USERNAME: optionalString('TURN_USERNAME'),
   TURN_CREDENTIAL: optionalString('TURN_CREDENTIAL'),
   TURN_TLS_URL: optionalString('TURN_TLS_URL'),
+  // FIX #24: Env-driven monitored username for Discord notifications.
+  // Previously hardcoded to 'Arnav_The_Dev' in socket.ts.
+  MONITORED_USERNAME: optionalString('MONITORED_USERNAME'),
 };
 
 // One-shot diagnostic at boot so ops can see exactly what was loaded (sans

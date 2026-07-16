@@ -18,7 +18,7 @@ import {
 import { env, logEnvSanity } from './env.js';
 import { pingDb, fetchOne, fetchAll } from './db.js';
 import { sendDiscordNotification } from './discord.js';
-import { setupSocket, startPresenceSweeper, emitToUserViaRegistry } from './socket.js';
+import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, touchPresence } from './socket.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -119,6 +119,11 @@ async function main() {
       res.status(401).json({ error: 'Invalid token' });
       return;
     }
+    // FIX #4: Touch the socket presence registry so iOS PWA SW heartbeats
+    // keep the user marked online. Previously /api/heartbeat was JWT-verify-
+    // only and did NOT update userHeartbeats, so iOS PWA users went offline
+    // within 60s of backgrounding (JS context suspended, no socket heartbeats).
+    touchPresence(decoded.userId);
     res.json({ ok: true });
   });
 
@@ -211,35 +216,24 @@ async function main() {
         });
       }
 
-      // Step 6: unread counts — one COUNT query per conversation
-      // (Promise.all parallel). The `last_last_read_at` is fetched inline
-      // so we don't re-query `participants` per conv.
-      const unreadMap = new Map<string, number>();
-      await Promise.all(
-        convRows.map(async (row) => {
-          const lastRead = lastReadMap.get(row.id);
-          if (lastRead) {
-            const r = await fetchOne<{ c: string }>(
-              `SELECT COUNT(*)::text AS c
-                 FROM messages
-                WHERE conversation_id = $1
-                  AND sender_id <> $2
-                  AND created_at > $3`,
-              [row.id, userId, lastRead],
-            );
-            unreadMap.set(row.id, parseInt(r?.c || '0', 10));
-          } else {
-            const r = await fetchOne<{ c: string }>(
-              `SELECT COUNT(*)::text AS c
-                 FROM messages
-                WHERE conversation_id = $1
-                  AND sender_id <> $2`,
-              [row.id, userId],
-            );
-            unreadMap.set(row.id, parseInt(r?.c || '0', 10));
-          }
-        }),
+      // FIX #7: Single GROUP BY query replaces N+1 COUNT-per-conversation.
+      const unreadRows = await fetchAll<{ conversation_id: string; unread: string }>(
+        `SELECT m.conversation_id,
+                COUNT(*) FILTER (
+                  WHERE m.sender_id <> $1
+                    AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at)
+                )::text AS unread
+           FROM messages m
+           JOIN participants p
+             ON p.conversation_id = m.conversation_id AND p.user_id = $1
+          WHERE m.conversation_id = ANY($2::uuid[])
+          GROUP BY m.conversation_id`,
+        [userId, convIds],
       );
+      const unreadMap = new Map<string, number>();
+      for (const row of unreadRows) {
+        unreadMap.set(row.conversation_id, parseInt(row.unread || '0', 10));
+      }
 
       // Step 7: assemble response.
       const conversations = convRows.map(row => {

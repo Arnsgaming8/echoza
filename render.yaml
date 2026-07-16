@@ -13,17 +13,14 @@ services:
       - key: PORT
         value: 10000
       - key: JWT_SECRET
-        value: jymFYdxatNLwrl3W2QBZJvn40EhCKH8ckiu5MD1AqsXz6eVoO7bUIgGSTRP9fp
+        value: 5241dcdd4428aad80e4654df780b0171b94e6bfcfb48126b8ae9aad415cccb84
       - key: VAPID_PUBLIC_KEY
         value: BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
-      - key: SUPABASE_URL
-        value: https://cekfrmgiecswlioflmip.supabase.co
-      - key: SUPABASE_SERVICE_ROLE_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNla2ZybWdpZWNzd2xpb2ZsbWlwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4MzQ2ODE3NCwiZXhwIjoyMDk5MDQ0MTc0fQ.8PxvLkHgP6kALNdfP2fZeWuJiN2QCPVEnPVDDUH_5hc
-      - key: SUPABASE_ANON_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNla2ZybWdpZWNzd2xpb2ZsbWlwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM0NjgxNzQsImV4cCI6MjA5OTA0NDE3NH0.7jNMQdBhmkUHqAAMq9d2F0y29E6F9H0CBU0Ui1e--DI
+      # FIX #9: Supabase env vars removed — full cutover to Neon complete.
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_3oIGjm1MDfZr@ep-solitary-violet-at50sbq6-pooler.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: TURN_URL
         value: turn:161.153.65.53:3478
       - key: TURN_USERNAME

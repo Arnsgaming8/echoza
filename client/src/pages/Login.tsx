@@ -90,6 +90,8 @@ export default function Login() {
   // redirect loop if some other path mis-encodes it.
   const [searchParams] = useSearchParams();
   const nextParam = searchParams.get('next');
+  // FIX #22: Preserve URL hash if present. Previously only pathname+search
+  // was encoded, silently dropping any #section fragment.
   const postLoginRedirect = nextParam && !nextParam.startsWith('/login')
     ? nextParam
     : '/dashboard';

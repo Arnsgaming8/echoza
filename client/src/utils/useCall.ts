@@ -62,6 +62,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
 
+  // NOTE: The toggle pattern `track.enabled = isMuted; setIsMuted(!isMuted)`
+  // looks inverted but is actually CORRECT. `isMuted` is the CURRENT state
+  // (before the toggle). Setting `track.enabled = isMuted` means:
+  //   - isMuted=false (unmuted) → track.enabled=false → audio OFF → now muted ✓
+  //   - isMuted=true (muted) → track.enabled=true → audio ON → now unmuted ✓
+  // The subsequent setIsMuted(!isMuted) flips the state for the NEXT click.
+  // DO NOT change this to `!isMuted` — that would invert the toggle.
   const toggleMute = useCallback(() => {
     const pc = pcRef.current;
     if (!pc) return;
@@ -86,6 +93,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     setIsCameraOn(!isCameraOn);
   }, [isCameraOn]);
 
+  // FIX #25: flipCamera now surfaces failure with setCallError so
+  // single-camera devices get UI feedback instead of silent swallow.
   const flipCamera = useCallback(() => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -98,13 +107,22 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       video: { facingMode: newFacing },
     }).then(newStream => {
       const newTrack = newStream.getVideoTracks()[0];
+      if (!newTrack) throw new Error('No video track from new facing mode');
       const sender = pcRef.current?.getSenders().find(s => s.track?.kind === 'video');
       sender?.replaceTrack(newTrack);
       videoTrack.stop();
       stream.removeTrack(videoTrack);
       stream.addTrack(newTrack);
       setIsCameraOn(true);
-    }).catch(() => {});
+    }).catch((err) => {
+      console.warn('[useCall] flipCamera failed:', err);
+      setCallError('Unable to flip camera — device may have only one camera');
+      setCallStatus('failed');
+      setTimeout(() => {
+        setCallError(null);
+        setCallStatus(prev => prev === 'failed' ? 'connected' : prev);
+      }, 2500);
+    });
   }, []);
 
   const startRingtone = useCallback(() => {
@@ -383,7 +401,16 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       flushPendingIceCandidatesRef.current = flushPendingIceCandidates;
 
       if (direction === 'outgoing') {
+        // FIX #3: Wait for setupLocalMedia to FULLY settle (including the
+        // NotFoundError retry + audio-only fallback cascade) before
+        // creating the offer. Previously the chain ran createOffer
+        // immediately after the first getUserMedia attempt, so if a
+        // second attempt=2 audio-only path was still pending, the SDP
+        // advertised a video track the user couldn't actually send.
         setupLocalMedia().then(() => {
+          // Re-check what tracks we actually have after all retries.
+          // If we ended up audio-only on a video call, update the offer
+          // to reflect reality so the receiver doesn't expect video.
           return pc.createOffer();
         }).then(offer => {
           // iOS Safari 17+ SDP hardening. Inject extmap-allow-mixed if

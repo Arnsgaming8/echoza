@@ -17,7 +17,9 @@ if (storedVersion !== STORAGE_VERSION) {
   }
 }
 
-if ('serviceWorker' in navigator) {
+// FIX #21: Only register the service worker in production. In dev mode,
+// SW caching of dev bundles causes stale code on next visit.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
