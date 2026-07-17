@@ -167,7 +167,11 @@ router.post('/delete-account', async (req: Request, res: Response) => {
     res.status(404).json({ error: 'Profile not found' });
     return;
   }
-  if (!profile.password_hash || !comparePassword(password, profile.password_hash)) {
+  // Trim before bcrypt compare so a pasted trailing space doesn't return
+  // a misleading 401 on a correct password. Matches loginUser()'s trim
+  // pre-compare behaviour.
+  const cleanPassword = password.trim();
+  if (!profile.password_hash || !comparePassword(cleanPassword, profile.password_hash)) {
     res.status(401).json({ error: 'Invalid password' });
     return;
   }

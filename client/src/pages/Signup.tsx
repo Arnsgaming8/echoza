@@ -89,7 +89,11 @@ export default function Signup() {
 
   const validateUsername = (val: string) => {
     setUsername(val);
-    if (val && !/^[A-Za-z_]{3,20}$/.test(val)) {
+    // Validate against the trimmed value so a pasted leading/trailing
+    // space doesn't show a red "Must be 3–20 letters" error during typing
+    // even though the submit path will trim and accept the value.
+    const trimmed = val.trim();
+    if (trimmed && !/^[A-Za-z_]{3,20}$/.test(trimmed)) {
       setUsernameError('Must be 3–20 letters');
     } else {
       setUsernameError('');
@@ -98,7 +102,10 @@ export default function Signup() {
 
   const validatePassword = (val: string) => {
     setPassword(val);
-    if (val && val.length < 8) {
+    // Same defence for passwords: validate trimmed length so the red
+    // error disappears as soon as the user has typed 8+ non-whitespace
+    // chars even if surrounding whitespace is present.
+    if (val.trim().length < 8) {
       setPasswordError('Must be at least 8 characters');
     } else {
       setPasswordError('');
@@ -117,12 +124,14 @@ export default function Signup() {
 
     setLoading(true);
     try {
+      // Trim before send so the hash stored under this user_id matches
+      // what we'll later type at sign-in. Server trims defensively too.
       const res = await fetch(
         apiUrl('/api/auth/register'),
         withDeviceHeaders({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username: username.trim(), password: password.trim() }),
         }),
       );
       const data = await res.json();

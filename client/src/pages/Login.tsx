@@ -214,12 +214,15 @@ export default function Login() {
 
     setLoading(true);
     try {
+      // Trim in the request body so the server never has to guess. Server
+      // also trims as defense-in-depth, but trimming client-side gives
+      // instant == what-is-stored semantics when the typo is whitespace.
       const res = await fetch(
         apiUrl('/api/auth/login'),
         withDeviceHeaders({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({ username: username.trim(), password: password.trim() }),
         }),
       );
       const data = await res.json();
@@ -324,7 +327,11 @@ function ForgotPasswordModal({
   const handleVerifyDevice = async (e: React.FormEvent) => {
     e.preventDefault();
     setStepError('');
-    if (!username) {
+    // Trim before the empty-string gate and the POST so a pasted space-
+    // padded username is accepted (server startForgotPassword uses
+    // LOWER(username)=LOWER($1) which doesn't strip whitespace).
+    const cleanUsername = username.trim();
+    if (!cleanUsername) {
       setStepError('Please enter your username.');
       return;
     }
@@ -335,7 +342,7 @@ function ForgotPasswordModal({
         withDeviceHeaders({
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ username }),
+          body: JSON.stringify({ username: cleanUsername }),
         }),
       );
       const data = await res.json();

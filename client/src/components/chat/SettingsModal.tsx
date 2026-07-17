@@ -361,7 +361,11 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     : 'off';
 
   const handleDelete = async () => {
-    if (!password || !confirmed) return;
+    // Trim before the existence gate so an accidentally-trailing-space
+    // password still passes the local check rather than leaving the user
+    // wondering why the Delete button won't enable.
+    const cleanPassword = password.trim();
+    if (!cleanPassword || !confirmed) return;
     setDeleting(true);
     setError('');
 
@@ -373,7 +377,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ password: cleanPassword }),
       });
 
       const data = await res.json();

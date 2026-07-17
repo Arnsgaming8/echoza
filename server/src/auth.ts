@@ -295,6 +295,11 @@ export async function registerUser(
   deviceId?: string,
   userAgent?: string,
 ): Promise<AuthResult> {
+  // Trim leading/trailing whitespace on the incoming password so an
+  // accidental pasted space doesn't silently apply — `loginUser()` and
+  // `comparePassword()` will hash this same trimmed string, so storing
+  // the trimmed form keeps sign-in stable across clients.
+  password = password.trim();
   const nowIso = new Date().toISOString();
   const newId = uuidv4();
   const passwordHash = hashPassword(password);
@@ -338,6 +343,13 @@ export async function loginUser(
   deviceId?: string,
   userAgent?: string,
 ): Promise<AuthResult> {
+  // Trim before credential compare. Pasted passwords and IME auto-space
+  // routinely append a stray space that produces a 401 on a valid login.
+  // Username trim is a no-op for valid usernames (the validation regex
+  // /^[A-Za-z_]{3,20}$/ already disallows spaces) and a harmless safety
+  // net against pasted leading/trailing spaces.
+  username = username.trim();
+  password = password.trim();
   const profile = await fetchOne<{
     id: string;
     username: string;
@@ -583,6 +595,10 @@ export async function completeForgotPassword(
   deviceId: string,
   newPassword: string,
 ): Promise<CompleteForgotPasswordResult> {
+  // Trim BEFORE the length check so "  abc  " is correctly flagged as too
+  // short (3 chars after trim, not 7 with whitespace), AND so the bcrypt
+  // hash we store matches what loginUser() will compare against later.
+  newPassword = newPassword.trim();
   if (newPassword.length < 8) {
     return { ok: false, reason: 'password_too_short' };
   }
