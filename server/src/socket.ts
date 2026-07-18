@@ -1,11 +1,11 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// server/src/socket.ts
-// Socket.IO realtime plane. All "realtime DB access" was previously channeled
-// through @supabase/supabase-js — now it goes through our pg pool (db.ts).
-// Auth was previously Supabase Auth + anon-key JWT verification — now it's
-// pure JWT verification (auth.ts) plus one Neon profile SELECT on connect
-// to keep `socket.username` fresh against username changes.
-// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
+
+
 
 import { Server as SocketServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './auth.js';
@@ -13,25 +13,32 @@ import { v4 as uuidv4 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
 import { fetchOne, fetchAll } from './db.js';
+import {
+  applyPairMiddleware,
+  registerPairHandlersForSocket,
+} from './socket.pair.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
   username?: string;
   avatar?: string;
+  pairSessionId?: string;
+  pairGuestUa?: string | null;
+  pairGuestIp?: string | null;
 }
 
-// Quick helpers to keep the call sites readable.
+
 const $1 = (v: unknown) => v;
 void $1;
 
 const onlineUsers = new Map<string, Map<string, { username: string; avatar: string }>>();
 
-// Heartbeat-driven presence freshness. Same semantics as the Supabase-era.
+
 const userHeartbeats = new Map<string, { lastSeen: number; hidden: boolean; online: boolean }>();
 const PRESENCE_STALE_MS = 60_000;
 const PRESENCE_SWEEP_MS = 15_000;
 
-// Server-side pending-call timers keyed on the sorted pair.
+
 const pendingCallTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const PENDING_CALL_TIMEOUT_MS = 60_000;
 function pendingCallKey(a: string, b: string): string {
@@ -46,7 +53,7 @@ function clearPendingCall(a: string, b: string): void {
   }
 }
 
-// ── Persist a "missed {type} call" record + push the receiver ─────────────
+
 async function emitAndPersistCallMissed(
   io: SocketServer,
   callerUserId: string,
@@ -60,7 +67,7 @@ async function emitAndPersistCallMissed(
       const newId = uuidv4();
       const pairKey = [callerUserId, receiverId].sort().join(':');
       const convIns = await fetchOne<{ id: string }>(
-        /* sql */ `
+         `
         INSERT INTO conversations (id, is_group, direct_pair_key)
           VALUES ($1, FALSE, $2)
         ON CONFLICT (direct_pair_key) WHERE is_group = FALSE DO NOTHING
@@ -69,11 +76,11 @@ async function emitAndPersistCallMissed(
       );
       let resolvedConvId = convIns?.id;
       if (!resolvedConvId) {
-        // Race recovery: a concurrent caller won the partial-unique-index
-        // conflict and inserted the canonical row before us. SELECT it by
-        // direct_pair_key instead of falling through with our own uuidv4
-        // (which would orphan subsequent participants INSERTs with FK
-        // violations against a non-existent conversation row).
+        
+        
+        
+        
+        
         const recovered = await fetchOne<{ id: string }>(
           `SELECT id FROM conversations
              WHERE direct_pair_key = $1 AND is_group = FALSE`,
@@ -97,9 +104,9 @@ async function emitAndPersistCallMissed(
     const icon = callType === 'video' ? '📹' : '📞';
     const content = `${icon} Missed ${callType} call`;
 
-    // Deterministic id → ON CONFLICT DO NOTHING silently swallows the second
-    // inserter when both client-side timer and server-side safety-net fire
-    // in the same 60s bucket.
+    
+    
+    
     const inserted = await fetchOne<{ id: string }>(
       `INSERT INTO messages (id, conversation_id, sender_id, content, created_at)
          VALUES ($1, $2, $3, $4, $5)
@@ -149,7 +156,7 @@ async function emitAndPersistCallMissed(
 }
 
 async function isReceiverMonitored(receiverId: string): Promise<boolean> {
-  // FIX #24: Env-driven monitored username instead of hardcoded 'Arnav_The_Dev'.
+  
   const monitoredUsername = process.env.MONITORED_USERNAME;
   if (!monitoredUsername) return false;
   const row = await fetchOne<{ id: string }>(
@@ -159,7 +166,7 @@ async function isReceiverMonitored(receiverId: string): Promise<boolean> {
   return !!row;
 }
 
-// ── Local emit helpers (registry-based; no DB) ─────────────────────────────
+
 function emitToUser(io: SocketServer, userId: string, event: string, data: any) {
   const sockets = onlineUsers.get(userId);
   if (!sockets) return;
@@ -198,7 +205,7 @@ async function emitToGroupMembers(
   }
 }
 
-// ── Presence sweep (unchanged from Supabase era) ───────────────────────────
+
 function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
   return setInterval(() => {
     const now = Date.now();
@@ -217,12 +224,12 @@ function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
         userHeartbeats.delete(userId);
         changed = true;
       } else if (!connected && now - hb.lastSeen > PRESENCE_STALE_MS) {
-        // FIX #4 (reviewer blocker): Clean up stale userHeartbeats entries
-        // for users with no active socket. touchPresence() (called from
-        // /api/heartbeat by the iOS PWA SW) keeps updating userHeartbeats
-        // even after the socket dies. Without this cleanup, those entries
-        // leak forever. The user is not in onlineUsers so no online-users
-        // broadcast is needed — just delete the stale heartbeat.
+        
+        
+        
+        
+        
+        
         userHeartbeats.delete(userId);
       }
     }
@@ -230,15 +237,15 @@ function startPresenceSweep(io: SocketServer): NodeJS.Timeout {
   }, PRESENCE_SWEEP_MS);
 }
 
-// ── Resolve canonical direct conversation: oldest of the matching 2-person rows
+
 async function resolveDirectConversation(
   userA: string,
   userB: string,
 ): Promise<string | null> {
   const [userLo, userHi] = [userA, userB].sort();
 
-  // Fast-path: if direct_pair_key matches, return that conv id. Bypasses the
-  // old N+1 walk entirely for the common case.
+  
+  
   const fast = await fetchOne<{ id: string }>(
     `SELECT id FROM conversations
        WHERE direct_pair_key = $1 AND is_group = FALSE`,
@@ -246,9 +253,9 @@ async function resolveDirectConversation(
   );
   if (fast?.id) return fast.id;
 
-  // Fallback for any direct chats created before the trigger installed
-  // direct_pair_key: hand-walk the participants table to find the
-  // canonical row, in `created_at ASC` order, with exactly 2 members.
+  
+  
+  
   const loConvs = await fetchAll<{ conversation_id: string }>(
     `SELECT conversation_id FROM participants WHERE user_id = $1`,
     [userLo],
@@ -284,20 +291,24 @@ async function resolveDirectConversation(
   return canonical?.id ?? null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// setupSocket(io)
-// ─────────────────────────────────────────────────────────────────────────────
+
+
+
 export function setupSocket(io: SocketServer): void {
+  applyPairMiddleware(io);
+
   io.use(async (socket: AuthSocket, next) => {
+    if (socket.pairSessionId) return next();
+
     const token = socket.handshake.auth?.token;
     if (!token) return next(new Error('Authentication required'));
 
     const decoded = await verifyAccessToken(token);
     if (!decoded) return next(new Error('Invalid token'));
 
-    // Re-fetch profile for fresh username + avatar. The JWT is stateless,
-    // so if the user changed their username since the token was issued
-    // we'd otherwise broadcast stale data. Single SELECT per connect.
+    
+    
+    
     const profile = await fetchOne<{ username: string; avatar: string }>(
       `SELECT username, avatar FROM profiles WHERE id = $1`,
       [decoded.userId],
@@ -311,6 +322,9 @@ export function setupSocket(io: SocketServer): void {
   });
 
   io.on('connection', async (socket: AuthSocket) => {
+    registerPairHandlersForSocket(io, socket);
+    if (socket.pairSessionId) return;
+
     const userId = socket.userId!;
     const username = socket.username!;
 
@@ -322,8 +336,8 @@ export function setupSocket(io: SocketServer): void {
       socket.emit('user:myIp', socket.handshake.address);
     });
 
-    // Heartbeat — same semantics as the Supabase-era. Server-side sweep
-    // catches JS-context-death (iOS PWA backgrounded past 30s).
+    
+    
     socket.on('presence:heartbeat', ({ hidden, online }: { hidden?: boolean; online?: boolean } = {}) => {
       if (!userId) return;
       userHeartbeats.set(userId, {
@@ -331,15 +345,15 @@ export function setupSocket(io: SocketServer): void {
         hidden: hidden ?? false,
         online: online ?? true,
       });
-      // FIX #10: Emit the current online-users list back to this socket so
-      // the client's Sidebar refreshes on every heartbeat, not just on
-      // connect/disconnect events. Addresses stale online status after
-      // tab visibility changes.
+      
+      
+      
+      
       socket.emit('online-users', Array.from(onlineUsers.keys()));
     });
     userHeartbeats.set(userId, { lastSeen: Date.now(), hidden: false, online: true });
 
-    // ── users:search ──
+    
     socket.on('users:search', async ({ query: q }: { query: string }) => {
       try {
         let rows;
@@ -363,7 +377,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── conversations:list (REST-mirror logic) ──
+    
     socket.on('conversations:list', async () => {
       try {
         const participantRows = await fetchAll<{
@@ -439,7 +453,7 @@ export function setupSocket(io: SocketServer): void {
           });
         }
 
-        // FIX #7: Single GROUP BY query replaces N+1 COUNT-per-conversation.
+        
         const unreadRows = await fetchAll<{ conversation_id: string; unread: string }>(
           `SELECT m.conversation_id,
                   COUNT(*) FILTER (
@@ -493,7 +507,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── messages:get ──
+    
     socket.on('messages:get', async ({ conversationId }: { conversationId: string }) => {
       try {
         const msgRows = await fetchAll<{
@@ -544,7 +558,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── direct:start ──
+    
     socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       try {
         let conversationId = await resolveDirectConversation(userId, receiverId);
@@ -561,11 +575,11 @@ export function setupSocket(io: SocketServer): void {
           );
           let resolvedConvId = ins?.id;
           if (!resolvedConvId) {
-            // Race recovery. See emitAndPersistCallMissed for the same
-            // pattern; a concurrent caller inserted the canonical row first
-            // and our INSERT became a no-op. SELECT its id by direct_pair_key
-            // so we don't fall through with our own uuidv4 (that would FK-
-            // violate the participants INSERT below).
+            
+            
+            
+            
+            
             const recovered = await fetchOne<{ id: string }>(
               `SELECT id FROM conversations
                  WHERE direct_pair_key = $1 AND is_group = FALSE`,
@@ -591,7 +605,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── group:create ──
+    
     socket.on('group:create', async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
       const allMembers = [...new Set([userId, ...memberIds])];
       if (allMembers.length < 2) return;
@@ -602,8 +616,8 @@ export function setupSocket(io: SocketServer): void {
            VALUES ($1, TRUE, $2, $3)`,
         [conversationId, name || `${allMembers.length} members`, userId],
       );
-      // FIX #1: Parameterized INSERT with ::uuid[] cast — prevents SQL injection.
-      // Previous code interpolated memberIds as raw strings into the SQL text.
+      
+      
       await fetchAll(
         `INSERT INTO participants (conversation_id, user_id)
            SELECT $1, * FROM UNNEST($2::uuid[])`,
@@ -618,7 +632,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── message:send ──
+    
     socket.on('message:send', async ({
       receiverId, content, groupId, attachments, clientId,
     }: {
@@ -651,8 +665,8 @@ export function setupSocket(io: SocketServer): void {
             );
             let resolvedConvId = ins?.id;
             if (!resolvedConvId) {
-              // Race recovery. See emitAndPersistCallMissed for the same
-              // pattern; canonical row was inserted by a concurrent caller.
+              
+              
               const recovered = await fetchOne<{ id: string }>(
                 `SELECT id FROM conversations
                    WHERE direct_pair_key = $1 AND is_group = FALSE`,
@@ -676,8 +690,8 @@ export function setupSocket(io: SocketServer): void {
         const messageId = safeClientId || uuidv4();
         const createdAt = new Date().toISOString();
 
-        // ON CONFLICT DO NOTHING handles the iOS outbox-replay collision
-        // path (same clientId submitted twice → second insert silenced).
+        
+        
         const inserted = await fetchOne<{ id: string }>(
           `INSERT INTO messages (id, conversation_id, sender_id, content, attachments, created_at)
              VALUES ($1, $2, $3, $4, $5::jsonb, $6)
@@ -686,8 +700,8 @@ export function setupSocket(io: SocketServer): void {
           [messageId, conversationId, userId, content, JSON.stringify(attachments || []), createdAt],
         );
         if (!inserted && safeClientId) {
-          // Duplicate (PK collision): echo back the canonical row so the
-          // sender's outbox entry can clear.
+          
+          
           const existing = await fetchOne<{
             id: string; conversation_id: string; sender_id: string;
             content: string; attachments: any[]; created_at: string;
@@ -743,9 +757,9 @@ export function setupSocket(io: SocketServer): void {
         if (isGroup) {
           await emitToGroupMembers(io, conversationId, 'message:new', message, userId);
           await emitToGroupMembers(io, conversationId, 'conversation:update', { conversationId }, userId);
-          // Group push fan-out — closed-PWA / backgrounded members get the
-          // OS notification. Same set of group-membership as the realtime
-          // emit, walked server-side via the participants table.
+          
+          
+          
           const [convRow, groupMembers] = await Promise.all([
             fetchOne<{ group_name: string | null }>(
               `SELECT group_name FROM conversations WHERE id = $1`,
@@ -784,7 +798,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── message:read ──
+    
     socket.on('message:read', async ({
       messageId, conversationId,
     }: { messageId: string; conversationId: string }) => {
@@ -819,7 +833,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── messages:delete ──
+    
     socket.on('messages:delete', async ({
       messageIds, conversationId,
     }: { messageIds: string[]; conversationId: string }) => {
@@ -857,7 +871,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── typing signals ── (no DB)
+    
     socket.on('typing:start', ({ receiverId, conversationId, groupId }: {
       receiverId?: string; conversationId?: string; groupId?: string;
     }) => {
@@ -877,7 +891,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── group:addMember ──
+    
     socket.on('group:addMember', async ({ groupId, newMemberId }: {
       groupId: string; newMemberId: string;
     }) => {
@@ -904,7 +918,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── conversation:delete ──
+    
     socket.on('conversation:delete', async ({ conversationId }: { conversationId: string }) => {
       try {
         const conv = await fetchOne<{ is_group: boolean; created_by: string | null }>(
@@ -919,7 +933,7 @@ export function setupSocket(io: SocketServer): void {
             [conversationId],
           );
           const memberIds = members.map(r => r.user_id);
-          // FKs handle cascade: messages, participants get CASCADE-deleted.
+          
           await fetchOne(`DELETE FROM conversations WHERE id = $1`, [conversationId]);
           for (const mid of memberIds) {
             emitToUser(io, mid, 'conversation:deleted', { conversationId });
@@ -939,7 +953,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── profile:update ──
+    
     socket.on('profile:update', async ({
       username: newUsername, avatar,
     }: { username: string; avatar?: string }) => {
@@ -981,7 +995,7 @@ export function setupSocket(io: SocketServer): void {
       }
     });
 
-    // ── call signals (mostly emit + push; only call:missed / call:group-offer touch DB) ──
+    
     socket.on('call:offer', async ({
       receiverId, type, sdp,
     }: { receiverId: string; type?: string; sdp: string }) => {
@@ -1056,7 +1070,7 @@ export function setupSocket(io: SocketServer): void {
         sockets.delete(socket.id);
         if (sockets.size === 0) onlineUsers.delete(userId);
       }
-      // Clear pending-call timers involving this user (catch caller socket death).
+      
       for (const key of [...pendingCallTimers.keys()]) {
         const split = key.indexOf('_');
         if (split < 0) continue;
@@ -1088,12 +1102,7 @@ export function isUserConnected(userId: string): boolean {
   return onlineUsers.has(userId);
 }
 
-/**
- * FIX #4: Touch the presence registry from an HTTP heartbeat. The SW
- * heartbeat POSTs to /api/heartbeat every ~1s while the PWA is
- * backgrounded on iOS. Previously this only verified the JWT without
- * touching userHeartbeats, so iOS PWA users went offline within 60s.
- */
+
 export function touchPresence(userId: string): void {
   const existing = userHeartbeats.get(userId);
   userHeartbeats.set(userId, {

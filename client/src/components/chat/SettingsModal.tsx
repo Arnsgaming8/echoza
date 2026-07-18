@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Avatar, Button, PasswordInput } from '../common';
-import { FiX, FiAlertTriangle, FiTrash2, FiBell, FiBellOff } from 'react-icons/fi';
+import { FiX, FiAlertTriangle, FiTrash2, FiBell, FiBellOff, FiSmartphone } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiUrl } from '../../utils/api';
 import { isIOS, isIOSStandalone, canIOSReceivePush } from '../../utils/iosCapability';
+import PairingHost from '../pair/PairingHost';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -253,9 +254,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
 
-  // Notification state. We re-read permission + push subscription state
-  // every time the modal opens or the user clicks "Enable" / "Test push" so
-  // the UI reflects reality without manual page refresh.
+  
+  
+  
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
     if (typeof Notification === 'undefined') return 'unsupported';
     return Notification.permission;
@@ -263,6 +264,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [subscribed, setSubscribed] = useState(false);
   const [notifBusy, setNotifBusy] = useState(false);
   const [notifMsg, setNotifMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+
+  const [showPairing, setShowPairing] = useState(false);
 
   const refreshNotifState = async () => {
     if (typeof Notification === 'undefined') {
@@ -305,15 +308,15 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       const perm = await Notification.requestPermission();
       setPermission(perm);
       if (perm === 'granted') {
-        // Tell Dashboard to re-run the subscribe pipeline (it's listening
-        // for this exact event). Without it, the subscribe effect only
-        // re-runs on user.id change, login, or appinstalled — not on a
-        // permission grant that happened AFTER mount.
+        
+        
+        
+        
         window.dispatchEvent(new Event('echoza:enable-push'));
-        // Wait briefly so Dashboard's async subscribe (fetch VAPID +
-        // pushManager.subscribe) can finish before we re-read state.
-        // Without this delay, the modal briefly shows the "On" badge
-        // while `subscribed` is still false.
+        
+        
+        
+        
         await new Promise(resolve => setTimeout(resolve, 600));
         await refreshNotifState();
         setNotifMsg({ kind: 'ok', text: 'Notifications enabled. Use “Send test push” to confirm.' });
@@ -361,9 +364,9 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     : 'off';
 
   const handleDelete = async () => {
-    // Trim before the existence gate so an accidentally-trailing-space
-    // password still passes the local check rather than leaving the user
-    // wondering why the Delete button won't enable.
+    
+    
+    
     const cleanPassword = password.trim();
     if (!cleanPassword || !confirmed) return;
     setDeleting(true);
@@ -502,6 +505,23 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
             )}
           </Section>
 
+          <Section>
+            <SectionTitle>
+              <FiSmartphone style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              Log In Any Other Device
+            </SectionTitle>
+            <SectionDesc>
+              Pair a new phone, tablet, or laptop. The new device will get full access to your Echoza account — same conversations, contacts, and message history.
+            </SectionDesc>
+            <Button
+              variant="primary"
+              onClick={() => setShowPairing(true)}
+              fullWidth
+            >
+              <FiSmartphone /> Start Device Log In
+            </Button>
+          </Section>
+
           {step === 'initial' ? (
             <Section>
               <SectionTitle>Account</SectionTitle>
@@ -572,6 +592,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
           </Footer>
         )}
       </Modal>
+      {showPairing && <PairingHost onClose={() => setShowPairing(false)} />}
     </Overlay>
   );
 }

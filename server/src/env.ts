@@ -1,10 +1,3 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// env.ts
-// Centralized env validation. Fail-fast on a missing required var at boot
-// (instead of complaining at first request). Keeps Render env-var changes
-// explicit and documented in one place.
-// ─────────────────────────────────────────────────────────────────────────────
-
 function required(name: string): string {
   const v = process.env[name];
   if (!v || v.trim().length === 0) {
@@ -29,38 +22,29 @@ function intWithDefault(name: string, defaultMs: number): number {
 }
 
 export const env = {
-  // ── Required ────────────────────────────────────────────────────────────
   DATABASE_URL: required('DATABASE_URL'),
   JWT_SECRET: required('JWT_SECRET'),
 
-  // ── Required for password-auth sign-in, but only because /me/something
-  //    uses it; /api/health/DbStatus endpoints don't. Listed first so the
-  //    error message is the most actionable for a fresh deploy. ────────
   PORT: intWithDefault('PORT', 3001),
 
-  // ── Token lifetimes ─────────────────────────────────────────────────────
-  ACCESS_TOKEN_TTL_MS: intWithDefault('ACCESS_TOKEN_TTL_MS', 15 * 60 * 1000), // 15m
+  ACCESS_TOKEN_TTL_MS: intWithDefault('ACCESS_TOKEN_TTL_MS', 15 * 60 * 1000),
   REFRESH_TOKEN_TTL_MS: intWithDefault(
     'REFRESH_TOKEN_TTL_MS',
-    365 * 24 * 60 * 60 * 1000, // 1y soft cap: users stay signed in (no auto-logout),
-                              // stolen refresh tokens still expire eventually
+    365 * 24 * 60 * 60 * 1000,
   ),
 
-  // ── Existing app env (passthrough) ──────────────────────────────────────
   RENDER_EXTERNAL_URL: optionalString('RENDER_EXTERNAL_URL'),
+  PAIR_BASE_URL: optionalString('PAIR_BASE_URL'),
   VAPID_PUBLIC_KEY: optionalString('VAPID_PUBLIC_KEY'),
   VAPID_PRIVATE_KEY: optionalString('VAPID_PRIVATE_KEY'),
   TURN_URL: optionalString('TURN_URL'),
   TURN_USERNAME: optionalString('TURN_USERNAME'),
   TURN_CREDENTIAL: optionalString('TURN_CREDENTIAL'),
   TURN_TLS_URL: optionalString('TURN_TLS_URL'),
-  // FIX #24: Env-driven monitored username for Discord notifications.
-  // Previously hardcoded to 'Arnav_The_Dev' in socket.ts.
+
   MONITORED_USERNAME: optionalString('MONITORED_USERNAME'),
 };
 
-// One-shot diagnostic at boot so ops can see exactly what was loaded (sans
-// secrets). Kept at the bottom so module import has fully populated `env`.
 export function logEnvSanity(): void {
   const ok: string[] = [];
   const missing: string[] = [];
@@ -77,7 +61,7 @@ export function logEnvSanity(): void {
   ] as const) {
     if (env[k]) set.push(k);
   }
-  /* suppress unused-var lint warning */
+
   void ok;
   void missing;
   console.log('[env] required OK; optional set:', set.join(', ') || 'none');

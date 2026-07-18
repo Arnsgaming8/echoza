@@ -1,9 +1,9 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// server/src/index.ts
-// Boot Express + Socket.IO on Neon-only data + self-hosted JWT auth.
-// No more @supabase/supabase-js; all data access goes through db.ts
-// (pg.Pool) and all auth through auth.ts (bcryptjs + JWT).
-// ─────────────────────────────────────────────────────────────────────────────
+
+
+
+
+
+
 
 import express from 'express';
 import { createServer } from 'http';
@@ -19,6 +19,7 @@ import { env, logEnvSanity } from './env.js';
 import { pingDb, fetchOne, fetchAll } from './db.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, touchPresence } from './socket.js';
+import { startPairSessionSweeper } from './socket.pair.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -27,9 +28,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function main() {
   logEnvSanity();
-  // Fail-fast on a bad DATABASE_URL. pingDb() opens one connection from
-  // the pool. Throws on misconfig so the server never "boots and serves
-  // 500 forever".
+  
+  
+  
   await pingDb();
   console.log('[db] ping OK — Neon connection pool ready.');
 
@@ -46,16 +47,16 @@ async function main() {
   app.use('/api/users', userRoutes);
   app.use('/api/push', pushRoutes);
 
-  // ── /api/health ────────────────────────────────────────────────────────
+  
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });
   });
 
-  // ── /api/db-status ─────────────────────────────────────────────────────
-  // SELECT 1 ping. Used by DbPausedOverlay.tsx on the client. Returns
-  // 'ok' on success, 'paused' on connection failure or transaction
-  // rollback so the legacy overlay still gets a sensible signal during
-  // any temporary Neon unavailability.
+  
+  
+  
+  
+  
   app.get('/api/db-status', async (_req, res) => {
     try {
       await pingDb();
@@ -73,9 +74,9 @@ async function main() {
     }
   });
 
-  // ── /api/debug-db ──────────────────────────────────────────────────────
-  // Diagnostic only. Kept for parity with the Supabase-era version but the
-  // info-shape is now Postgres-oriented (server-version, table sizes).
+  
+  
+  
   app.get('/api/debug-db', async (_req, res) => {
     try {
       const version = await fetchOne<{ server_version: string }>(`SHOW server_version`);
@@ -100,14 +101,14 @@ async function main() {
     }
   });
 
-  // ── /api/test-discord ──────────────────────────────────────────────────
+  
   app.get('/api/test-discord', async (_req, res) => {
     await sendDiscordNotification('Test from Echoza server');
     res.json({ sent: true });
   });
 
-  // ── /api/heartbeat ──────────────────────────────────────────────────────
-  // JWT-decode only. No DB hit. Returns ok if the access token verifies.
+  
+  
   app.post('/api/heartbeat', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -119,17 +120,17 @@ async function main() {
       res.status(401).json({ error: 'Invalid token' });
       return;
     }
-    // FIX #4: Touch the socket presence registry so iOS PWA SW heartbeats
-    // keep the user marked online. Previously /api/heartbeat was JWT-verify-
-    // only and did NOT update userHeartbeats, so iOS PWA users went offline
-    // within 60s of backgrounding (JS context suspended, no socket heartbeats).
+    
+    
+    
+    
     touchPresence(decoded.userId);
     res.json({ ok: true });
   });
 
-  // ── /api/conversations ──────────────────────────────────────────────────
-  // REST mirror of the socket-side `conversations:list` handler. Kept in
-  // sync intentionally — both call the same SQL patterns.
+  
+  
+  
   app.get('/api/conversations', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -144,7 +145,7 @@ async function main() {
     const userId = decoded.userId;
 
     try {
-      // Step 1: conversations the user is in + last_read marker.
+      
       const participantRows = await fetchAll<{
         conversation_id: string;
         last_read_at: string | null;
@@ -161,7 +162,7 @@ async function main() {
         participantRows.map(p => [p.conversation_id, p.last_read_at]),
       );
 
-      // Step 2: conversation rows.
+      
       const convRows = await fetchAll<{
         id: string;
         is_group: boolean;
@@ -183,7 +184,7 @@ async function main() {
         return;
       }
 
-      // Step 3: all participants (single query for all conversations).
+      
       const allParticipants = await fetchAll<{
         conversation_id: string;
         user_id: string;
@@ -192,7 +193,7 @@ async function main() {
         [convIds],
       );
 
-      // Step 4: all referenced profiles.
+      
       const allUserIds = [...new Set(allParticipants.map(p => p.user_id))];
       const allProfiles = allUserIds.length
         ? await fetchAll<{ id: string; username: string; avatar: string }>(
@@ -202,7 +203,7 @@ async function main() {
         : [];
       const profileMap = new Map(allProfiles.map(p => [p.id, p]));
 
-      // Step 5: per-conversation participant list.
+      
       const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
       for (const p of allParticipants) {
         if (!participantMap.has(p.conversation_id)) {
@@ -216,7 +217,7 @@ async function main() {
         });
       }
 
-      // FIX #7: Single GROUP BY query replaces N+1 COUNT-per-conversation.
+      
       const unreadRows = await fetchAll<{ conversation_id: string; unread: string }>(
         `SELECT m.conversation_id,
                 COUNT(*) FILTER (
@@ -235,7 +236,7 @@ async function main() {
         unreadMap.set(row.conversation_id, parseInt(row.unread || '0', 10));
       }
 
-      // Step 7: assemble response.
+      
       const conversations = convRows.map(row => {
         const members = participantMap.get(row.id) || [];
         const otherParticipants = members.filter(m => m.id !== userId);
@@ -269,8 +270,8 @@ async function main() {
     }
   });
 
-  // ── /api/ice-config + /api/debug/ice-test ───────────────────────────────
-  // Unchanged from the Supabase era.
+  
+  
   app.get('/api/ice-config', (_req, res) => {
     const turnUrl = env.TURN_URL;
     const turnUsername = env.TURN_USERNAME;
@@ -344,7 +345,7 @@ async function runTest(relayOnly=false){
 </script></body></html>`);
   });
 
-  // ── Static client + SPA fallback ────────────────────────────────────────
+  
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
     app.use(express.static(clientDist, { maxAge: '1y', immutable: true, index: false }));
@@ -359,12 +360,13 @@ async function runTest(relayOnly=false){
 
   setupSocket(io);
   startPresenceSweeper(io);
+  startPairSessionSweeper();
 
   httpServer.listen(env.PORT, () => {
     console.log(`Echoza server running on port ${env.PORT}`);
     const baseUrl = env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT}`;
-    // Render free tier spins down on 15 min idle — keep-alive ping is the
-    // canonical workaround. Same as before.
+    
+    
     setInterval(async () => {
       try {
         const r = await fetch(`${baseUrl}/api/health`);

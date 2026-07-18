@@ -6,6 +6,7 @@ import Landing from './pages/Landing';
 import Signup from './pages/Signup';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import Pair from './pages/Pair';
 import LoadingScreen from './components/LoadingScreen';
 import DbPausedOverlay from './components/DbPausedOverlay';
 import { ReactNode } from 'react';
@@ -14,12 +15,12 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   const location = useLocation();
   if (!isAuthenticated) {
-    // Preserve the deep-link query/URL through login. Without this, a
-    // closed-PWA notification tap with `?conv=ID` is silently dropped
-    // on token expiry — the user lands on /login, signs in, and gets
-    // /dashboard with no chat selected, defeating the entire
-    // closed-PWA push UX. The Login page reads `?next=` and navigates
-    // back here after successful auth.
+    
+    
+    
+    
+    
+    
     const next = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?next=${next}`} replace />;
   }
