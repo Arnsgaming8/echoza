@@ -15,20 +15,20 @@ import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
-// useRealtimeChat was removed in the websocket-consolidation refactor.
-// Live DB deltas are delivered via Socket.IO events instead of
-// Supabase Realtime `postgres_changes`. The replacement effect lives
-// further down in this file under the "Realtime → Socket.IO events"
-// comment block.
+
+
+
+
+
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
 import { canMakeWebRTCCall, canIOSReceivePush } from '../utils/iosCapability';
 
-// crypto.randomUUID is supported on iOS Safari 16.4+ and every modern
-// desktop browser, so we don't need the `uuid` npm package here. The
-// iOS-PWA install requirement is 16.4+ (for Web Push) so this floor is
-// already guaranteed.
+
+
+
+
 function newClientId(): string {
   return (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     ? crypto.randomUUID()
@@ -206,12 +206,7 @@ const Footer = styled.footer`
   z-index: 5;
 `;
 
-/**
- * Dedupes a conversation list. Direct conversations are keyed by their
- * contact.id (the actual other user), groups by their id. Removes
- * historical duplicates produced by a TOCTOU race in the server's
- * resolveDirectConversation (now also made deterministic on the server).
- */
+
 function dedupeConversations(list: any[]): Conversation[] {
   if (!Array.isArray(list)) return [];
   const seen = new Set<string>();
@@ -286,7 +281,7 @@ export default function Dashboard() {
 
   const notify = useCallback((title: string, body: string, tag?: string, data?: any) => {
     const opts = { body, icon: '/vite.svg', tag, data: data || {} };
-    // SW postMessage (works on iOS PWA + desktop once SW is active)
+    
     if (navigator.serviceWorker.controller) {
       navigator.serviceWorker.controller.postMessage({ type: 'show-notification', title, ...opts });
     } else if ('serviceWorker' in navigator) {
@@ -298,57 +293,57 @@ export default function Dashboard() {
         }
       });
     }
-    // Desktop Notification API — only if already granted
+    
     if ('Notification' in window && Notification.permission === 'granted') {
       try { new Notification(title, opts); } catch {}
     }
   }, []);
 
-  // ── Push subscription ──────────────────────────────────────────────────
-  // Push subscribe is gated by THREE things, all of which must be true:
-  //   1. The user is logged in (we have a token + userId to bind the
-  //      subscription to server-side).
-  //   2. canIOSReceivePush() returns true — iOS Safari strictly requires
-  //      a home-screen PWA install before pushManager.subscribe() will
-  //      stop throwing NotAllowedError. We gate on this rather than
-  //      letting the silent throw happen 13+ times per page load as
-  //      before.
-  //   3. Notification.permission === 'granted'. iOS requires a
-  //      USER-INITIATED GESTURE to call requestPermission() — auto-
-  //      requesting on mount is silently denied by Safari. Settings now
-  //      exposes an "Enable Notifications" button which fires
-  //      window 'echoza:enable-push', which bumps subscribeNonce below
-  //      and triggers permission request from a real click handler.
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   const [subscribeNonce, setSubscribeNonce] = useState(0);
 
   useEffect(() => {
     if (!user?.id) return;
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
     if (!canIOSReceivePush()) return;
-    // If permission isn't granted, the Settings "Enable Notifications"
-    // button is the only path to a granted state on iOS (and the same
-    // UX is clearer on desktop too — silent permission prompts are
-    // hostile). Bail and wait for the user-initiated subscribe.
+    
+    
+    
+    
     if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return;
 
-    // Snapshot the userId at effect entry. After the async work completes
-    // (fetch VAPID + pushManager.subscribe can take 100s of ms on iOS),
-    // we verify the snapshot's userId still matches the active user
-    // before POSTing. Without this guard, a fast login→logout→login
-    // could fire the subscribe effect for user A, then a user-switch
-    // bumps subscribeNonce while we're mid-flight, and the POST would
-    // bind B's new push subscription to A's old JWT (server 401s, the
-    // subscription stays orphaned in the browser).
+    
+    
+    
+    
+    
+    
+    
+    
     const snapshotUserId = user.id;
 
     let cancelled = false;
     (async () => {
       try {
-        // 1. Fetch VAPID public key from server (single source of truth,
-        //    not hardcoded — protects against client/server key drift, which
-        //    was a known iOS silent-failure mode: subscribe() succeeds in
-        //    browser, webpush.sendNotification() rejects with BadJwt on the
-        //    server, and the user never sees a notification).
+        
+        
+        
+        
+        
         const vapidRes = await fetch(apiUrl('/api/push/vapid-public-key'));
         if (!vapidRes.ok || cancelled) return;
         const { publicKey } = await vapidRes.json();
@@ -366,10 +361,10 @@ export default function Dashboard() {
           return;
         }
 
-        // Verify the user/subscription pair is still coherent. If user.id
-        // swapped while we were awaiting the SW, abandon — the new user
-        // will trigger their own subscribe cycle on the next login or
-        // enable-push event.
+        
+        
+        
+        
         const freshToken = localStorage.getItem('echoza-token');
         const freshUserId = userRef.current?.id ?? null;
         if (freshUserId !== snapshotUserId || !freshToken) {
@@ -385,9 +380,19 @@ export default function Dashboard() {
           },
           body: JSON.stringify(sub.toJSON()),
         });
-        if (r.ok) console.log('Push subscribed'); else console.warn('Push subscribe POST failed:', r.status);
+        if (r.ok) {
+          const data = await r.json().catch(() => null);
+          if (data && data.success === true) {
+            console.log('Push subscribed');
+          } else {
+            console.error('Push subscribe POST reported failure:', r.status, data);
+          }
+        } else {
+          const errBody = await r.text().catch(() => '');
+          console.error('Push subscribe POST failed:', r.status, errBody);
+        }
       } catch (err) {
-        if (!cancelled) console.warn('Push subscribe failed:', err);
+        if (!cancelled) console.error('Push subscribe error:', err);
       }
     })();
 
@@ -395,44 +400,44 @@ export default function Dashboard() {
   }, [user?.id, subscribeNonce]);
 
   useEffect(() => {
-    // PWA install complete → re-run subscribe flow. On iOS this is when
-    // the user has just installed Echoza from Safari to the home screen
-    // and re-opens it. The endpoint may have changed because iOS only
-    // returns a real endpoint AFTER install.
+    
+    
+    
+    
     const onAppInstalled = () => setSubscribeNonce(n => n + 1);
     window.addEventListener('appinstalled', onAppInstalled);
     return () => window.removeEventListener('appinstalled', onAppInstalled);
   }, []);
 
   useEffect(() => {
-    // Settings "Enable Notifications" button dispatches this event after
-    // the user has just clicked through Safari's permission dialog.
-    // Bumping subscribeNonce forces the subscribe effect above to
-    // re-run with the now-granted permission state.
+    
+    
+    
+    
     const onEnablePush = () => setSubscribeNonce(n => n + 1);
     window.addEventListener('echoza:enable-push', onEnablePush);
     return () => window.removeEventListener('echoza:enable-push', onEnablePush);
   }, []);
 
   useEffect(() => {
-    // SW controller replaced (browser updated the SW after a deploy) —
-    // re-subscribe under the new controller so the push endpoint stays
-    // bound to the active SW.
+    
+    
+    
     const handleSwUpdate = () => setSubscribeNonce(n => n + 1);
     navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
   }, []);
 
   useEffect(() => {
-    // SW → client messaging. Dashboard uses this to receive notification
-    // actions (e.g. when the user taps a notification, the SW opens/focuses
-    // Echoza and tells us which conversation to navigate to or whether the
-    // tap was an incoming call). The `incoming-call` case is a no-op
-    // because sw.js's push handler already showed the OS notification;
-    // re-firing `notify(...)` here would tag-collision-replace it.
-    // NOTE: `controllerchange` re-subscribe is handled in its OWN useEffect
-    // above (bumps subscribeNonce). Deliberately NOT duplicated here to
-    // avoid two listener registrations for the same event.
+    
+    
+    
+    
+    
+    
+    
+    
+    
     const handleSwMessage = (event: MessageEvent) => {
       if (!event.data) return;
       if (event.data.type === 'navigate-conversation') {
@@ -451,39 +456,39 @@ export default function Dashboard() {
     };
   }, []);
 
-  // Deep-link parser for closed-PWA notification taps. When the iOS PWA
-  // is fully closed and the user taps the OS banner, the SW's
-  // `notificationclick` calls `clients.openWindow('/dashboard?conv=...')`,
-  // iOS opens the PWA at that URL, and we land here with a populated
-  // query string. After conversations arrive over the socket we want
-  // to auto-select that thread so the user lands on the right chat —
-  // not on an empty sidebar.
+  
+  
+  
+  
+  
+  
+  
   const deepLinkHandledRef = useRef(false);
   useEffect(() => {
     if (deepLinkHandledRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const deepLinkConvId = params.get('conv');
-    // No deep-link param? Mark handled so this effect stops re-running
-    // on every `conversations` update.
+    
+    
     if (!deepLinkConvId) {
       deepLinkHandledRef.current = true;
       return;
     }
-    // Wait for the conversations list to be populated before resolving
-    // — `find` against an empty array on first render would silently miss.
+    
+    
     if (conversations.length === 0) return;
     const conv = conversations.find(c => c.id === deepLinkConvId);
     if (!conv) {
-      // Conversation the push referenced doesn't exist on this device
-      // (different account, deleted, etc.) — still strip the param so
-      // reloads don't keep retrying.
+      
+      
+      
       window.history.replaceState({}, '', '/dashboard');
       deepLinkHandledRef.current = true;
       return;
     }
     handleSelectChatRef.current(deepLinkConvId, conv);
-    // Strip the query so reloading the page doesn't re-latch onto the
-    // deep-linked conversation (user navigated away after, for example).
+    
+    
     window.history.replaceState({}, '', '/dashboard');
     deepLinkHandledRef.current = true;
   }, [conversations]);
@@ -512,20 +517,20 @@ export default function Dashboard() {
     }, 50);
   }, []);
 
-  // FIX #16: Removed the one-time getUserMedia prompt at mount. It was
-  // hostile UX — firing both audio + video permission dialogs on first
-  // paint before the user even opened Settings or initiated a call.
-  // Permissions are now requested naturally when the user starts a call
-  // (useCall.ts setupLocalMedia), which is a user-initiated gesture and
-  // the correct context for Safari/iOS permission prompts.
+  
+  
+  
+  
+  
+  
 
-  // ── Pre-warm ICE config so call setup is instant ─────────────────────────
-  // useCall.ts reads `window._echozaIce` synchronously and uses it as the
-  // first-choice RTCConfiguration. Without this, every outgoing call pays
-  // the 100–500 ms round-trip to /api/ice-config before socket.emit fires,
-  // which surfaced as a noticeable delay before the receiver's phone rings.
-  // Cache shape is { iceServers, fetchedAt } so useCall.ts can transparently
-  // re-fetch when credentials rotate server-side.
+  
+  
+  
+  
+  
+  
+  
   useEffect(() => {
     fetch(apiUrl('/api/ice-config'))
       .then(r => r.json())
@@ -540,7 +545,7 @@ export default function Dashboard() {
       .catch(() => { /* FALLBACK_ICE_CONFIG in useCall.ts already covers cold start */ });
   }, []);
 
-  // Fetch conversations via HTTP immediately — no need to wait for socket
+  
   useEffect(() => {
     const token = localStorage.getItem('echoza-token');
     if (!token) return;
@@ -560,17 +565,17 @@ export default function Dashboard() {
     return () => { cancelled = true; };
   }, []);
 
-  // Socket listeners for real-time conversation updates
+  
   useEffect(() => {
     if (!socket) return;
 
     setConversationsLoaded(true);
 
-    // Ask for the conversation list on every (re)connect. Server only
-    // pushes conversations:list in response to this emit, so without it
-    // the sidebar stays empty until a new message triggers a refetch.
-    // Cheap (single batched query) and idempotent (dedupeConversations
-    // handles race with the HTTP /api/conversations fetch).
+    
+    
+    
+    
+    
     socket.emit('conversations:list');
 
     socket.on('server:diag', (diag: any) => {
@@ -627,11 +632,11 @@ export default function Dashboard() {
     };
     socket.io.on('reconnect', onReconnect);
 
-    // message:sent is echoed to the sender only — never triggers notification.
-    // The ack carries the original `clientId` so we can swap the optimistic
-    // outbox message (id=clientId) for the authoritative server message
-    // (id=server uuid). Dedupe on either id so a duplicate ack (server
-    // crash + retry) doesn't render the same message twice.
+    
+    
+    
+    
+    
     socket.on('message:sent', (message: any) => {
       if (message.clientId) removeFromOutbox(message.clientId);
       if (message.conversationId === activeChatRef.current) {
@@ -646,11 +651,11 @@ export default function Dashboard() {
       socket.emit('conversations:list');
     });
 
-    // On every socket connect (initial mount + every reconnect) replay
-    // any messages the outbox has been holding. This is the iOS PWA
-    // durability path: the user backgrounds the app, iOS kills the JS
-    // context, the message is in localStorage; on resume the socket
-    // reconnects and we drain the queue.
+    
+    
+    
+    
+    
     socket.on('connect', () => {
       try {
         const pending = loadOutbox();
@@ -662,9 +667,9 @@ export default function Dashboard() {
     });
 
     socket.on('message:new', (message: any) => {
-      // FIX #14: Also check senderUsername as a fallback in case the
-      // server schema ever renames senderId. Previously only senderId
-      // was checked — a schema drift would cause duplicate renders.
+      
+      
+      
       if (message.senderId === userRef.current?.id ||
           (message.senderUsername && message.senderUsername === userRef.current?.username)) return;
 
@@ -831,9 +836,9 @@ export default function Dashboard() {
     });
   };
 
-  // Register messages:list once (not dependent on activeChat) to avoid race
-  // where handleSelectChat emits messages:get before the handler is registered.
-  // Server now includes conversationId in the response so we don't need a ref.
+  
+  
+  
   useEffect(() => {
     if (!socket) return;
 
@@ -864,8 +869,8 @@ export default function Dashboard() {
     return () => { socket.off('messages:list'); };
   }, [socket]);
 
-  // Listen for real-time read status updates via socket (replaces old Realtime
-  // subscription on messages.read column, which no longer exists in v2 schema).
+  
+  
   useEffect(() => {
     if (!socket) return;
 
@@ -879,21 +884,21 @@ export default function Dashboard() {
     return () => { socket.off('message:read-status', handler); };
   }, [socket]);
 
-  // ── Live DB deltas via Socket.IO (replaces Supabase Realtime) ────────────────
-  // The previous `useRealtimeChat({ ... })` subscriber list has been
-  // replaced with the socket listeners below. Both paths updated the same
-  // React state setters (setMessages, setConversations, setDeleteMode,
-  // setSelectedMessages), so the consolidation is purely a transport
-  // change — no UX regression. Socket events are slightly faster than
-  // postgres_changes (in-process emitToUser, no logical replication
-  // hop), which is what the user asked for.
-  //
-  // DEDUPLICATION: `message:new` is already handled by the message:new
-  // listener further up in the second [socket] useEffect. We only need
-  // to add the participant:change handler here because the previous
-  // realtime path was the only emitter for it. Other realtime events
-  // (message insert/delete, conversation update) already have equivalent
-  // socket-based paths via the existing handlers.
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   useEffect(() => {
     if (!socket) return;
 
@@ -901,8 +906,8 @@ export default function Dashboard() {
       const isAboutSelf = changedUserId === userRef.current?.id;
       const isActive = groupId === activeChatRef.current;
 
-      // I was removed from a group — drop it from my sidebar entirely,
-      // and close the active chat if I was viewing it.
+      
+      
       if (op === 'DELETE' && isAboutSelf) {
         setConversations(prev => prev.filter(c => c.id !== groupId));
         if (isActive) {
@@ -914,9 +919,9 @@ export default function Dashboard() {
         return;
       }
 
-      // I was added to a group, or someone else was added/removed in a
-      // group I'm in. Refresh the sidebar so member list / group name
-      // stays current.
+      
+      
+      
       if (isAboutSelf || conversationsRef.current.some(c => c.id === groupId)) {
         const t = localStorage.getItem('echoza-token');
         if (!t) return;
@@ -986,12 +991,12 @@ export default function Dashboard() {
     };
 
     processAttachments().then(processedAttachments => {
-      // Client-generated id travels with the message all the way to the
-      // server's `message:sent` ack. On ack we remove the matching
-      // outbox entry; on socket reconnect we drain the outbox and replay
-      // each entry with its original clientId. This is the durability
-      // layer that keeps iOS PWA messages from being silently dropped
-      // when iOS kills the JS context after a background.
+      
+      
+      
+      
+      
+      
       const clientId = newClientId();
       const payload: any = { content, clientId };
       if (processedAttachments) payload.attachments = processedAttachments;
@@ -1011,10 +1016,10 @@ export default function Dashboard() {
         createdAt: new Date().toISOString(),
       });
 
-      // Optimistic local render so the user sees their message instantly.
-      // The `_sending` flag is cleared when the server's `message:sent`
-      // ack lands (matched by clientId). If the JS context dies before
-      // the ack, the outbox still has the entry and replays on reconnect.
+      
+      
+      
+      
       setMessages(prev => [
         ...prev,
         {
@@ -1106,9 +1111,9 @@ export default function Dashboard() {
 
   const handleAudioCall = () => {
     if (!activeConv) return;
-    // iOS Safari in a regular tab occasionally drops WebRTC when the
-    // page is backgrounded. Require the user to install the PWA first
-    // for a much more reliable call experience.
+    
+    
+    
     if (!canMakeWebRTCCall()) {
       alert('Calls work better when Echoza is installed to your home screen. Open in the installed app, or use the Share button to Add to Home Screen first.');
       return;
@@ -1145,15 +1150,15 @@ export default function Dashboard() {
     if (!incomingCall) return;
     setCallContact(incomingCall.caller);
     setIncomingSdp(incomingCall.sdp);
-    // DO NOT pre-call getUserMedia from this user-gesture handler. iOS
-    // Safari enforces a per-gesture device-init budget; firing it here
-    // AND again in useCall's setupLocalMedia counts as two device-inits
-    // and the second one can be refused with NotFoundError — exactly
-    // the 'no mic or camera available' error this code was written to
-    // prevent. The session-mount pre-warm above covers the iOS-permission
-    // grant for the whole session, and useCall's setupLocalMedia now has
-    // an attempt=0→retry(400ms)→attempt=2 (audio-only for video callers)
-    // rollback for the rare Chromium tab-cold-start race.
+    
+    
+    
+    
+    
+    
+    
+    
+    
     if (incomingCall.type === 'audio') {
       setShowAudioCall(true);
     } else {
