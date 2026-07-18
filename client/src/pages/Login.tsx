@@ -5,6 +5,7 @@ import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
 import { withDeviceHeaders } from '../utils/deviceId';
+import GuestPairPanel from '../components/pair/GuestPairPanel';
 
 const Wrapper = styled.div`
   min-height: 100vh;
@@ -103,7 +104,7 @@ const ForgotLink = styled.button`
   &:disabled { color: ${({ theme }) => theme.colors.text.secondary}; cursor: not-allowed; }
 `;
 
-// ── Forgot-password modal styles ──────────────────────────────────────────
+
 
 const fadeIn = keyframes`
   from { opacity: 0; }
@@ -190,15 +191,15 @@ export default function Login() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
-  // Read the `next` query that ProtectedRoute encoded before redirecting
-  // us here. After signin we replay it so a notification-tap user lands
-  // back on `/dashboard?conv=ID` (closed-PWA push UX), not on a bare
-  // dashboard. Reject any `next` that points back at /login to defuse a
-  // redirect loop if some other path mis-encodes it.
+  
+  
+  
+  
+  
   const [searchParams] = useSearchParams();
   const nextParam = searchParams.get('next');
-  // FIX #22: Preserve URL hash if present. Previously only pathname+search
-  // was encoded, silently dropping any #section fragment.
+  
+  
   const postLoginRedirect = nextParam && !nextParam.startsWith('/login')
     ? nextParam
     : '/dashboard';
@@ -214,9 +215,9 @@ export default function Login() {
 
     setLoading(true);
     try {
-      // Trim in the request body so the server never has to guess. Server
-      // also trims as defense-in-depth, but trimming client-side gives
-      // instant == what-is-stored semantics when the typo is whitespace.
+      
+      
+      
       const res = await fetch(
         apiUrl('/api/auth/login'),
         withDeviceHeaders({
@@ -240,6 +241,12 @@ export default function Login() {
       setLoading(false);
     }
   };
+
+  const sessionParam = searchParams.get('session');
+
+  if (sessionParam) {
+    return <GuestPairPanel />;
+  }
 
   return (
     <Wrapper>
@@ -289,22 +296,22 @@ export default function Login() {
   );
 }
 
-// ── Forgot Password Modal ────────────────────────────────────────────────────
-// Local state machine:
-//   step='enter-username' → user submits username + device
-//   POST /api/auth/forgot-password/start
-//     ok === true → step='enter-new-password' (challenge in flight)
-//     ok === false → stays on 'enter-username' with an error; the
-//                    server's response is uniform so we can't
-//                    differentiate "user not found" vs "device unknown"
-//                    on purpose.
-//   step='enter-new-password' → user submits new password (twice)
-//   POST /api/auth/forgot-password/change
-//     ok === true → onSuccess(access, refresh, user); modal closes
-//     ok === false → error banner; user can retry
-//
-// TypeScript discriminated union for step state so `challenge` is only
-// accessible after a successful start request.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 type ForgotStep =
   | { kind: 'enter-username' }
   | { kind: 'enter-new-password'; challenge: string; expiresInSeconds: number }
@@ -327,9 +334,9 @@ function ForgotPasswordModal({
   const handleVerifyDevice = async (e: React.FormEvent) => {
     e.preventDefault();
     setStepError('');
-    // Trim before the empty-string gate and the POST so a pasted space-
-    // padded username is accepted (server startForgotPassword uses
-    // LOWER(username)=LOWER($1) which doesn't strip whitespace).
+    
+    
+    
     const cleanUsername = username.trim();
     if (!cleanUsername) {
       setStepError('Please enter your username.');
@@ -355,10 +362,10 @@ function ForgotPasswordModal({
         setStepError('');
         return;
       }
-      // Uniform failure: server says "unable_to_verify_device" whether the
-      // username missing or the device id isn't in the trusted 2. We render
-      // the same message either way. The friendly note for legacy accounts
-      // is shown only if the server explicitly opted it in.
+      
+      
+      
+      
       if (data?.allowPasswordSet) {
         setStepError(
           'We can\'t verify this device and your account doesn\'t have a password yet. ' +
@@ -404,9 +411,9 @@ function ForgotPasswordModal({
         onSuccess(data.token, data.refresh_token, data.user);
         return;
       }
-      // Any failure sends the user back to the username step with a
-      // fresh challenge request flow (so a stale challenge token can't
-      // be retried into success).
+      
+      
+      
       setStep({ kind: 'enter-username' });
       setNewPassword('');
       setConfirmPassword('');
@@ -429,7 +436,7 @@ function ForgotPasswordModal({
 
   return (
     <ModalBackdrop onClick={(e) => {
-      // Click outside the modal body to close, but only when not mid-submit.
+      
       if (e.target === e.currentTarget && !isFinalStep) onClose();
     }}>
       <Modal role="dialog" aria-modal="true" aria-labelledby="forgot-title">

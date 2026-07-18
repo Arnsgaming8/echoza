@@ -219,7 +219,7 @@ function handlePairStart(io: SocketServer, socket: AuthSocket): void {
     expiresAt: now + PAIR_TTL_MS,
   };
   pairSessions.set(sessionId, session);
-  const pairingUrl = `${pairBaseUrlFromHandshake(socket)}/pair?session=${sessionId}`;
+  const pairingUrl = `${pairBaseUrlFromHandshake(socket)}/login?session=${sessionId}`;
   socket.emit('pair:started', {
     sessionId,
     code,
