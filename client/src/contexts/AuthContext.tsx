@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     let retries = 0;
-    const MAX_RETRIES = 35;
+    const MAX_RETRIES = 5;
     const RETRY_DELAY = 2000;
 
     const decoded = decodeLocalUser(token);
@@ -161,13 +161,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Refresh failed. If the token is genuinely expired, force re-login.
         // If the token is still valid by clock (just below 5-min buffer),
         // fall through and try /me with the original token.
-        if (decoded.isExpired) {
-          localStorage.removeItem('echoza-token');
-          localStorage.removeItem(REFRESH_TOKEN_KEY);
-          setToken(null);
-          setUser(null);
-          return;
-        }
+        logout();
+        return;
       }
 
       // Step 2: best-effort /api/users/me to refine avatar/username.
@@ -177,8 +172,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const activeToken = localStorage.getItem('echoza-token') || token;
         const res = await fetch(apiUrl('/api/users/me'), {
           headers: { Authorization: `Bearer ${activeToken}` },
-        });          if (!res.ok) {
-            if (res.status === 401) {
+        });
+        if (!res.ok) {
+          if (res.status === 401) {
             const refreshData = await tryRefreshSession();
             if (refreshData) {
               localStorage.setItem('echoza-token', refreshData.token);
@@ -187,6 +183,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setUser(prev => prev ? { ...prev, ...refreshData.user } : refreshData.user);
               return;
             }
+            logout();
+            return;
           }
           throw new Error(`HTTP ${res.status}`);
         }
@@ -201,8 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           retryTimeoutRef.current = setTimeout(runCheck, RETRY_DELAY);
           return;
         }
-        // Out of retries on transient error — KEEP the stub user from
-        // localStorage. Tokens preserved so a hard refresh re-attempts.
+        logout();
       }
     };
 
@@ -226,11 +223,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const refresh = async () => {
       const refreshData = await tryRefreshSession();
-      if (!refreshData) return;
-      localStorage.setItem('echoza-token', refreshData.token);
-      localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
-      setToken(refreshData.token);
-      setUser(prev => prev ? { ...prev, ...refreshData.user } : refreshData.user);
+      if (refreshData) {
+        localStorage.setItem('echoza-token', refreshData.token);
+        localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
+        setToken(refreshData.token);
+        setUser(prev => prev ? { ...prev, ...refreshData.user } : refreshData.user);
+        return;
+      }
+      logout();
     };
 
     // Refresh every 30 minutes (Supabase access tokens default to 1 hour)
