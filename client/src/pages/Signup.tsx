@@ -68,6 +68,36 @@ const StyledLink = styled(Link)`
   }
 `;
 
+const InactivityNotice = styled.div`
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: ${({ theme }) => theme.colors.secondary.warmGray}22;
+  border: 1px solid ${({ theme }) => theme.colors.secondary.warmGray}66;
+  color: ${({ theme }) => theme.colors.text.primary};
+  padding: 12px 14px;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  font-size: ${({ theme }) => theme.font.size.sm};
+  line-height: 1.45;
+  margin-bottom: ${({ theme }) => theme.spacing.lg};
+`;
+
+const InactivityNoticeIcon = styled.span`
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+`;
+
+const InactivityNoticeBody = styled.div`
+  flex: 1;
+
+  strong {
+    display: block;
+    font-weight: ${({ theme }) => theme.font.weight.bold};
+    margin-bottom: 2px;
+  }
+`;
+
 const ErrorMsg = styled.div`
   background: ${({ theme }) => theme.colors.danger}15;
   color: ${({ theme }) => theme.colors.danger};
@@ -89,9 +119,9 @@ export default function Signup() {
 
   const validateUsername = (val: string) => {
     setUsername(val);
-    // Validate against the trimmed value so a pasted leading/trailing
-    // space doesn't show a red "Must be 3–20 letters" error during typing
-    // even though the submit path will trim and accept the value.
+    
+    
+    
     const trimmed = val.trim();
     if (trimmed && !/^[A-Za-z_]{3,20}$/.test(trimmed)) {
       setUsernameError('Must be 3–20 letters');
@@ -102,9 +132,9 @@ export default function Signup() {
 
   const validatePassword = (val: string) => {
     setPassword(val);
-    // Same defence for passwords: validate trimmed length so the red
-    // error disappears as soon as the user has typed 8+ non-whitespace
-    // chars even if surrounding whitespace is present.
+    
+    
+    
     if (val.trim().length < 8) {
       setPasswordError('Must be at least 8 characters');
     } else {
@@ -124,8 +154,8 @@ export default function Signup() {
 
     setLoading(true);
     try {
-      // Trim before send so the hash stored under this user_id matches
-      // what we'll later type at sign-in. Server trims defensively too.
+      
+      
       const res = await fetch(
         apiUrl('/api/auth/register'),
         withDeviceHeaders({
@@ -142,6 +172,10 @@ export default function Signup() {
       }
 
       login(data.token, data.refresh_token, data.user);
+      try {
+        localStorage.setItem('echoza-accountCreatedAt', new Date().toISOString());
+        localStorage.removeItem('echoza-inactivityBannerDismissed');
+      } catch {}
       navigate('/dashboard');
     } catch {
       setServerError('Connection error. Please try again.');
@@ -155,6 +189,13 @@ export default function Signup() {
       <Card>
         <Title>Create Account</Title>
         <Subtitle>Join Echoza and start connecting</Subtitle>
+        <InactivityNotice>
+          <InactivityNoticeIcon aria-hidden>⏱️</InactivityNoticeIcon>
+          <InactivityNoticeBody>
+            <strong>Heads up — accounts auto-delete after 2 weeks of inactivity</strong>
+            If you don't sign in for 14 days, Echoza permanently deletes your account along with every conversation, message, contact, and token it contains. No recovery is possible. Sign in regularly to keep your account alive.
+          </InactivityNoticeBody>
+        </InactivityNotice>
         <Form onSubmit={handleSubmit}>
           {serverError && <ErrorMsg>{serverError}</ErrorMsg>}
           <Input

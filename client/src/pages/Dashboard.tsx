@@ -206,6 +206,43 @@ const Footer = styled.footer`
   z-index: 5;
 `;
 
+const InactivityBanner = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: ${({ theme }) => theme.colors.secondary.warmGray}22;
+  border-bottom: 1px solid ${({ theme }) => theme.colors.secondary.warmGray}66;
+  color: ${({ theme }) => theme.colors.text.primary};
+  padding: 10px 14px;
+  font-size: ${({ theme }) => theme.font.size.sm};
+  line-height: 1.45;
+  flex-shrink: 0;
+`;
+
+const InactivityBannerBody = styled.div`
+  flex: 1;
+  min-width: 0;
+
+  strong {
+    font-weight: ${({ theme }) => theme.font.weight.bold};
+  }
+`;
+
+const InactivityBannerDismiss = styled.button`
+  background: transparent;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  color: ${({ theme }) => theme.colors.text.primary};
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.card};
+  }
+`;
+
 
 function dedupeConversations(list: any[]): Conversation[] {
   if (!Array.isArray(list)) return [];
@@ -258,6 +295,19 @@ export default function Dashboard() {
   const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [showInactivityBanner, setShowInactivityBanner] = useState(() => {
+    try {
+      const createdAtRaw = localStorage.getItem('echoza-accountCreatedAt');
+      const dismissed = localStorage.getItem('echoza-inactivityBannerDismissed');
+      if (!createdAtRaw || dismissed === '1') return false;
+      const createdAt = new Date(createdAtRaw).getTime();
+      if (!Number.isFinite(createdAt)) return false;
+      const ageMs = Date.now() - createdAt;
+      return ageMs >= 0 && ageMs < 14 * 24 * 60 * 60 * 1000;
+    } catch {
+      return false;
+    }
+  });
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
 
@@ -1203,6 +1253,22 @@ export default function Dashboard() {
         onToggleSidebar={() => setShowSidebar(false)}
       />
       <Main>
+        {showInactivityBanner && (
+          <InactivityBanner role="status">
+            <InactivityBannerBody>
+              <strong>New here?</strong>{' '}
+              Echoza accounts auto-delete after 2 weeks of inactivity — every conversation, message, and contact goes with it. Sign in regularly to keep your account.
+            </InactivityBannerBody>
+            <InactivityBannerDismiss
+              onClick={() => {
+                try { localStorage.setItem('echoza-inactivityBannerDismissed', '1'); } catch {}
+                setShowInactivityBanner(false);
+              }}
+            >
+              Got it
+            </InactivityBannerDismiss>
+          </InactivityBanner>
+        )}
         <TopBar
           conversation={activeConv}
           onAudioCall={handleAudioCall}

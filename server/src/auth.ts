@@ -22,6 +22,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { env } from './env.js';
 import { fetchOne, fetchAll, tx } from './db.js';
+import { touchLastSignIn } from './account-deletion.js';
 
 
 
@@ -355,10 +356,7 @@ export async function loginUser(
   }
 
   const nowIso = new Date().toISOString();
-  await fetchOne(
-    `UPDATE profiles SET last_sign_in_at = $1 WHERE id = $2`,
-    [nowIso, profile.id],
-  );
+  await touchLastSignIn(profile.id);
 
   if (deviceId) {
     await recordDeviceFingerprint(profile.id, deviceId, userAgent);

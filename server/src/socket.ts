@@ -17,6 +17,7 @@ import {
   applyPairMiddleware,
   registerPairHandlersForSocket,
 } from './socket.pair.js';
+import { touchLastSignIn } from './account-deletion.js';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -330,6 +331,7 @@ export function setupSocket(io: SocketServer): void {
 
     if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Map());
     onlineUsers.get(userId)!.set(socket.id, { username, avatar: socket.avatar || '' });
+    void touchLastSignIn(userId);
     io.emit('online-users', Array.from(onlineUsers.keys()));
 
     socket.on('user:myIp', () => {

@@ -20,6 +20,7 @@ import { pingDb, fetchOne, fetchAll } from './db.js';
 import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, touchPresence } from './socket.js';
 import { startPairSessionSweeper } from './socket.pair.js';
+import { startAccountDeletionSweeper } from './account-deletion.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -361,6 +362,7 @@ async function runTest(relayOnly=false){
   setupSocket(io);
   startPresenceSweeper(io);
   startPairSessionSweeper();
+  startAccountDeletionSweeper();
 
   httpServer.listen(env.PORT, () => {
     console.log(`Echoza server running on port ${env.PORT}`);
