@@ -21,6 +21,7 @@ import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, touchPresence } from './socket.js';
 import { startPairSessionSweeper } from './socket.pair.js';
 import { startAccountDeletionSweeper } from './account-deletion.js';
+import { initVapid } from './vapid.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
@@ -34,6 +35,8 @@ async function main() {
   
   await pingDb();
   console.log('[db] ping OK — Neon connection pool ready.');
+
+  await initVapid();
 
   const app = express();
   const httpServer = createServer(app);

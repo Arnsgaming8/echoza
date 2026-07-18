@@ -23,14 +23,14 @@ function startHeartbeat() {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + HEARTBEAT_TOKEN, 'Content-Type': 'application/json' },
     }).catch(() => {});
-    // Presence relay for iOS PWA background survival. The JS-side
-    // `setInterval(25s)` in SocketContext dies when iOS suspends the
-    // context (~30s after background); without this relay, the user's
-    // server-side heartbeat goes stale and friends see them as offline.
-    // We tick once per second; broadcasting every 5 ticks (~5s) is light
-    // enough that foregrounded tabs aren't spammed. When the JS context
-    // IS alive, the receiving client immediately emits socket
-    // 'presence:heartbeat' — same effect as the in-tab interval.
+    
+    
+    
+    
+    
+    
+    
+    
     HEARTBEAT_TICK_COUNT++;
     if (HEARTBEAT_TICK_COUNT % 5 !== 0) return;
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
@@ -51,6 +51,7 @@ self.addEventListener('fetch', (event) => {
 
   if (request.method !== 'GET') return;
   if (url.pathname.startsWith('/api/') || url.protocol === 'ws:' || url.protocol === 'wss:') return;
+  if (!url.protocol.startsWith('http')) return;
 
   if (/\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$/i.test(url.pathname)) {
     event.respondWith(
@@ -96,14 +97,14 @@ self.addEventListener('push', (event) => {
     body: data.body || '',
     icon: '/vite.svg',
     badge: '/vite.svg',
-    // tag + renotify collapses repeated calls from same caller instead of
-    // stacking. Missing tag falls back to a per-message unique id.
+    
+    
     tag: data.tag || (callType ? `call-${callerId || 'unknown'}` : undefined),
     renotify: !!callType,
-    // iOS ignores this (its own OS banner model), but desktop Chrome/
-    // Edge and Android Chrome honor it — important so direct-message
-    // banners don't auto-dismiss mid-scroll on Desktop while the user
-    // is reading something else.
+    
+    
+    
+    
     requireInteraction: !callType,
     data: {
       url: data.url || '/',
@@ -115,11 +116,11 @@ self.addEventListener('push', (event) => {
   };
   event.waitUntil(
     self.registration.showNotification(title, options).then(() => {
-      // Broadcast the call payload to any open Echoza tab so Dashboard can
-      // render its IncomingCall UI without requiring the user to click the
-      // notification first. If a socket `call:offer` is also in flight the
-      // full SDP version will arrive milliseconds later — Dashboard dedupes
-      // by caller id, so the second `setIncomingCall` is a no-op.
+      
+      
+      
+      
+      
       if (callType && callerId) {
         return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
           for (const client of windowClients) {
@@ -140,12 +141,12 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
-  // Construct the deep-link from conversationId BEFORE falling back to
-  // data.url. The web-push fan-out above calls sendPushNotification with
-  // `/dashboard?conv=...` already, but the SW is the source of truth for
-  // any payload shape that arrives here (cron security warnings, test
-  // push, future call-site additions). Guarantees the closed-PWA
-  // resuscitates on the right chat thread instead of the bare sidebar.
+  
+  
+  
+  
+  
+  
   const conversationId = data.conversationId;
   const deepLink = conversationId
     ? `/dashboard?conv=${encodeURIComponent(conversationId)}`
@@ -157,10 +158,10 @@ self.addEventListener('notificationclick', (event) => {
       if (windowClients.length > 0) {
         const client = windowClients[0];
         client.focus();
-        // For a foregrounded PWA, route via postMessage so React state
-        // updates without a hard reload. Calls fire 'incoming-call' so
-        // Dashboard's IncomingCall UI lands; messages fire
-        // 'navigate-conversation' so the thread opens.
+        
+        
+        
+        
         if (callType) {
           client.postMessage({
             type: 'incoming-call',
@@ -173,10 +174,10 @@ self.addEventListener('notificationclick', (event) => {
         }
         return;
       }
-      // CLOSED PWA on iOS: clients.matchAll returns []. openWindow with
-      // an in-scope URL opens the installed PWA at that route; out-of-
-      // scope URLs open a regular Safari tab. /dashboard is the SPA root
-      // for authenticated users — correct in-scope deep-link.
+      
+      
+      
+      
       clients.openWindow(deepLink);
     })
   );
