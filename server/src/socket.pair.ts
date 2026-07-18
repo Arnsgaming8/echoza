@@ -17,8 +17,10 @@ interface AuthSocket extends Socket {
 interface PairSession {
   id: string;
   code: string;
-  ownerUserId: string;
+  ownerUserId: string | null;
   ownerSocketId: string;
+  ownerUa: string | null;
+  ownerIp: string | null;
   guestSocketId: string | null;
   guestUa: string | null;
   guestIp: string | null;
@@ -112,6 +114,16 @@ function setupPairGuestSocket(io: SocketServer, socket: AuthSocket): void {
     socket.disconnect(true);
     return;
   }
+  if (session.status !== 'pending') {
+    socket.emit('pair:connected', { ok: false, reason: 'session_already_in_use' });
+    socket.disconnect(true);
+    return;
+  }
+  if (session.guestSocketId && session.guestSocketId !== socket.id) {
+    socket.emit('pair:connected', { ok: false, reason: 'session_already_has_guest' });
+    socket.disconnect(true);
+    return;
+  }
   session.guestSocketId = socket.id;
   session.guestUa = socket.pairGuestUa ?? session.guestUa;
   session.guestIp = socket.pairGuestIp ?? session.guestIp;
@@ -184,31 +196,43 @@ async function handleCodeSubmit(
     return;
   }
 
-  s.status = 'awaiting_approval';
-  const deviceLabel = sanitizeDeviceLabel(s.guestUa, s.guestIp);
-
   const ownerSocket = io.sockets.sockets.get(s.ownerSocketId) as AuthSocket | undefined;
-  if (ownerSocket) {
-    ownerSocket.emit('pair:request', { sessionId, deviceLabel, waitMs: 60_000 });
-  }
+  const approverIsOwner = !!ownerSocket?.userId;
+  const approverSocket = approverIsOwner ? ownerSocket : socket;
+  const deviceLabel = approverIsOwner
+    ? sanitizeDeviceLabel(s.guestUa, s.guestIp)
+    : sanitizeDeviceLabel(s.ownerUa, s.ownerIp);
 
+  s.status = 'awaiting_approval';
+  approverSocket.emit('pair:request', { sessionId, deviceLabel, waitMs: 60_000 });
   socket.emit('pair:code-accepted', { sessionId });
+  const guestSocket = socket;
+  if (!approverIsOwner && ownerSocket) {
+    ownerSocket.emit('pair:status', {
+      kind: 'awaiting_approval',
+      sessionId,
+      guestDeviceLabel: sanitizeDeviceLabel(guestSocket.pairGuestUa ?? null, guestSocket.pairGuestIp ?? null),
+    });
+  }
   console.log(JSON.stringify({
     t: 'pair', event: 'code-accepted', sessionId,
     ownerUserId: s.ownerUserId, guestIp: s.guestIp,
   }));
 }
 function handlePairStart(io: SocketServer, socket: AuthSocket): void {
-  const userId = socket.userId!;
   purgeExpiredPairSessions();
   const sessionId = uuidv4();
   const code = generatePairCode();
   const now = Date.now();
+  const ownerUa = ((socket.handshake.headers['user-agent'] as string) || '').slice(0, 200) || null;
+  const ownerIp = socket.handshake.address || null;
   const session: PairSession = {
     id: sessionId,
     code,
-    ownerUserId: userId,
+    ownerUserId: socket.userId || null,
     ownerSocketId: socket.id,
+    ownerUa,
+    ownerIp,
     guestSocketId: null,
     guestUa: null,
     guestIp: null,
@@ -228,7 +252,7 @@ function handlePairStart(io: SocketServer, socket: AuthSocket): void {
   });
   console.log(JSON.stringify({
     t: 'pair', event: 'start', sessionId,
-    ownerUserId: userId, expiresAt: session.expiresAt,
+    ownerUserId: socket.userId || null, expiresAt: session.expiresAt,
   }));
 }
 async function handlePairApprove(
@@ -238,7 +262,13 @@ async function handlePairApprove(
 ): Promise<void> {
   const userId = socket.userId!;
   const s = pairSessions.get(sessionId);
-  if (!s || s.ownerUserId !== userId) {
+  if (!s) {
+    socket.emit('pair:completed', { ok: false, sessionId, reason: 'session_not_found' });
+    return;
+  }
+  const isOwner = s.ownerSocketId === socket.id;
+  const isGuest = s.guestSocketId === socket.id;
+  if (!isOwner && !isGuest) {
     socket.emit('pair:completed', { ok: false, sessionId, reason: 'session_not_found' });
     return;
   }
@@ -249,45 +279,56 @@ async function handlePairApprove(
 
   s.status = 'approved';
 
+  const recipientSocketId = isOwner ? s.guestSocketId : s.ownerSocketId;
+  const recipientSocket = recipientSocketId
+    ? (io.sockets.sockets.get(recipientSocketId) as AuthSocket | undefined)
+    : undefined;
+  if (!recipientSocket) {
+    s.status = 'pending';
+    socket.emit('pair:completed', { ok: false, sessionId, reason: 'recipient_gone' });
+    console.warn(JSON.stringify({
+      t: 'pair', event: 'approve-recipient-gone', sessionId,
+      approverUserId: userId, approverIsHost: isOwner,
+    }));
+    return;
+  }
+
   try {
     const profile = await fetchOne<{ username: string; avatar: string; last_sign_in_at: string | null }>(
       `SELECT username, avatar, last_sign_in_at FROM profiles WHERE id = $1`,
-      [s.ownerUserId],
+      [userId],
     );
     if (!profile) {
       pairSessions.delete(sessionId);
       socket.emit('pair:completed', { ok: false, sessionId, reason: 'user_no_longer_exists' });
+      recipientSocket.emit('pair:result', { ok: false, reason: 'user_no_longer_exists' });
       return;
     }
 
-    const refresh = signRefreshToken(s.ownerUserId);
+    const refresh = signRefreshToken(userId);
     await fetchOne(
       `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
          VALUES ($1, $2, $3)`,
-      [s.ownerUserId, refresh.hash, refresh.expiresAt],
+      [userId, refresh.hash, refresh.expiresAt],
     );
-    const access = signAccessToken(s.ownerUserId, profile.username, profile.last_sign_in_at);
+    const access = signAccessToken(userId, profile.username, profile.last_sign_in_at);
 
-    const guestSocket = s.guestSocketId
-      ? (io.sockets.sockets.get(s.guestSocketId) as AuthSocket | undefined)
-      : undefined;
-    if (guestSocket) {
-      guestSocket.emit('pair:result', {
-        ok: true,
-        access_token: access,
-        refresh_token: refresh.plaintext,
-        user: {
-          id: s.ownerUserId,
-          username: profile.username,
-          avatar: profile.avatar,
-          online: false,
-        },
-      });
-    }
+    recipientSocket.emit('pair:result', {
+      ok: true,
+      access_token: access,
+      refresh_token: refresh.plaintext,
+      user: {
+        id: userId,
+        username: profile.username,
+        avatar: profile.avatar,
+        online: false,
+      },
+    });
 
-    if (s.guestUa) {
+    const otherSideUa = isOwner ? s.guestUa : s.ownerUa;
+    if (otherSideUa) {
       try {
-        await recordDeviceFingerprint(s.ownerUserId, `pair:${s.id}`, s.guestUa);
+        await recordDeviceFingerprint(userId, `pair:${s.id}`, otherSideUa);
       } catch (err: any) {
         console.warn('[pair:approve] device fingerprint skipped:', err?.message || err);
       }
@@ -296,13 +337,14 @@ async function handlePairApprove(
     socket.emit('pair:completed', { ok: true, sessionId });
     console.log(JSON.stringify({
       t: 'pair', event: 'approved', sessionId,
-      ownerUserId: s.ownerUserId, guestIp: s.guestIp,
+      approverUserId: userId, approverIsHost: isOwner,
     }));
 
     setTimeout(() => {
-      if (s.guestSocketId) {
-        const gs = io.sockets.sockets.get(s.guestSocketId);
-        gs?.disconnect(true);
+      const recipientSocketId2 = isOwner ? s.guestSocketId : s.ownerSocketId;
+      if (recipientSocketId2) {
+        const rs = io.sockets.sockets.get(recipientSocketId2);
+        rs?.disconnect(true);
       }
       pairSessions.delete(sessionId);
     }, 2_000);
@@ -314,31 +356,35 @@ async function handlePairApprove(
 }
 
 function handlePairDeny(io: SocketServer, socket: AuthSocket, sessionId: string): void {
-  const userId = socket.userId!;
   const s = pairSessions.get(sessionId);
-  if (!s || s.ownerUserId !== userId) return;
+  if (!s) return;
+  const isOwner = s.ownerSocketId === socket.id;
+  const isGuest = s.guestSocketId === socket.id;
+  if (!isOwner && !isGuest) return;
+  if (!socket.userId) return;
   if (s.status === 'approved') return;
   s.status = 'denied';
-  const guestSocket = s.guestSocketId
-    ? (io.sockets.sockets.get(s.guestSocketId) as AuthSocket | undefined)
+  const counterpartySocketId = isOwner ? s.guestSocketId : s.ownerSocketId;
+  const counterpartySocket = counterpartySocketId
+    ? (io.sockets.sockets.get(counterpartySocketId) as AuthSocket | undefined)
     : undefined;
-  if (guestSocket) {
-    guestSocket.emit('pair:result', { ok: false, reason: 'denied' });
+  if (counterpartySocket) {
+    counterpartySocket.emit('pair:result', { ok: false, reason: 'denied' });
   }
   socket.emit('pair:completed', { ok: false, sessionId, denied: true });
-  console.log(JSON.stringify({ t: 'pair', event: 'deny', sessionId, ownerUserId: s.ownerUserId }));
+  console.log(JSON.stringify({ t: 'pair', event: 'deny', sessionId, approverUserId: socket.userId, approverIsHost: isOwner }));
   setTimeout(() => pairSessions.delete(sessionId), 2_000);
 }
 
 function handlePairCancel(io: SocketServer, socket: AuthSocket, sessionId: string): void {
-  const userId = socket.userId!;
   const s = pairSessions.get(sessionId);
-  if (!s || s.ownerUserId !== userId) return;
-  const guestSocket = s.guestSocketId
-    ? (io.sockets.sockets.get(s.guestSocketId) as AuthSocket | undefined)
+  if (!s || s.ownerSocketId !== socket.id) return;
+  const counterpartySocketId = s.guestSocketId;
+  const counterpartySocket = counterpartySocketId
+    ? (io.sockets.sockets.get(counterpartySocketId) as AuthSocket | undefined)
     : undefined;
-  if (guestSocket) {
-    guestSocket.emit('pair:result', { ok: false, reason: 'cancelled' });
+  if (counterpartySocket) {
+    counterpartySocket.emit('pair:result', { ok: false, reason: 'cancelled' });
   }
   pairSessions.delete(sessionId);
   socket.emit('pair:completed', { ok: false, sessionId, cancelled: true });
@@ -350,19 +396,25 @@ export function registerPairHandlersForSocket(io: SocketServer, socket: AuthSock
     setupPairGuestSocket(io, socket);
     return;
   }
-  if (!socket.userId) return;
 
   socket.on('pair:start', () => {
     try { handlePairStart(io, socket); } catch (err: any) { console.error('[pair:start]', err?.message || err); }
   });
-  socket.on('pair:approve', async ({ sessionId }: { sessionId: string }) => {
-    await handlePairApprove(io, socket, String(sessionId || ''));
-  });
-  socket.on('pair:deny', ({ sessionId }: { sessionId: string }) => {
-    handlePairDeny(io, socket, String(sessionId || ''));
-  });
+
+  if (socket.userId) {
+    socket.on('pair:approve', async ({ sessionId }: { sessionId: string }) => {
+      try { await handlePairApprove(io, socket, String(sessionId || '')); }
+      catch (err: any) { console.error('[pair:approve]', err?.message || err); }
+    });
+    socket.on('pair:deny', ({ sessionId }: { sessionId: string }) => {
+      try { handlePairDeny(io, socket, String(sessionId || '')); }
+      catch (err: any) { console.error('[pair:deny]', err?.message || err); }
+    });
+  }
+
   socket.on('pair:cancel', ({ sessionId }: { sessionId: string }) => {
-    handlePairCancel(io, socket, String(sessionId || ''));
+    try { handlePairCancel(io, socket, String(sessionId || '')); }
+    catch (err: any) { console.error('[pair:cancel]', err?.message || err); }
   });
 }
 

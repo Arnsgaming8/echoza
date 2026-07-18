@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
 import { io, Socket } from 'socket.io-client';
-import { FiCheck, FiX, FiAlertCircle, FiLoader } from 'react-icons/fi';
+import { FiCheck, FiX, FiAlertCircle, FiLoader, FiSlash, FiSmartphone } from 'react-icons/fi';
 import { apiUrl } from '../../utils/api';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -11,6 +11,9 @@ type PairStatus =
   | 'preflight'
   | 'code'
   | 'submitting'
+  | 'approver_view'
+  | 'approving'
+  | 'denying'
   | 'approved'
   | 'denied'
   | 'expired'
@@ -24,6 +27,12 @@ interface UserRecord {
   username: string;
   avatar: string;
   online: boolean;
+}
+
+interface PairRequestData {
+  sessionId: string;
+  deviceLabel: string;
+  waitMs?: number;
 }
 
 const fadeIn = keyframes`from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); }`;
@@ -119,6 +128,27 @@ const ConfirmBtn = styled(SubmitBtn)`
   background: ${({ theme }) => theme.colors.danger || '#EF4444'};
 `;
 
+const ApproveBtn = styled(SubmitBtn)`
+  background: ${({ theme }) => theme.colors.primary.echoBlue};
+`;
+
+const DenyBtn = styled.button`
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  background: transparent;
+  color: ${({ theme }) => theme.colors.text.primary};
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  &:hover { background: ${({ theme }) => theme.colors.bg.hover}; }
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+`;
+
 const BtnRow = styled.div`
   display: flex;
   gap: 10px;
@@ -175,6 +205,32 @@ const CardBox = styled.div`
   color: ${({ theme }) => theme.colors.text.primary};
 `;
 
+const DeviceLabel = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 6px 10px;
+  background: ${({ theme }) => theme.colors.bg.main};
+  border-radius: 6px;
+`;
+
+const RequestCard = styled(CardBox)`
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+`;
+
+const RequestHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.text.primary};
+`;
+
 const Strong = styled.strong`
   color: ${({ theme }) => theme.colors.text.primary};
 `;
@@ -188,7 +244,7 @@ function ErrorMessage({ status, customText }: { status: PairStatus; customText?:
     case 'cancelled':
       return <ErrorText>The pairing session was cancelled.</ErrorText>;
     case 'invalid':
-      return <ErrorText>This pairing link is no longer valid. Open a fresh one from Settings on your other device.</ErrorText>;
+      return <ErrorText>This pairing link is no longer valid. Open a fresh one from the device that started the pairing.</ErrorText>;
     case 'error':
       return <ErrorText>{customText || 'Pairing failed. Please try again.'}</ErrorText>;
     default:
@@ -206,6 +262,7 @@ export default function GuestPairPanel() {
   const [msRemaining, setMsRemaining] = useState(0);
   const [targetUsername, setTargetUsername] = useState<string>('');
   const [confirmingSwap, setConfirmingSwap] = useState(false);
+  const [request, setRequest] = useState<PairRequestData | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const sessionId = params.get('session') || '';
 
@@ -247,7 +304,13 @@ export default function GuestPairPanel() {
     });
 
     sock.on('pair:code-accepted', () => {
-      setStatus('submitting');
+      setStatus((cur) => (cur === 'approver_view' ? 'approver_view' : 'submitting'));
+      setError('');
+    });
+
+    sock.on('pair:request', (data: PairRequestData) => {
+      setRequest(data);
+      setStatus('approver_view');
       setError('');
     });
 
@@ -312,22 +375,26 @@ export default function GuestPairPanel() {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!socketRef.current || !code.trim() || status !== 'code') return;
+    if (!socketRef.current || !code.trim() || (status !== 'code' && status !== 'already_logged_in')) return;
     setError('');
     socketRef.current.emit('pair:code-submit', { code: code.trim() });
   };
 
-  const handleAcceptSwap = async () => {
-    setConfirmingSwap(true);
-    try {
-      const sock = socketRef.current;
-      if (sock && sock.connected && code.trim()) {
-        sock.emit('pair:code-submit', { code: code.trim() });
-      }
-    } catch { /* handled below */ }
+  const handleCancel = () => navigate('/login', { replace: true });
+
+  const handleApproveRequest = () => {
+    const sock = socketRef.current;
+    if (!sock || !request) return;
+    setStatus('approving');
+    sock.emit('pair:approve', { sessionId: request.sessionId });
   };
 
-  const handleCancel = () => navigate('/login', { replace: true });
+  const handleDenyRequest = () => {
+    const sock = socketRef.current;
+    if (!sock || !request) return;
+    setStatus('denying');
+    sock.emit('pair:deny', { sessionId: request.sessionId });
+  };
 
   const remainingLabel =
     msRemaining > 0 ? `${Math.floor(msRemaining / 60000)}:${Math.floor((msRemaining % 60000) / 1000).toString().padStart(2, '0')}` : '';
@@ -351,20 +418,31 @@ export default function GuestPairPanel() {
 
         {status === 'already_logged_in' && (
           <>
-            <Title>Switch accounts?</Title>
+            <Title>Sign in via QR</Title>
             <Sub>
               You're currently signed in as <Strong>{user?.username || 'this account'}</Strong>.
-              Continuing will sign you out of that account and sign you in to the account that started the pairing session on your other device.
+              Enter the 6-digit pairing code shown on your other device — approving will sign this device in to that other account.
             </Sub>
             {error && <ErrorText>{error}</ErrorText>}
-            <BtnRow>
-              <GhostBtn onClick={handleCancel}>Cancel</GhostBtn>
-              <ConfirmBtn disabled={confirmingSwap} onClick={handleAcceptSwap}>
-                {confirmingSwap ? <FiLoader /> : <FiCheck />}
-                Sign in to the other account
-              </ConfirmBtn>
-            </BtnRow>
-            <InfoPill>Then enter the code on the next screen.</InfoPill>
+            <CodeForm onSubmit={handleSubmit}>
+              <CodeInput
+                type="text"
+                inputMode="text"
+                autoFocus
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                placeholder="------"
+                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+              />
+              <SubmitBtn type="submit" disabled={code.length !== 6}>
+                <FiCheck /> Submit code
+              </SubmitBtn>
+              {msRemaining > 0 && (
+                <InfoPill>Code expires in {remainingLabel}</InfoPill>
+              )}
+            </CodeForm>
+            <GhostBtn onClick={handleCancel}>Cancel</GhostBtn>
           </>
         )}
 
@@ -372,8 +450,7 @@ export default function GuestPairPanel() {
           <>
             <Title>Enter the pairing code</Title>
             <Sub>
-              On your other device, open Settings → Log In Any Other Device → Start Device Log In,
-              and enter the 6-digit code shown there.
+              On the device that started the pairing, enter the 6-digit code shown there.
             </Sub>
             <CodeForm onSubmit={handleSubmit}>
               <CodeInput
@@ -403,6 +480,36 @@ export default function GuestPairPanel() {
             <Spinner />
             <Title>Confirming on your other device…</Title>
             <Sub>Tap <Strong>Approve</Strong> on the device that started the pairing.</Sub>
+          </>
+        )}
+
+        {status === 'approver_view' && request && (
+          <>
+            <Title>Approve this sign-in?</Title>
+            <Sub>
+              A device wants to sign in to your account. If this wasn't you, deny the request.
+            </Sub>
+            <RequestCard>
+              <RequestHeader>
+                <FiSmartphone /> New device requesting access
+              </RequestHeader>
+              <DeviceLabel>{request.deviceLabel}</DeviceLabel>
+            </RequestCard>
+            <BtnRow>
+              <DenyBtn onClick={handleDenyRequest}>
+                <FiSlash /> Deny
+              </DenyBtn>
+              <ApproveBtn onClick={handleApproveRequest}>
+                <FiCheck /> Approve
+              </ApproveBtn>
+            </BtnRow>
+          </>
+        )}
+
+        {(status === 'approving' || status === 'denying') && (
+          <>
+            <Spinner />
+            <Title>{status === 'approving' ? 'Approving…' : 'Denying…'}</Title>
           </>
         )}
 

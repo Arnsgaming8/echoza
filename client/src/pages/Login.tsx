@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
+import { FiSmartphone } from 'react-icons/fi';
 import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
 import { withDeviceHeaders } from '../utils/deviceId';
 import GuestPairPanel from '../components/pair/GuestPairPanel';
+import HostPairPanel from '../components/pair/HostPairPanel';
 
 const Wrapper = styled.div`
   min-height: 100vh;
@@ -66,6 +68,55 @@ const StyledLink = styled(Link)`
 
   &:hover {
     text-decoration: underline;
+  }
+`;
+
+const Divider = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: ${({ theme }) => theme.spacing.lg} 0 ${({ theme }) => theme.spacing.md};
+
+  &::before, &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: ${({ theme }) => theme.colors.border};
+  }
+
+  span {
+    font-size: ${({ theme }) => theme.font.size.xs};
+    color: ${({ theme }) => theme.colors.text.secondary};
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: ${({ theme }) => theme.font.weight.semibold};
+  }
+`;
+
+const QrButton = styled.button`
+  width: 100%;
+  padding: 14px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  border: 1px solid ${({ theme }) => theme.colors.primary.echoBlue};
+  background: ${({ theme }) => theme.colors.primary.echoBlue}10;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  font-size: ${({ theme }) => theme.font.size.md};
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.15s ease, filter 0.15s ease;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.primary.echoBlue}22;
+    filter: brightness(1.04);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
   }
 `;
 
@@ -189,6 +240,7 @@ export default function Login() {
   const [serverError, setServerError] = useState('');
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [qrMode, setQrMode] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
   
@@ -248,6 +300,10 @@ export default function Login() {
     return <GuestPairPanel />;
   }
 
+  if (qrMode) {
+    return <HostPairPanel onBack={() => setQrMode(false)} />;
+  }
+
   return (
     <Wrapper>
       <Card>
@@ -280,6 +336,18 @@ export default function Login() {
         >
           Forgot password?
         </ForgotLink>
+
+        <Divider><span>or</span></Divider>
+
+        <QrButton
+          type="button"
+          onClick={() => setQrMode(true)}
+          disabled={loading}
+        >
+          <FiSmartphone />
+          Log in with QR code
+        </QrButton>
+
         <StyledLink to="/signup">Don't have an account? Sign up</StyledLink>
       </Card>
       {forgotOpen && (
