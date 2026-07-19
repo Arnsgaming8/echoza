@@ -2,14 +2,15 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { isIOS } from './iosCapability';
 
-const STUN_ONLY_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-};
-const METERED_API_KEY = '01f1b35814cb7141d57495f79d7806cb97a6';
-const ORACLE_TURN: RTCIceServer = {
-  urls: ['turn:129.146.134.55:3478', 'turn:129.146.134.55:3478?transport=tcp'],
-  username: 'echoza',
-  credential: 'echoza123',
+const ICE_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: ['turn:129.146.134.55:3478', 'turn:129.146.134.55:3478?transport=tcp'],
+      username: 'echoza',
+      credential: 'echoza123',
+    },
+  ],
 };
 
 interface UseCallOptions {
@@ -265,27 +266,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     const run = async () => {
       if (cancelled) return;
 
-      let config: RTCConfiguration = STUN_ONLY_CONFIG;
-      const cached = (window as any)._echozaIceServers;
-      if (Array.isArray(cached)) {
-        config = { iceServers: cached };
-      } else {
-        try {
-          const res = await fetch(`https://vanra.metered.live/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`);
-          if (res.ok) {
-            const servers = await res.json();
-            if (Array.isArray(servers) && servers.length > 0) {
-              config = { iceServers: servers };
-              (window as any)._echozaIceServers = servers;
-            }
-          }
-        } catch {}
-      }
-
       if (cancelled) return;
 
-      const servers = (config.iceServers || []).concat(ORACLE_TURN);
-      const pc = new RTCPeerConnection({ iceServers: servers });
+      const pc = new RTCPeerConnection(ICE_CONFIG);
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
