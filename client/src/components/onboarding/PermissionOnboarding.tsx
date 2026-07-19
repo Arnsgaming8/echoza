@@ -290,6 +290,7 @@ export default function PermissionOnboarding() {
     const val = localStorage.getItem(CAMERA_MIC_KEY);
     if (val === 'granted') return 'granted';
     if (val === 'denied') return 'denied';
+    if (val === 'skipped') return 'skipped';
     return 'pending';
   }
 
