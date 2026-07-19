@@ -307,6 +307,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
+      function isPcAlive(): boolean {
+        return pcRef.current === pc && pcRef.current !== null;
+      }
+
       
       
       
@@ -315,17 +319,20 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       
       
       const setupLocalMedia = async (attempt = 0): Promise<void> => {
+        if (!isPcAlive()) throw new DOMException('Peer connection closed during setup');
         const wantVideo = type === 'video' && attempt < 2;
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: true,
             video: wantVideo,
           });
+          if (!isPcAlive()) { stream.getTracks().forEach(t => t.stop()); throw new DOMException('Peer connection closed during setup'); }
           setLocalStream(stream);
           localStreamRef.current = stream;
           cleanupStream = stream;
           stream.getTracks().forEach(track => {
-            pc.addTrack(track, stream);
+            const live = pcRef.current;
+            if (live) live.addTrack(track, stream);
           });
           if (!wantVideo && type === 'video') {
             
@@ -419,44 +426,30 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         
         
         setupLocalMedia().then(() => {
-          
-          
-          
-          return pc.createOffer();
+          if (!isPcAlive()) return;
+          return pcRef.current!.createOffer();
         }).then(offer => {
-          
-          
-          
-          
-          
+          if (!offer || !isPcAlive()) return;
           if (isIOS() && offer.sdp && !offer.sdp.includes('a=extmap-allow-mixed')) {
-            
-            
-            
-            
-            
             const lines = offer.sdp.split(/\r\n|\n/);
             let insertIdx = lines.length;
             for (let i = 0; i < lines.length; i++) {
               if (lines[i].startsWith('m=')) { insertIdx = i; break; }
             }
             lines.splice(insertIdx, 0, 'a=extmap-allow-mixed');
-            return pc.setLocalDescription({ type: offer.type, sdp: lines.join('\r\n') });
+            return pcRef.current!.setLocalDescription({ type: offer.type, sdp: lines.join('\r\n') });
           }
-          return pc.setLocalDescription(offer);
+          return pcRef.current!.setLocalDescription(offer);
         }).then(() => {
+          if (!isPcAlive()) return;
           socket.emit('call:offer', {
             receiverId: contact.id,
             type,
-            sdp: pc.localDescription?.sdp || '',
+            sdp: pcRef.current!.localDescription?.sdp || '',
           });
         }).catch(err => {
+          if (!isPcAlive()) return;
           console.warn('Outgoing call setup failed:', err);
-          
-          
-          
-          
-          
           if (!missedRef.current) failCall(err);
         });
 
@@ -532,20 +525,25 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       if (!initialSdp) return;
 
       const offer = new RTCSessionDescription({ type: 'offer', sdp: initialSdp });
-      pc.setRemoteDescription(offer).then(() => {
+      pcRef.current!.setRemoteDescription(offer).then(() => {
+        if (!isPcAlive()) return;
         flushPendingIceCandidatesRef.current?.();
         return setupLocalMedia();
       }).then(() => {
-        return pc.createAnswer();
+        if (!isPcAlive()) return;
+        return pcRef.current!.createAnswer();
       }).then(answer => {
-        return pc.setLocalDescription(answer);
+        if (!answer || !isPcAlive()) return;
+        return pcRef.current!.setLocalDescription(answer);
       }).then(() => {
+        if (!isPcAlive()) return;
         flushPendingIceCandidatesRef.current?.();
         socket.emit('call:answer', {
           receiverId: contact.id,
-          sdp: pc.localDescription?.sdp || '',
+          sdp: pcRef.current!.localDescription?.sdp || '',
         });
       }).catch(err => {
+        if (!isPcAlive()) return;
         failCall(err);
       });
 
