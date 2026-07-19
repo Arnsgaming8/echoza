@@ -447,24 +447,35 @@ export default function Dashboard() {
           return;
         }
 
-        const r = await fetch(apiUrl('/api/push/subscribe'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer ' + freshToken,
-          },
-          body: JSON.stringify(sub.toJSON()),
-        });
-        if (r.ok) {
-          const data = await r.json().catch(() => null);
-          if (data && data.success === true) {
-            console.log('Push subscribed');
-          } else {
-            console.error('Push subscribe POST reported failure:', r.status, data);
+        const doSubscribe = async (tokenToUse: string): Promise<boolean> => {
+          const r = await fetch(apiUrl('/api/push/subscribe'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: 'Bearer ' + tokenToUse,
+            },
+            body: JSON.stringify(sub.toJSON()),
+          });
+          if (r.ok) {
+            const data = await r.json().catch(() => null);
+            if (data && data.success === true) {
+              console.log('Push subscribed');
+            } else {
+              console.error('Push subscribe POST reported failure:', r.status, data);
+            }
+            return true;
           }
-        } else {
           const errBody = await r.text().catch(() => '');
           console.error('Push subscribe POST failed:', r.status, errBody);
+          return false;
+        };
+
+        let subscribed = await doSubscribe(freshToken);
+        if (!subscribed && !cancelled) {
+          const retryToken = localStorage.getItem('echoza-token');
+          if (retryToken && retryToken !== freshToken) {
+            await doSubscribe(retryToken);
+          }
         }
       } catch (err) {
         if (!cancelled) console.error('Push subscribe error:', err);
