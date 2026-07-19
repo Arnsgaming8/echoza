@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { FiBell, FiCamera, FiMic, FiCheck, FiX, FiSkipForward, FiCheckCircle } from 'react-icons/fi';
 import { isIOS, isIOSStandalone } from '../../utils/iosCapability';
@@ -27,7 +27,9 @@ const checkPop = keyframes`
 const Overlay = styled.div`
   position: fixed;
   inset: 0;
-  background: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -237,8 +239,12 @@ type StepId = 'notification' | 'cameraMic';
 export default function PermissionOnboarding() {
   const [visible, setVisible] = useState(false);
   const [done, setDone] = useState(false);
-  const [currentStep, setCurrentStep] = useState<StepId | null>(null);
+  const [step, setStep] = useState<StepId | null>(null);
   const [busy, setBusy] = useState(false);
+  const permsRef = useRef<PermissionState>({
+    notification: 'pending',
+    cameraMic: 'pending',
+  });
   const [perms, setPerms] = useState<PermissionState>({
     notification: 'pending',
     cameraMic: 'pending',
@@ -263,7 +269,7 @@ export default function PermissionOnboarding() {
       : null;
 
     if (firstStep) {
-      setCurrentStep(firstStep);
+      setStep(firstStep);
       setVisible(true);
     }
   }, []);
@@ -351,46 +357,48 @@ export default function PermissionOnboarding() {
     }
   }, []);
 
-  function moveNext(step: StepId, result: string) {
-    const notifState = step === 'notification' ? result : perms.notification;
-    const camState = step === 'cameraMic' ? result : perms.cameraMic;
+  function moveNext(id: StepId, result: PermissionState['notification']) {
+    const r = permsRef.current;
+    const newNotif = id === 'notification' ? result : r.notification;
+    const newCam = id === 'cameraMic' ? result : r.cameraMic;
 
-    const notifDone = notifState !== 'pending' && notifState !== 'active';
-    const camDone = camState !== 'pending' && camState !== 'active';
+    permsRef.current = { notification: newNotif, cameraMic: newCam };
+    setPerms({ notification: newNotif, cameraMic: newCam });
+
+    const notifDone = newNotif !== 'pending';
+    const camDone = newCam !== 'pending';
 
     const notifSettled = notifDone || getNotifState() !== 'pending';
     const camSettled = camDone || getCameraMicAsked() !== 'pending';
 
     if (notifSettled && camSettled) {
       setDone(true);
+      setStep(null);
       setTimeout(() => setVisible(false), 800);
       return;
     }
 
     if (!notifDone && getNotifState() === 'pending') {
-      setCurrentStep('notification');
-      setPerms(p => ({ ...p, notification: 'pending' as const }));
+      setStep('notification');
     } else if (!camDone && getCameraMicAsked() === 'pending') {
-      setCurrentStep('cameraMic');
-      setPerms(p => ({ ...p, cameraMic: 'pending' as const }));
+      setStep('cameraMic');
     } else {
       setDone(true);
+      setStep(null);
       setTimeout(() => setVisible(false), 800);
     }
   }
 
   const handleSkip = () => {
-    if (currentStep === 'notification') {
-      setPerms(p => ({ ...p, notification: 'skipped' }));
-      moveNext('notification', 'skipped');
-    } else {
-      setPerms(p => ({ ...p, cameraMic: 'skipped' }));
-      moveNext('cameraMic', 'skipped');
-    }
+    const id: StepId = step!;
+    const upd = { ...permsRef.current, [id]: 'skipped' as const };
+    permsRef.current = upd;
+    setPerms(upd);
+    moveNext(id, 'skipped');
   };
 
   const handleDismissAll = () => {
-    if (currentStep === 'cameraMic') {
+    if (step === 'cameraMic') {
       localStorage.setItem(CAMERA_MIC_KEY, 'skipped');
     }
     setVisible(false);
@@ -411,7 +419,7 @@ export default function PermissionOnboarding() {
     : 'pending';
 
   const allDone = done || (
-    (notifBadge !== 'pending') && (camBadge !== 'pending')
+    notifBadge !== 'pending' && camBadge !== 'pending'
   );
 
   return (
@@ -444,14 +452,14 @@ export default function PermissionOnboarding() {
 
             <Steps>
               <StepCard
-                $state={currentStep === 'notification' ? 'active' : notifBadge}
+                $state={step === 'notification' ? 'active' : notifBadge}
                 onClick={() => {
-                  if (!busy && currentStep === 'notification' && notifBadge === 'pending') {
+                  if (!busy && step === 'notification' && notifBadge === 'pending') {
                     requestNotification();
                   }
                 }}
               >
-                <StepIcon $state={currentStep === 'notification' ? 'active' : notifBadge}>
+                <StepIcon $state={step === 'notification' ? 'active' : notifBadge}>
                   <FiBell />
                 </StepIcon>
                 <StepInfo>
@@ -472,14 +480,14 @@ export default function PermissionOnboarding() {
               </StepCard>
 
               <StepCard
-                $state={currentStep === 'cameraMic' ? 'active' : camBadge}
+                $state={step === 'cameraMic' ? 'active' : camBadge}
                 onClick={() => {
-                  if (!busy && currentStep === 'cameraMic' && camBadge === 'pending') {
+                  if (!busy && step === 'cameraMic' && camBadge === 'pending') {
                     requestCameraMic();
                   }
                 }}
               >
-                <StepIcon $state={currentStep === 'cameraMic' ? 'active' : camBadge}>
+                <StepIcon $state={step === 'cameraMic' ? 'active' : camBadge}>
                   <FiCamera />
                 </StepIcon>
                 <StepInfo>
@@ -504,17 +512,17 @@ export default function PermissionOnboarding() {
               <SkipBtn onClick={handleDismissAll}>
                 <FiX /> Not now
               </SkipBtn>
-              {currentStep && (
+              {step && (
                 <SkipBtn onClick={handleSkip} style={{ color: '#6B7280' }}>
                   <FiSkipForward /> Skip this
                 </SkipBtn>
               )}
-              {currentStep === 'notification' && !busy && (
+              {step === 'notification' && !busy && (
                 <ActionBtn onClick={requestNotification}>
                   <FiBell /> Allow notifications
                 </ActionBtn>
               )}
-              {currentStep === 'cameraMic' && !busy && (
+              {step === 'cameraMic' && !busy && (
                 <ActionBtn onClick={requestCameraMic}>
                   <FiCamera /> <FiMic /> Allow camera &amp; mic
                 </ActionBtn>
