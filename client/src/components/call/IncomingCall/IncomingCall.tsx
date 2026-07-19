@@ -204,10 +204,13 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
   const ringtoneRef = useRef<{ stop: () => void } | null>(null);
 
   useEffect(() => {
+    let ctx: AudioContext | undefined;
+    let osc: OscillatorNode | undefined;
+    let gain: GainNode | undefined;
     try {
-      const ctx = new AudioContext();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
+      ctx = new AudioContext();
+      osc = ctx.createOscillator();
+      gain = ctx.createGain();
       osc.type = 'triangle';
       gain.gain.value = 0;
       osc.connect(gain);
@@ -233,9 +236,17 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
           gain.gain.linearRampToValueAtTime(0, t + 0.05);
         }
       }
-      ringtoneRef.current = { stop: () => { try { osc.stop(); gain.disconnect(); ctx.close(); } catch {} } };
     } catch {}
-    return () => { ringtoneRef.current?.stop(); };
+    return () => {
+      try {
+        if (ctx && ctx.state !== 'closed') {
+          if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+          osc?.stop();
+          gain?.disconnect();
+          ctx.close();
+        }
+      } catch {}
+    };
   }, []);
 
   return (
@@ -246,7 +257,7 @@ export default function IncomingCall({ caller, type, onAccept, onDecline }: Inco
           <Avatar username={caller.username} src={caller.avatar} size={100} />
         </AvatarGlow>
         <CallerName>{caller.username}</CallerName>
-        <CallTypeLabel>FaceTime {type === 'video' ? 'Video' : 'Audio'}</CallTypeLabel>
+        <CallTypeLabel>{type === 'video' ? 'Video' : 'Audio'} Call</CallTypeLabel>
       </CenterContent>
       <BottomActions>
         <MainButtons>
