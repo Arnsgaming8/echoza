@@ -227,6 +227,11 @@ const DoneIcon = styled.div`
   padding: 16px 0;
 `;
 
+const DoneCheck = styled.div`
+  animation: ${checkPop} 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  display: inline-flex;
+`;
+
 const CAMERA_MIC_KEY = 'echoza-cameraMicAsked';
 
 interface PermissionState {
@@ -429,7 +434,9 @@ export default function PermissionOnboarding() {
           <>
             <Header>
               <DoneIcon>
-                <FiCheckCircle size={48} color="#22C55E" style={{ animation: `${checkPop} 0.5s cubic-bezier(0.16, 1, 0.3, 1)` }} />
+                <DoneCheck>
+                  <FiCheckCircle size={48} color="#22C55E" />
+                </DoneCheck>
               </DoneIcon>
               <Title>All set!</Title>
               <Subtitle>You can always change permissions later in Settings.</Subtitle>
