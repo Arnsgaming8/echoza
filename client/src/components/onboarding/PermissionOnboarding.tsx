@@ -27,13 +27,12 @@ const checkPop = keyframes`
 const Overlay = styled.div`
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9998;
   animation: ${fadeIn} 0.3s ease;
-  backdrop-filter: blur(4px);
 `;
 
 const Card = styled.div`
@@ -226,7 +225,6 @@ const DoneIcon = styled.div`
   padding: 16px 0;
 `;
 
-const PERMISSIONS_KEY = 'echoza-permissionsAsked';
 const CAMERA_MIC_KEY = 'echoza-cameraMicAsked';
 
 interface PermissionState {
@@ -247,19 +245,13 @@ export default function PermissionOnboarding() {
   });
 
   useEffect(() => {
-    const asked = localStorage.getItem(PERMISSIONS_KEY);
-    if (asked === '1') return;
-
     const notifState = getNotifState();
     const camState = getCameraMicAsked();
 
     const notifSettled = notifState !== 'pending';
     const camSettled = camState !== 'pending';
 
-    if (notifSettled && camSettled) {
-      localStorage.setItem(PERMISSIONS_KEY, '1');
-      return;
-    }
+    if (notifSettled && camSettled) return;
 
     setPerms({
       notification: notifState,
@@ -370,7 +362,6 @@ export default function PermissionOnboarding() {
     const camSettled = camDone || getCameraMicAsked() !== 'pending';
 
     if (notifSettled && camSettled) {
-      localStorage.setItem(PERMISSIONS_KEY, '1');
       setDone(true);
       setTimeout(() => setVisible(false), 800);
       return;
@@ -383,7 +374,6 @@ export default function PermissionOnboarding() {
       setCurrentStep('cameraMic');
       setPerms(p => ({ ...p, cameraMic: 'pending' as const }));
     } else {
-      localStorage.setItem(PERMISSIONS_KEY, '1');
       setDone(true);
       setTimeout(() => setVisible(false), 800);
     }
@@ -400,7 +390,6 @@ export default function PermissionOnboarding() {
   };
 
   const handleDismissAll = () => {
-    localStorage.setItem(PERMISSIONS_KEY, '1');
     if (currentStep === 'cameraMic') {
       localStorage.setItem(CAMERA_MIC_KEY, 'skipped');
     }
