@@ -1,13 +1,12 @@
 import { useState } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
-import { FiSmartphone, FiCamera } from 'react-icons/fi';
+import { FiCamera } from 'react-icons/fi';
 import { Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
 import { withDeviceHeaders } from '../utils/deviceId';
 import GuestPairPanel from '../components/pair/GuestPairPanel';
-import HostPairPanel from '../components/pair/HostPairPanel';
 import QrScanPanel from '../components/pair/QrScanPanel';
 
 const Wrapper = styled.div`
@@ -118,17 +117,6 @@ const QrButton = styled.button`
   &:disabled {
     opacity: 0.55;
     cursor: not-allowed;
-  }
-`;
-
-const QrScanButton = styled(QrButton)`
-  margin-top: 10px;
-  border-color: ${({ theme }) => theme.colors.primary.echoGreen};
-  background: ${({ theme }) => theme.colors.primary.echoGreen}10;
-  color: ${({ theme }) => theme.colors.primary.echoGreen};
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.primary.echoGreen}22;
   }
 `;
 
@@ -252,7 +240,6 @@ export default function Login() {
   const [serverError, setServerError] = useState('');
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
-  const [qrMode, setQrMode] = useState(false);
   const [qrScanMode, setQrScanMode] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -313,10 +300,6 @@ export default function Login() {
     return <GuestPairPanel />;
   }
 
-  if (qrMode) {
-    return <HostPairPanel onBack={() => setQrMode(false)} />;
-  }
-
   if (qrScanMode) {
     return <QrScanPanel onClose={() => setQrScanMode(false)} />;
   }
@@ -358,21 +341,12 @@ export default function Login() {
 
         <QrButton
           type="button"
-          onClick={() => setQrMode(true)}
-          disabled={loading}
-        >
-          <FiSmartphone />
-          Log in with QR code
-        </QrButton>
-
-        <QrScanButton
-          type="button"
           onClick={() => setQrScanMode(true)}
           disabled={loading}
         >
           <FiCamera />
           Scan QR code to log in
-        </QrScanButton>
+        </QrButton>
 
         <StyledLink to="/signup">Don't have an account? Sign up</StyledLink>
       </Card>
