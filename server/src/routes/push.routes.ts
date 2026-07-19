@@ -97,6 +97,80 @@ router.post('/unsubscribe', async (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+router.get('/subscriptions', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'No token provided' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  const decoded = await verifyAccessToken(token);
+  if (!decoded) {
+    res.status(401).json({ error: 'Invalid token' });
+    return;
+  }
+
+  const subs = await fetchAll<{ endpoint: string; p256dh: string; created_at: string }>(
+    `SELECT endpoint, p256dh, created_at
+       FROM push_subscriptions
+       WHERE user_id = $1
+       ORDER BY created_at DESC`,
+    [decoded.userId],
+  );
+
+  res.json({
+    count: subs.length,
+    subscriptions: subs.map(s => ({
+      endpoint: s.endpoint,
+      endpointPrefix: s.endpoint.slice(0, 60),
+      p256dhPrefix: s.p256dh.slice(0, 16),
+      created_at: s.created_at,
+    })),
+  });
+});
+
+router.post('/subscriptions/cleanup', async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'No token provided' });
+    return;
+  }
+  const token = authHeader.split(' ')[1];
+  const decoded = await verifyAccessToken(token);
+  if (!decoded) {
+    res.status(401).json({ error: 'Invalid token' });
+    return;
+  }
+
+  const { keepEndpoint } = req.body || {};
+  if (keepEndpoint !== undefined && (typeof keepEndpoint !== 'string' || keepEndpoint.length === 0)) {
+    res.status(400).json({ error: 'keepEndpoint must be a non-empty string when provided' });
+    return;
+  }
+
+  const result = keepEndpoint
+    ? await fetchOne<{ deleted_count: number }>(
+        `WITH deleted AS (
+           DELETE FROM push_subscriptions
+             WHERE user_id = $1 AND endpoint <> $2
+             RETURNING 1
+         )
+         SELECT COUNT(*)::int AS deleted_count FROM deleted`,
+        [decoded.userId, keepEndpoint],
+      )
+    : await fetchOne<{ deleted_count: number }>(
+        `WITH deleted AS (
+           DELETE FROM push_subscriptions
+             WHERE user_id = $1
+             RETURNING 1
+         )
+         SELECT COUNT(*)::int AS deleted_count FROM deleted`,
+        [decoded.userId],
+      );
+
+  res.json({ success: true, deletedCount: result?.deleted_count ?? 0 });
+});
+
 
 
 

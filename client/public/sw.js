@@ -74,68 +74,76 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-});
+});self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    if (!event.data) return;
 
-self.addEventListener('push', (event) => {
-  if (!event.data) return;
+    let title = 'Echoza';
+    let body = '';
+    let tag;
+    let callType;
+    let callerId;
+    let callerUsername;
+    let extraData = { url: '/', conversationId: undefined, callType: null, callerId: null, callerUsername: null };
 
-  let data;
-  try {
-    data = event.data.json();
-  } catch {
-    event.waitUntil(self.registration.showNotification('Echoza', {
-      body: event.data.text(),
-      icon: '/vite.svg',
-    }));
-    return;
-  }
-  const title = data.title || 'Echoza';
-  const callType = data.callType;
-  const callerId = data.callerId;
-  const callerUsername = data.callerUsername;
-  const options = {
-    body: data.body || '',
-    icon: '/vite.svg',
-    badge: '/vite.svg',
-    
-    
-    tag: data.tag || (callType ? `call-${callerId || 'unknown'}` : undefined),
-    renotify: !!callType,
-    
-    
-    
-    
-    requireInteraction: !callType,
-    data: {
-      url: data.url || '/',
-      conversationId: data.conversationId,
-      callType: callType || null,
-      callerId: callerId || null,
-      callerUsername: callerUsername || null,
-    },
-  };
-  event.waitUntil(
-    self.registration.showNotification(title, options).then(() => {
-      
-      
-      
-      
-      
-      if (callType && callerId) {
-        return self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
-          for (const client of windowClients) {
-            client.postMessage({
-              type: 'incoming-call',
-              callType,
-              callerId,
-              callerUsername: callerUsername || null,
-            });
-          }
-        });
+    try {
+      const data = event.data.json();
+      title = data.title || 'Echoza';
+      body = data.body || '';
+      tag = data.tag;
+      callType = data.callType;
+      callerId = data.callerId;
+      callerUsername = data.callerUsername;
+      extraData = {
+        url: data.url || '/',
+        conversationId: data.conversationId,
+        callType: callType || null,
+        callerId: callerId || null,
+        callerUsername: callerUsername || null,
+      };
+    } catch {
+      try {
+        body = event.data.text();
+      } catch {
+        return;
       }
-      return undefined;
-    })
-  );
+    }
+
+    const baseOptions = { body, icon: '/vite.svg', data: extraData };
+    if (tag) baseOptions.tag = tag;
+    if (callType && callerId) {
+      if (!baseOptions.tag) baseOptions.tag = `call-${callerId}`;
+      baseOptions.renotify = true;
+      baseOptions.requireInteraction = true;
+    }
+
+    let shown = false;
+    try {
+      await self.registration.showNotification(title, baseOptions);
+      shown = true;
+    } catch {}
+
+    if (!shown) {
+      try {
+        await self.registration.showNotification(title, { body, icon: '/vite.svg' });
+        shown = true;
+      } catch {}
+    }
+
+    if (shown && callType && callerId) {
+      try {
+        const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of windowClients) {
+          client.postMessage({
+            type: 'incoming-call',
+            callType,
+            callerId,
+            callerUsername: callerUsername || null,
+          });
+        }
+      } catch {}
+    }
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
