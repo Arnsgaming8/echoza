@@ -266,8 +266,6 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     const run = async () => {
       if (cancelled) return;
 
-      if (cancelled) return;
-
       const pc = new RTCPeerConnection(ICE_CONFIG);
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
@@ -337,11 +335,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-        if (e.track.kind === 'audio' && playbackCtxRef.current && analyserRef.current) {
+        if (playbackCtxRef.current && analyserRef.current && e.track.kind === 'audio') {
           try {
             const src = playbackCtxRef.current.createMediaStreamSource(new MediaStream([e.track]));
             src.connect(analyserRef.current);
-            analyserRef.current.connect(playbackGainRef.current!);
           } catch {}
         }
         setConnected(true);
@@ -349,19 +346,12 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       };
 
       pc.onicecandidate = handleIceCandidate;
-      pc.ontrack = handleTrack;
-
-      
-      
-      
-      
-      
-      pc.oniceconnectionstatechange = () => {
+      pc.ontrack = handleTrack;      pc.oniceconnectionstatechange = () => {
+        if (pc.iceConnectionState === 'connected') {
+          stopRingtone();
+        }
         if (pc.iceConnectionState === 'failed') {
           try { pc.restartIce(); } catch {}
-          
-          
-          
           setTimeout(() => {
             const cur = pcRef.current;
             if (cur && cur.iceConnectionState === 'failed') {
