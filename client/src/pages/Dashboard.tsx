@@ -13,6 +13,7 @@ import ProfileEditModal from '../components/chat/ProfileEditModal';
 import SettingsModal from '../components/chat/SettingsModal';
 import PwaGuide from '../components/onboarding/PwaGuide';
 import InstallBanner from '../components/onboarding/InstallBanner';
+import PermissionOnboarding from '../components/onboarding/PermissionOnboarding';
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -1419,6 +1420,7 @@ export default function Dashboard() {
         />
       )}
 
+      <PermissionOnboarding />
       <PwaGuide />
       <InstallBanner />
       {!showAudioCall && !showVideoCall && !incomingCall && (
