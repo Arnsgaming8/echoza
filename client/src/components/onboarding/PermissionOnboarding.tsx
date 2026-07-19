@@ -258,16 +258,15 @@ export default function PermissionOnboarding() {
   useEffect(() => {
     const notifState = getNotifState();
     const camState = getCameraMicAsked();
+    const initState = { notification: notifState, cameraMic: camState };
 
     const notifSettled = notifState !== 'pending';
     const camSettled = camState !== 'pending';
 
     if (notifSettled && camSettled) return;
 
-    setPerms({
-      notification: notifState,
-      cameraMic: camState,
-    });
+    permsRef.current = initState;
+    setPerms(initState);
 
     const firstStep: StepId | null = notifState === 'pending' ? 'notification'
       : camState === 'pending' ? 'cameraMic'
