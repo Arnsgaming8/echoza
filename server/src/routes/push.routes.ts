@@ -6,6 +6,8 @@ import { getVapidKeys } from '../vapid.js';
 
 const router = Router();
 
+const MAX_PUSH_SUBS_PER_USER = 10;
+
 
 
 
@@ -53,6 +55,17 @@ router.post('/subscribe', async (req: Request, res: Response) => {
        ON CONFLICT (user_id, endpoint)
        DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth`,
     [decoded.userId, endpoint, keys.p256dh, keys.auth],
+  );
+  await fetchOne(
+    `DELETE FROM push_subscriptions
+       WHERE user_id = $1
+         AND endpoint NOT IN (
+           SELECT endpoint FROM push_subscriptions
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT $2
+         )`,
+    [decoded.userId, MAX_PUSH_SUBS_PER_USER],
   );
   res.json({ success: true });
 });

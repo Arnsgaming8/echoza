@@ -272,18 +272,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const sub = await reg.pushManager.getSubscription();
           if (!sub) return;
           const endpoint = sub.endpoint;
+          const cleanupFetch = endpoint
+            ? fetch(apiUrl('/api/push/unsubscribe'), {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${tokenAtLogout}`,
+                },
+                body: JSON.stringify({ endpoint }),
+                keepalive: true,
+              }).catch(() => {})
+            : Promise.resolve();
           await sub.unsubscribe().catch(() => {});
-          if (endpoint) {
-            await fetch(apiUrl('/api/push/unsubscribe'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${tokenAtLogout}`,
-              },
-              body: JSON.stringify({ endpoint }),
-              keepalive: true,
-            }).catch(() => {});
-          }
+          await cleanupFetch;
         } catch {
         }
       })();

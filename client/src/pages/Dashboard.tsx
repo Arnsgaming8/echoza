@@ -402,13 +402,37 @@ export default function Dashboard() {
         const reg = await navigator.serviceWorker.ready;
         if (cancelled) return;
 
-        const sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(publicKey) as any,
-        });
-        if (cancelled) {
-          sub.unsubscribe().catch(() => {});
-          return;
+        let sub = await reg.pushManager.getSubscription().catch(() => null);
+        if (sub) {
+          const currentKey = urlBase64ToUint8Array(publicKey);
+          const subKey = sub.options?.applicationServerKey as ArrayBuffer | Uint8Array | undefined;
+          const subKeyArr = subKey instanceof Uint8Array
+            ? subKey
+            : subKey instanceof ArrayBuffer
+              ? new Uint8Array(subKey)
+              : null;
+          let needsNewSub = true;
+          if (subKeyArr && subKeyArr.length === currentKey.length) {
+            let keysMatch = true;
+            for (let i = 0; i < currentKey.length; i++) {
+              if (subKeyArr[i] !== currentKey[i]) { keysMatch = false; break; }
+            }
+            needsNewSub = !keysMatch;
+          }
+          if (needsNewSub) {
+            await sub.unsubscribe().catch(() => {});
+            sub = null;
+          }
+        }
+        if (!sub) {
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlBase64ToUint8Array(publicKey) as any,
+          });
+          if (cancelled) {
+            sub.unsubscribe().catch(() => {});
+            return;
+          }
         }
 
         
