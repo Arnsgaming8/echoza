@@ -5,8 +5,8 @@ import { isIOS } from './iosCapability';
 
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: ['turn:161.153.65.53:3478', 'turn:161.153.65.53:3478?transport=tcp'], username: 'echoza', credential: 'echoza123' },
+    { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+    { urls: ['turn:openrelay.metered.ca:80'], username: 'openrelayproject', credential: 'openrelayproject' },
   ],
 };
 
@@ -275,20 +275,30 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       } else if (Array.isArray(cached)) {
         cachedServers = cached as any[];
       }
-      if (cachedServers && Date.now() - cachedFetchedAt < 300_000) {
-        config = { iceServers: cachedServers };
-      } else {
+      if (!cachedServers || Date.now() - cachedFetchedAt >= 300_000) {
         try {
           const res = await fetch(apiUrl('/api/ice-config'));
           const data = await res.json();
           if (data?.iceServers) {
-            config = { iceServers: data.iceServers };
+            cachedServers = data.iceServers;
             (window as any)._echozaIce = {
               iceServers: data.iceServers,
               fetchedAt: Date.now(),
             };
           }
         } catch {}
+      }
+      if (cachedServers) {
+        const merged = [...cachedServers];
+        for (const fb of FALLBACK_ICE_CONFIG.iceServers || []) {
+          const fbUrls = Array.isArray(fb.urls) ? fb.urls : [fb.urls];
+          const exists = merged.some(ex => {
+            const exUrls = Array.isArray(ex.urls) ? ex.urls : [ex.urls];
+            return exUrls.some((eu: string) => fbUrls.includes(eu));
+          });
+          if (!exists) merged.push(fb);
+        }
+        config = { iceServers: merged };
       }
 
       if (cancelled) return;
