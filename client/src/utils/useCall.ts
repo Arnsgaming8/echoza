@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
-import { apiUrl } from './api';
 import { isIOS } from './iosCapability';
 
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
@@ -261,49 +260,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     let cancelled = false;
 
     const run = async () => {
-      let config: RTCConfiguration = FALLBACK_ICE_CONFIG;
-      
-      
-      
-      
-      const cached = (window as any)._echozaIce;
-      let cachedServers: any[] | null = null;
-      let cachedFetchedAt = 0;
-      if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
-        if (Array.isArray(cached.iceServers)) cachedServers = cached.iceServers;
-        cachedFetchedAt = cached.fetchedAt || 0;
-      } else if (Array.isArray(cached)) {
-        cachedServers = cached as any[];
-      }
-      if (!cachedServers || Date.now() - cachedFetchedAt >= 300_000) {
-        try {
-          const res = await fetch(apiUrl('/api/ice-config'));
-          const data = await res.json();
-          if (data?.iceServers) {
-            cachedServers = data.iceServers;
-            (window as any)._echozaIce = {
-              iceServers: data.iceServers,
-              fetchedAt: Date.now(),
-            };
-          }
-        } catch {}
-      }
-      if (cachedServers) {
-        const merged = [...cachedServers];
-        for (const fb of FALLBACK_ICE_CONFIG.iceServers || []) {
-          const fbUrls = Array.isArray(fb.urls) ? fb.urls : [fb.urls];
-          const exists = merged.some(ex => {
-            const exUrls = Array.isArray(ex.urls) ? ex.urls : [ex.urls];
-            return exUrls.some((eu: string) => fbUrls.includes(eu));
-          });
-          if (!exists) merged.push(fb);
-        }
-        config = { iceServers: merged };
-      }
-
       if (cancelled) return;
 
-      const pc = new RTCPeerConnection(config);
+      const pc = new RTCPeerConnection(FALLBACK_ICE_CONFIG);
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
