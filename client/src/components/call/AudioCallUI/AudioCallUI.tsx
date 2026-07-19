@@ -369,7 +369,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
 
   return (
     <Overlay>
-      <audio ref={audioRef} autoPlay playsInline muted />
+      <audio ref={audioRef} autoPlay playsInline />
       {!ended && (
         <AvatarRing $connected={connected}>
           {(connected || callStatus === 'ringing') && [0, 1, 2].map(i => (

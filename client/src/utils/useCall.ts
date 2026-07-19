@@ -30,9 +30,9 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const [callStatus, setCallStatus] = useState<'ringing' | 'missed' | 'declined' | 'connected' | 'failed'>('ringing');
   const [audioLevel, setAudioLevel] = useState(0);
   const [callError, setCallError] = useState<string | null>(null);
-  // Server emits `call:ringing` ACK with `{ offline }` flag in <50ms after
-  // the offer. UI uses this to swap between 'Ringing…' and 'Notifying…'
-  // messaging on the caller's side. null = the ACK hasn't arrived yet.
+  
+  
+  
   const [receiverReachable, setReceiverReachable] = useState<boolean | null>(null);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -43,11 +43,11 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const endTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const missedRef = useRef(false);
-  // Buffer remote ICE candidates that arrive BEFORE we've set the remote
-  // description. addIceCandidate throws InvalidStateError when called
-  // without one; queuing them and draining after setRemoteDescription
-  // resolves means host/srflx/relay candidates from the peer don't get
-  // silently dropped during the offer→answer chain.
+  
+  
+  
+  
+  
   const pendingIceCandidatesRef = useRef<RTCIceCandidate[]>([]);
   const flushPendingIceCandidatesRef = useRef<(() => void) | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -62,13 +62,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
   const onEndRef = useRef(onEnd);
   onEndRef.current = onEnd;
 
-  // NOTE: The toggle pattern `track.enabled = isMuted; setIsMuted(!isMuted)`
-  // looks inverted but is actually CORRECT. `isMuted` is the CURRENT state
-  // (before the toggle). Setting `track.enabled = isMuted` means:
-  //   - isMuted=false (unmuted) → track.enabled=false → audio OFF → now muted ✓
-  //   - isMuted=true (muted) → track.enabled=true → audio ON → now unmuted ✓
-  // The subsequent setIsMuted(!isMuted) flips the state for the NEXT click.
-  // DO NOT change this to `!isMuted` — that would invert the toggle.
+  
+  
+  
+  
+  
+  
+  
   const toggleMute = useCallback(() => {
     const pc = pcRef.current;
     if (!pc) return;
@@ -93,8 +93,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     setIsCameraOn(!isCameraOn);
   }, [isCameraOn]);
 
-  // FIX #25: flipCamera now surfaces failure with setCallError so
-  // single-camera devices get UI feedback instead of silent swallow.
+  
+  
   const flipCamera = useCallback(() => {
     const stream = localStreamRef.current;
     if (!stream) return;
@@ -189,11 +189,11 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     endTimerRef.current = setTimeout(() => handleEnd(), 2000);
   }, [handleEnd]);
 
-  // Surface a setup failure for the CALLEE side (incoming) so the caller
-  // knows the callee can't pick up. The OUTGOING side intentionally does
-  // NOT call this — when the caller has no mic/camera, the other party's
-  // phone keeps ringing (just like before) and the caller can hang up
-  // manually or hit the 60s ringing timeout.
+  
+  
+  
+  
+  
   const failCall = useCallback((err: any) => {
     if (missedRef.current) return;
     missedRef.current = true;
@@ -226,13 +226,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     endTimerRef.current = setTimeout(() => handleEnd(), 2500);
   }, [socket, contact, type, handleEnd]);
 
-  // Timer
+  
   useEffect(() => {
     timerRef.current = setInterval(() => setSeconds(s => s + 1), 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
-  // Ringing timeout
+  
   useEffect(() => {
     if (callStatus !== 'ringing') return;
     ringingRef.current = setTimeout(() => {
@@ -247,13 +247,14 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     return () => { if (ringingRef.current) clearTimeout(ringingRef.current); };
   }, [connected, callStatus, socket, contact, type, delayedEnd]);
 
-  // Ringtone
+  
   useEffect(() => {
     if (callStatus === 'ringing') startRingtone();
     else stopRingtone();
+    return () => stopRingtone();
   }, [callStatus, startRingtone, stopRingtone]);
 
-  // Setup peer connection + media
+  
   useEffect(() => {
     if (!user || !socket) return;
 
@@ -261,10 +262,10 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
     const run = async () => {
       let config: RTCConfiguration = FALLBACK_ICE_CONFIG;
-      // ICE pre-warm: Dashboard mounts fetch /api/ice-config and stash
-      // { iceServers, fetchedAt } on window._echozaIce. Use it instantly
-      // when fresh, otherwise re-fetch transparently so rotated TURN
-      // credentials don't silently poison the call.
+      
+      
+      
+      
       const cached = (window as any)._echozaIce;
       let cachedServers: any[] | null = null;
       let cachedFetchedAt = 0;
@@ -296,13 +297,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
-      // Setup local media with progressive constraint relaxation. NotFoundError
-      // on the first pass is the most common 'no mic/camera' symptom — it's
-      // triggered by (a) Chromium's tab-cold-start device-enumeration race,
-      // or (b) a hardware-with-no-camera plus an outgoing video call. We
-      // retry once after a short delay, then if STILL failing AND this is
-      // a video call, drop the video constraint and accept an audio-only
-      // call as a graceful fallback instead of failing the call entirely.
+      
+      
+      
+      
+      
+      
+      
       const setupLocalMedia = async (attempt = 0): Promise<void> => {
         const wantVideo = type === 'video' && attempt < 2;
         try {
@@ -317,22 +318,22 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
             pc.addTrack(track, stream);
           });
           if (!wantVideo && type === 'video') {
-            // Camera unavailable but proceeding audio-only. Caller and
-            // peer both know the call is voice-only.
+            
+            
             console.warn('[useCall] camera unavailable, proceeding audio-only');
           }
           return;
         } catch (err: any) {
           if (err?.name === 'NotFoundError') {
             if (attempt === 0) {
-              // First NotFoundError: Chromium's tab-cold-start race.
-              // Wait briefly and retry — devices usually reappear.
+              
+              
               await new Promise(r => setTimeout(r, 400));
               return setupLocalMedia(1);
             }
             if (attempt === 1 && type === 'video') {
-              // Video caller's camera is genuinely missing. Drop video
-              // and run as audio-only so the call still succeeds.
+              
+              
               return setupLocalMedia(2);
             }
           }
@@ -368,17 +369,17 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       pc.onicecandidate = handleIceCandidate;
       pc.ontrack = handleTrack;
 
-      // ICE failure recovery. WebRTC's standard fix is restartIce() — the
-      // browser re-gathers using the existing ICE config and (re)negotiates.
-      // This is what actually achieves the "100% reach" goal when one side
-      // is behind a NAT that needed a relay candidate that wasn't ready at
-      // the original gathering time.
+      
+      
+      
+      
+      
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === 'failed') {
           try { pc.restartIce(); } catch {}
-          // After 6s, if still failed, surface as a setup error so the
-          // caller sees the same UX as a permission/mic failure rather than
-          // a silent hang.
+          
+          
+          
           setTimeout(() => {
             const cur = pcRef.current;
             if (cur && cur.iceConnectionState === 'failed') {
@@ -401,29 +402,29 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       flushPendingIceCandidatesRef.current = flushPendingIceCandidates;
 
       if (direction === 'outgoing') {
-        // FIX #3: Wait for setupLocalMedia to FULLY settle (including the
-        // NotFoundError retry + audio-only fallback cascade) before
-        // creating the offer. Previously the chain ran createOffer
-        // immediately after the first getUserMedia attempt, so if a
-        // second attempt=2 audio-only path was still pending, the SDP
-        // advertised a video track the user couldn't actually send.
+        
+        
+        
+        
+        
+        
         setupLocalMedia().then(() => {
-          // Re-check what tracks we actually have after all retries.
-          // If we ended up audio-only on a video call, update the offer
-          // to reflect reality so the receiver doesn't expect video.
+          
+          
+          
           return pc.createOffer();
         }).then(offer => {
-          // iOS Safari 17+ SDP hardening. Inject extmap-allow-mixed if
-          // the browser omitted it — required for some iOS interop paths
-          // and harmless on Chromium. The `replaceTrack` flow later in
-          // `flipCamera` benefits from this too because the relay
-          // candidate needs to be in the same bundle group.
+          
+          
+          
+          
+          
           if (isIOS() && offer.sdp && !offer.sdp.includes('a=extmap-allow-mixed')) {
-            // Insert the attribute at the correct SDP position: just
-            // before the first m= line (session-level attributes belong
-            // there). A previous version prepended the attribute to the
-            // ENTIRE SDP, placing it before v=0 — invalid SDP, the
-            // browser rejected the local description, no media flowed.
+            
+            
+            
+            
+            
             const lines = offer.sdp.split(/\r\n|\n/);
             let insertIdx = lines.length;
             for (let i = 0; i < lines.length; i++) {
@@ -441,18 +442,18 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           });
         }).catch(err => {
           console.warn('Outgoing call setup failed:', err);
-          // Surface the failure to the caller too — previously the chain
-          // swallowed setup errors and the UI stuck on a silent 'Calling...'
-          // with no progress indication. failCall() emits call:end to
-          // release the receiver (so they don't see a phantom ring) and
-          // shows a friendly error overlay on the caller side.
+          
+          
+          
+          
+          
           if (!missedRef.current) failCall(err);
         });
 
-        // Re-emit the offer if the socket cycles mid-ringing. The receiver
-        // path is unaffected, but our local SDP is still valid, and a fresh
-        // socket means the server's pending-call timer tied to the old
-        // socket id may have been orphaned. Replaying the offer re-binds it.
+        
+        
+        
+        
         const onSocketReconnect = () => {
           const live = pcRef.current;
           if (live?.localDescription?.sdp) {
@@ -465,8 +466,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         };
         socket.io.on('reconnect', onSocketReconnect);
 
-        // Server ack telling us whether the receiver is reachable. Drives
-        // 'Ringing…' vs 'Notifying…' on the caller UI within ~50 ms.
+        
+        
         const onRingingAck = ({ offline }: { offline: boolean }) => {
           setReceiverReachable(!offline);
         };
@@ -485,8 +486,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           const pcNow = pcRef.current;
           if (!pcNow) return;
           const c = new RTCIceCandidate(candidate);
-          // No remote description yet → queue; flushPendingIceCandidates()
-          // drains when the offer→answer setRemoteDescription completes.
+          
+          
           if (!pcNow.remoteDescription && !pcNow.currentRemoteDescription) {
             pendingIceCandidatesRef.current.push(c);
             return;

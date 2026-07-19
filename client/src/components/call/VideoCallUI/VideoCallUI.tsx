@@ -452,11 +452,11 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     }
   }, [connected]);
 
-  // Attach streams to video elements
+  
   useEffect(() => { if (localVideoRef.current && localStream) localVideoRef.current.srcObject = localStream; }, [localStream]);
   useEffect(() => { if (remoteVideoRef.current && remoteStream) { remoteVideoRef.current.srcObject = remoteStream; remoteVideoRef.current.play().catch(() => {}); } }, [remoteStream]);
 
-  // Track if remote camera is off
+  
   useEffect(() => {
     if (!remoteStream) return;
     const videoTracks = remoteStream.getVideoTracks();
@@ -479,7 +479,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     };
   }, [remoteStream]);
 
-  // Track if remote camera is off
+  
   useEffect(() => {
     navigator.mediaDevices.enumerateDevices().then(devices => {
       setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
@@ -611,7 +611,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
 
       {!ended && (
         <>
-          <RemoteVideo ref={remoteVideoRef} autoPlay playsInline muted />
+          <RemoteVideo ref={remoteVideoRef} autoPlay playsInline />
           {remoteCameraOff && connected && (
             <RemoteAvatarOverlay>
               <CameraOffAvatar>
