@@ -5,8 +5,7 @@ import { isIOS } from './iosCapability';
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.relay.metered.ca:80' },
-    { urls: ['turn:global.relay.metered.ca:80', 'turn:global.relay.metered.ca:80?transport=tcp'], username: '13af9d99d0f6f0254ce27aab', credential: 'pYBC0Ja7sKi04no3' },
-    { urls: ['turn:global.relay.metered.ca:443', 'turns:global.relay.metered.ca:443?transport=tcp'], username: '13af9d99d0f6f0254ce27aab', credential: 'pYBC0Ja7sKi04no3' },
+    { urls: ['turn:global.relay.metered.ca:80', 'turn:global.relay.metered.ca:443', 'turns:global.relay.metered.ca:443?transport=tcp'], username: '13af9d99d0f6f0254ce27aab', credential: 'pYBC0Ja7sKi04no3' },
   ],
 };
 

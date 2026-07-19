@@ -636,20 +636,6 @@ export default function Dashboard() {
   
   
   
-  useEffect(() => {
-    fetch(apiUrl('/api/ice-config'))
-      .then(r => r.json())
-      .then(d => {
-        if (d?.iceServers) {
-          (window as any)._echozaIce = {
-            iceServers: d.iceServers,
-            fetchedAt: Date.now(),
-          };
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   const KEEPALIVE_INTERVAL = 16 * 60 * 1000;
   useEffect(() => {
     const ping = () => {
