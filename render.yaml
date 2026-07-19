@@ -22,7 +22,7 @@ services:
       - key: DATABASE_URL
         value: postgresql://neondb_owner:npg_3oIGjm1MDfZr@ep-solitary-violet-at50sbq6-pooler.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: TURN_URL
-        value: turn:161.153.65.53:3478
+        value: turn:129.146.134.55:3478
       - key: TURN_USERNAME
         value: echoza
       - key: TURN_CREDENTIAL
