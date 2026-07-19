@@ -647,7 +647,17 @@ export default function Dashboard() {
           };
         }
       })
-      .catch(() => { /* FALLBACK_ICE_CONFIG in useCall.ts already covers cold start */ });
+      .catch(() => {});
+  }, []);
+
+  const KEEPALIVE_INTERVAL = 16 * 60 * 1000;
+  useEffect(() => {
+    const ping = () => {
+      fetch(apiUrl('/api/health')).catch(() => {});
+    };
+    ping();
+    const id = setInterval(ping, KEEPALIVE_INTERVAL);
+    return () => clearInterval(id);
   }, []);
 
   
