@@ -3,6 +3,7 @@ export const lightTheme = {
   colors: {
     primary: {
       echoBlue: '#3A7BFF',
+      echoGreen: '#22C55E',
       deepNavy: '#0F1A2F',
       softWhite: '#F5F7FA',
     },
@@ -83,6 +84,7 @@ export const darkTheme = {
     ...lightTheme.colors,
     primary: {
       echoBlue: '#3A7BFF',
+      echoGreen: '#22C55E',
       deepNavy: '#0F1A2F',
       softWhite: '#1A1D26',
     },
