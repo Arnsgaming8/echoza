@@ -6,6 +6,11 @@ const STUN_ONLY_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
 };
 const METERED_API_KEY = '01f1b35814cb7141d57495f79d7806cb97a6';
+const ORACLE_TURN: RTCIceServer = {
+  urls: ['turn:129.146.134.55:3478', 'turn:129.146.134.55:3478?transport=tcp'],
+  username: 'echoza',
+  credential: 'echoza123',
+};
 
 interface UseCallOptions {
   socket: Socket | null;
@@ -279,7 +284,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
       if (cancelled) return;
 
-      const pc = new RTCPeerConnection(config);
+      const servers = (config.iceServers || []).concat(ORACLE_TURN);
+      const pc = new RTCPeerConnection({ iceServers: servers });
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
