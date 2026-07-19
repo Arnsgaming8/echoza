@@ -6,7 +6,7 @@ import { isIOS } from './iosCapability';
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
-    { urls: ['turn:openrelay.metered.ca:80'], username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: ['turn:turn.metered.ca:80', 'turn:turn.metered.ca:443'], username: '13af9d99d0f6f0254ce27aab', credential: 'pYBC0Ja7sKi04no3' },
   ],
 };
 
