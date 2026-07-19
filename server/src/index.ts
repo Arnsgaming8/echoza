@@ -352,6 +352,12 @@ async function runTest(relayOnly=false){
   
   const clientDist = join(__dirname, '..', '..', 'client', 'dist');
   if (existsSync(clientDist)) {
+    app.get('/sw.js', (_req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(join(clientDist, 'sw.js'));
+    });
     app.use(express.static(clientDist, { maxAge: '1y', immutable: true, index: false }));
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');

@@ -6,7 +6,7 @@ import App from './App';
 
 
 
-const STORAGE_VERSION = '7';
+const STORAGE_VERSION = '8';
 const storedVersion = localStorage.getItem('echoza-storage-version');
 if (storedVersion !== STORAGE_VERSION) {
   localStorage.setItem('echoza-storage-version', STORAGE_VERSION);
