@@ -3,6 +3,8 @@ const STATIC_ASSETS = ['/vite.svg'];
 let HEARTBEAT_TOKEN = '';
 let HEARTBEAT_INTERVAL = null;
 
+const NOTIF_ICON_DATA_URI = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="32" fill="#3A7BFF"/><text x="96" y="132" text-anchor="middle" fill="white" font-size="108" font-weight="800" font-family="sans-serif">E</text></svg>');
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE).then(cache => cache.addAll(STATIC_ASSETS)).catch(() => {})
@@ -23,14 +25,7 @@ function startHeartbeat() {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + HEARTBEAT_TOKEN, 'Content-Type': 'application/json' },
     }).catch(() => {});
-    
-    
-    
-    
-    
-    
-    
-    
+
     HEARTBEAT_TICK_COUNT++;
     if (HEARTBEAT_TICK_COUNT % 5 !== 0) return;
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windowClients => {
@@ -74,7 +69,9 @@ self.addEventListener('fetch', (event) => {
     );
     return;
   }
-});self.addEventListener('push', (event) => {
+});
+
+self.addEventListener('push', (event) => {
   console.log('[SW] push event received, hasData=', !!event.data);
   event.waitUntil((async () => {
     if (!event.data) return;
@@ -113,7 +110,7 @@ self.addEventListener('fetch', (event) => {
       }
     }
 
-    const baseOptions = { body, icon: '/vite.svg', data: extraData };
+    const baseOptions = { body, icon: NOTIF_ICON_DATA_URI, data: extraData };
     if (tag) baseOptions.tag = tag;
     if (callType && callerId) {
       if (!baseOptions.tag) baseOptions.tag = `call-${callerId}`;
@@ -125,23 +122,33 @@ self.addEventListener('fetch', (event) => {
     try {
       await self.registration.showNotification(title, baseOptions);
       shown = true;
-      console.log('[SW] showNotification OK (full options)');
+      console.log('[SW] showNotification OK (full options with data URI icon)');
     } catch (err1) {
       console.log('[SW] showNotification FAILED (full options):', err1?.message || err1);
     }
 
     if (!shown) {
       try {
-        await self.registration.showNotification(title, { body, icon: '/vite.svg' });
+        await self.registration.showNotification(title, { body, icon: NOTIF_ICON_DATA_URI });
         shown = true;
-        console.log('[SW] showNotification OK (minimal fallback)');
+        console.log('[SW] showNotification OK (minimal with data URI icon)');
       } catch (err2) {
-        console.log('[SW] showNotification FAILED (minimal fallback):', err2?.message || err2);
+        console.log('[SW] showNotification FAILED (minimal with data URI icon):', err2?.message || err2);
       }
     }
 
     if (!shown) {
-      console.log('[SW] notification NOT shown — both attempts failed');
+      try {
+        await self.registration.showNotification(title, { body });
+        shown = true;
+        console.log('[SW] showNotification OK (no icon fallback)');
+      } catch (err3) {
+        console.log('[SW] showNotification FAILED (no icon fallback):', err3?.message || err3);
+      }
+    }
+
+    if (!shown) {
+      console.log('[SW] notification NOT shown — all attempts failed');
     }
 
     if (shown && callType && callerId) {
@@ -164,12 +171,7 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const data = event.notification.data || {};
-  
-  
-  
-  
-  
-  
+
   const conversationId = data.conversationId;
   const deepLink = conversationId
     ? `/dashboard?conv=${encodeURIComponent(conversationId)}`
@@ -181,10 +183,6 @@ self.addEventListener('notificationclick', (event) => {
       if (windowClients.length > 0) {
         const client = windowClients[0];
         client.focus();
-        
-        
-        
-        
         if (callType) {
           client.postMessage({
             type: 'incoming-call',
@@ -197,10 +195,6 @@ self.addEventListener('notificationclick', (event) => {
         }
         return;
       }
-      
-      
-      
-      
       clients.openWindow(deepLink);
     })
   );
@@ -219,7 +213,7 @@ self.addEventListener('message', (event) => {
   if (data?.type === 'show-notification') {
     self.registration.showNotification(event.data.title, {
       body: event.data.body,
-      icon: event.data.icon || '/vite.svg',
+      icon: event.data.icon || NOTIF_ICON_DATA_URI,
       tag: event.data.tag,
       data: event.data.data || {},
     });

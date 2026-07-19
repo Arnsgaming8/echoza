@@ -24,7 +24,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
-import { canMakeWebRTCCall, canIOSReceivePush } from '../utils/iosCapability';
+import { canMakeWebRTCCall, canIOSReceivePush, isIOS, isIOSStandalone } from '../utils/iosCapability';
 
 
 
@@ -502,6 +502,25 @@ export default function Dashboard() {
     navigator.serviceWorker.addEventListener('controllerchange', handleSwUpdate);
     return () => navigator.serviceWorker.removeEventListener('controllerchange', handleSwUpdate);
   }, []);
+
+  
+  
+  
+  
+  
+  
+  useEffect(() => {
+    if (!user?.id) return;
+    if (!isIOS() || !isIOSStandalone()) return;
+    if (!canIOSReceivePush()) return;
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        setSubscribeNonce(n => n + 1);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [user?.id]);
 
   useEffect(() => {
     
