@@ -199,7 +199,7 @@ router.post('/test', async (req: Request, res: Response) => {
     res.json({ success: false, reason: 'no_subscriptions' });
     return;
   }
-  await sendPushNotification(
+  const results = await sendPushNotification(
     decoded.userId,
     'Echoza test push',
     'Notifications are working!',
@@ -207,7 +207,18 @@ router.post('/test', async (req: Request, res: Response) => {
     undefined,
     { tag: 'echoza-test', data: { isTest: true } },
   );
-  res.json({ success: true, subscriptionCount: subs.length });
+  res.json({
+    success: results.some(r => r.ok),
+    subscriptionCount: subs.length,
+    successCount: results.filter(r => r.ok).length,
+    failureCount: results.filter(r => !r.ok).length,
+    results: results.map(r => ({
+      ok: r.ok,
+      statusCode: r.statusCode,
+      error: r.error,
+      endpoint: r.endpoint.slice(0, 60) + '...',
+    })),
+  });
 });
 
 
@@ -219,8 +230,9 @@ export async function sendPushNotification(
   url?: string,
   conversationId?: string,
   extra?: { tag?: string; data?: Record<string, any> },
-): Promise<void> {
-  if (!getVapidKeys()) return;
+): Promise<Array<{ endpoint: string; ok: boolean; error?: string; statusCode?: number }>> {
+  console.log('[push] sending userId=', userId, 'title=', title, 'subCount lookup...');
+  if (!getVapidKeys()) return [];
 
   const subs = await fetchAll<{ endpoint: string; p256dh: string; auth: string }>(
     `SELECT endpoint, p256dh, auth
@@ -228,7 +240,7 @@ export async function sendPushNotification(
        WHERE user_id = $1`,
     [userId],
   );
-  if (!subs.length) return;
+  if (!subs.length) return [];
 
   const payloadData = {
     title,
@@ -238,6 +250,8 @@ export async function sendPushNotification(
     ...(extra?.data || {}),
   };
   const payload = JSON.stringify(payloadData);
+
+  const results: Array<{ endpoint: string; ok: boolean; error?: string; statusCode?: number }> = [];
 
   for (const sub of subs) {
     try {
@@ -249,15 +263,24 @@ export async function sendPushNotification(
         payload,
         extra?.tag ? { headers: { Urgency: 'high', Topic: extra.tag } } : undefined,
       );
-    } catch {
-      
-      
-      await fetchOne(
-        `DELETE FROM push_subscriptions WHERE endpoint = $1`,
-        [sub.endpoint],
-      );
+      results.push({ endpoint: sub.endpoint, ok: true });
+    } catch (err: any) {
+      const statusCode = typeof err?.statusCode === 'number'
+        ? err.statusCode
+        : (typeof err?.status === 'number' ? err.status : undefined);
+      const errorBody = err?.body || err?.message || String(err);
+      console.error('[push] send failed endpoint=', sub.endpoint.slice(0, 60), 'statusCode=', statusCode, 'err=', String(errorBody).slice(0, 200));
+      if (statusCode === 404 || statusCode === 410) {
+        await fetchOne(
+          `DELETE FROM push_subscriptions WHERE endpoint = $1`,
+          [sub.endpoint],
+        );
+      }
+      results.push({ endpoint: sub.endpoint, ok: false, error: String(errorBody).slice(0, 200), statusCode });
     }
   }
+
+  return results;
 }
 
 export default router;

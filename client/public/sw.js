@@ -75,6 +75,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 });self.addEventListener('push', (event) => {
+  console.log('[SW] push event received, hasData=', !!event.data);
   event.waitUntil((async () => {
     if (!event.data) return;
 
@@ -101,10 +102,13 @@ self.addEventListener('fetch', (event) => {
         callerId: callerId || null,
         callerUsername: callerUsername || null,
       };
-    } catch {
+      console.log('[SW] push payload parsed title=', title, 'body=', body);
+    } catch (parseErr) {
+      console.log('[SW] push payload parse failed:', parseErr?.message || parseErr);
       try {
         body = event.data.text();
       } catch {
+        console.log('[SW] push payload text() also failed, returning');
         return;
       }
     }
@@ -121,18 +125,29 @@ self.addEventListener('fetch', (event) => {
     try {
       await self.registration.showNotification(title, baseOptions);
       shown = true;
-    } catch {}
+      console.log('[SW] showNotification OK (full options)');
+    } catch (err1) {
+      console.log('[SW] showNotification FAILED (full options):', err1?.message || err1);
+    }
 
     if (!shown) {
       try {
         await self.registration.showNotification(title, { body, icon: '/vite.svg' });
         shown = true;
-      } catch {}
+        console.log('[SW] showNotification OK (minimal fallback)');
+      } catch (err2) {
+        console.log('[SW] showNotification FAILED (minimal fallback):', err2?.message || err2);
+      }
+    }
+
+    if (!shown) {
+      console.log('[SW] notification NOT shown — both attempts failed');
     }
 
     if (shown && callType && callerId) {
       try {
         const windowClients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+        console.log('[SW] posted incoming-call to', windowClients.length, 'client(s)');
         for (const client of windowClients) {
           client.postMessage({
             type: 'incoming-call',
