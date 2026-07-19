@@ -263,16 +263,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token]);
 
   const logout = () => {
+    const tokenAtLogout = token;
+    if (tokenAtLogout && typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      void (async () => {
+        try {
+          const reg = (await navigator.serviceWorker.getRegistration().catch(() => null)) ?? null;
+          if (!reg) return;
+          const sub = await reg.pushManager.getSubscription();
+          if (!sub) return;
+          const endpoint = sub.endpoint;
+          await sub.unsubscribe().catch(() => {});
+          if (endpoint) {
+            await fetch(apiUrl('/api/push/unsubscribe'), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${tokenAtLogout}`,
+              },
+              body: JSON.stringify({ endpoint }),
+              keepalive: true,
+            }).catch(() => {});
+          }
+        } catch {
+        }
+      })();
+    }
+
     setToken(null);
     setUser(null);
     setAuthLoading(false);
     localStorage.removeItem('echoza-token');
     localStorage.removeItem(REFRESH_TOKEN_KEY);
-    // Clear the message outbox so a queued message from this user
-    // doesn't get re-emitted under a different identity (or a fresh
-    // registration) after the next login. The outbox is durable across
-    // iOS PWA background-kill, which is its job — but it should NOT
-    // survive an explicit logout.
     try { localStorage.removeItem('echoza-message-outbox'); } catch { /* ignore */ }
   };
 
