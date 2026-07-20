@@ -525,18 +525,12 @@ export default function Dashboard() {
     if (!isIOS() || !isIOSStandalone()) return;
     if (!canIOSReceivePush()) return;
     const handleVisibility = () => {
-      if (document.hidden) return;
-      setSubscribeNonce(n => n + 1);
-    };
-    const handleFocus = () => {
-      setTimeout(() => setSubscribeNonce(n => n + 1), 500);
+      if (!document.hidden) {
+        setSubscribeNonce(n => n + 1);
+      }
     };
     document.addEventListener('visibilitychange', handleVisibility);
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('focus', handleFocus);
-    };
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [user?.id]);
 
   useEffect(() => {
