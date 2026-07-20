@@ -55,7 +55,7 @@ function AppContent() {
   return (
     <>
       {showLoader && <LoadingScreen visible={!ready} />}
-      {ready && (
+      {!authLoading && (
         <SocketProvider>
           <DbPausedOverlay>
             <Routes>
