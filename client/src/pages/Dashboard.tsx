@@ -1181,8 +1181,21 @@ export default function Dashboard() {
     if (!socket) return;
     socket.emit('direct:start', { receiverId });
 
-    socket.once('direct:started', ({ conversationId }: { conversationId: string }) => {
-      socket.emit('conversations:list');
+    socket.once('direct:started', ({
+      conversationId, receiverUsername, receiverAvatar,
+    }: { conversationId: string; receiverUsername?: string; receiverAvatar?: string }) => {
+      if (conversationId) {
+        socket.emit('conversations:list');
+        const conv: Conversation = {
+          id: conversationId,
+          isGroup: false,
+          contact: { id: receiverId, username: receiverUsername || '', avatar: receiverAvatar || '' },
+          lastMessage: '',
+          lastTime: '',
+          unread: 0,
+        };
+        handleSelectChat(conversationId, conv);
+      }
     });
   };
 

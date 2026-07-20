@@ -537,10 +537,7 @@ export function setupSocket(io: SocketServer): void {
         console.error('[messages:get] error:', err);
         socket.emit('messages:list', { conversationId, messages: [] });
       }
-    });
-
-    
-    socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
+    });    socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       try {
         let conversationId = await resolveDirectConversation(userId, receiverId);
         if (!conversationId) {
@@ -556,11 +553,6 @@ export function setupSocket(io: SocketServer): void {
           );
           let resolvedConvId = ins?.id;
           if (!resolvedConvId) {
-            
-            
-            
-            
-            
             const recovered = await fetchOne<{ id: string }>(
               `SELECT id FROM conversations
                  WHERE direct_pair_key = $1 AND is_group = FALSE`,
@@ -580,7 +572,16 @@ export function setupSocket(io: SocketServer): void {
             [conversationId, userId, receiverId],
           );
         }
-        socket.emit('direct:started', { conversationId, receiverId });
+        const receiverProfile = await fetchOne<{ username: string; avatar: string }>(
+          `SELECT username, avatar FROM profiles WHERE id = $1`,
+          [receiverId],
+        );
+        socket.emit('direct:started', {
+          conversationId,
+          receiverId,
+          receiverUsername: receiverProfile?.username ?? '',
+          receiverAvatar: receiverProfile?.avatar ?? '',
+        });
       } catch (err) {
         console.error('[direct:start] error:', err);
       }
