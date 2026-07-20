@@ -129,7 +129,7 @@ self.addEventListener('push', (event) => {
 
     if (!shown) {
       try {
-        await self.registration.showNotification(title, { body, icon: NOTIF_ICON_DATA_URI });
+        await self.registration.showNotification(title, { body, icon: NOTIF_ICON_DATA_URI, data: extraData });
         shown = true;
         console.log('[SW] showNotification OK (minimal with data URI icon)');
       } catch (err2) {
@@ -139,7 +139,7 @@ self.addEventListener('push', (event) => {
 
     if (!shown) {
       try {
-        await self.registration.showNotification(title, { body });
+        await self.registration.showNotification(title, { body, data: extraData });
         shown = true;
         console.log('[SW] showNotification OK (no icon fallback)');
       } catch (err3) {
