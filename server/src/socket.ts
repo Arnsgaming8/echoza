@@ -37,7 +37,7 @@ const onlineUsers = new Map<string, Map<string, { username: string; avatar: stri
 
 const userHeartbeats = new Map<string, { lastSeen: number; hidden: boolean; online: boolean }>();
 const PRESENCE_STALE_MS = 60_000;
-const PRESENCE_SWEEP_MS = 15_000;
+const PRESENCE_SWEEP_MS = 8_000;
 
 
 const userActiveConversations = new Map<string, string | null>();
@@ -338,10 +338,14 @@ export function setupSocket(io: SocketServer): void {
     const userId = socket.userId!;
     const username = socket.username!;
 
+    const wasOffline = !onlineUsers.has(userId);
     if (!onlineUsers.has(userId)) onlineUsers.set(userId, new Map());
     onlineUsers.get(userId)!.set(socket.id, { username, avatar: socket.avatar || '' });
     void touchLastSignIn(userId);
     io.emit('online-users', Array.from(onlineUsers.keys()));
+    if (wasOffline) {
+      io.emit('user:online', { userId, username });
+    }
 
     socket.on('user:myIp', () => {
       socket.emit('user:myIp', socket.handshake.address);
@@ -351,15 +355,19 @@ export function setupSocket(io: SocketServer): void {
     
     socket.on('presence:heartbeat', ({ hidden, online }: { hidden?: boolean; online?: boolean } = {}) => {
       if (!userId) return;
+      const prevHidden = userHeartbeats.get(userId)?.hidden;
+      const newHidden = hidden ?? false;
       userHeartbeats.set(userId, {
         lastSeen: Date.now(),
-        hidden: hidden ?? false,
+        hidden: newHidden,
         online: online ?? true,
       });
-      
-      
-      
-      
+      if (prevHidden === true && !newHidden) {
+        io.emit('online-users', Array.from(onlineUsers.keys()));
+        io.emit('user:online', { userId, username });
+      } else if (prevHidden === false && newHidden) {
+        io.emit('user:offline', { userId });
+      }
       socket.emit('online-users', Array.from(onlineUsers.keys()));
     });
     userHeartbeats.set(userId, { lastSeen: Date.now(), hidden: false, online: true });
@@ -391,102 +399,61 @@ export function setupSocket(io: SocketServer): void {
     
     socket.on('conversations:list', async () => {
       try {
-        const participantRows = await fetchAll<{
-          conversation_id: string;
-          last_read_at: string | null;
-        }>(
-          `SELECT conversation_id, last_read_at FROM participants WHERE user_id = $1`,
+        const convRows = await fetchAll<any>(
+          `WITH my_parts AS (
+            SELECT conversation_id, last_read_at FROM participants WHERE user_id = $1
+          ),
+          unread AS (
+            SELECT m.conversation_id,
+              COUNT(*) FILTER (
+                WHERE m.sender_id <> $1
+                  AND (mp.last_read_at IS NULL OR m.created_at > mp.last_read_at)
+              )::int AS cnt
+            FROM messages m
+            JOIN my_parts mp ON mp.conversation_id = m.conversation_id
+            GROUP BY m.conversation_id
+          )
+          SELECT c.id, c.is_group, c.group_name, c.group_avatar,
+                 c.last_message, c.last_message_at, c.created_at,
+                 COALESCE(u.cnt, 0) AS unread
+            FROM conversations c
+            JOIN my_parts mp ON mp.conversation_id = c.id
+            LEFT JOIN unread u ON u.conversation_id = c.id
+            ORDER BY c.last_message_at DESC NULLS LAST`,
           [userId],
         );
-        const convIds = participantRows.map(p => p.conversation_id);
-        const lastReadMap = new Map(
-          participantRows.map(p => [p.conversation_id, p.last_read_at]),
-        );
+
+        const convIds = convRows.map((r: any) => r.id);
         if (convIds.length === 0) {
           socket.emit('conversations:list', []);
           return;
         }
-        const convRows = await fetchAll<{
-          id: string;
-          is_group: boolean;
-          group_name: string | null;
-          group_avatar: string | null;
-          last_message: string | null;
-          last_message_at: string | null;
-          created_at: string;
-        }>(
-          `SELECT id, is_group, group_name, group_avatar,
-                  last_message, last_message_at, created_at
-             FROM conversations
-            WHERE id = ANY($1::uuid[])
-            ORDER BY last_message_at DESC NULLS LAST`,
+
+        const partRows = await fetchAll<any>(
+          `SELECT p.conversation_id, p.user_id, prof.username, prof.avatar
+             FROM participants p
+             JOIN profiles prof ON prof.id = p.user_id
+            WHERE p.conversation_id = ANY($1::uuid[])`,
           [convIds],
         );
-        if (convRows.length === 0) {
-          socket.emit('conversations:list', []);
-          return;
-        }
 
-        convRows.sort((a, b) => {
-          if (!a.last_message_at && !b.last_message_at) return 0;
-          if (!a.last_message_at) return 1;
-          if (!b.last_message_at) return -1;
-          return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
-        });
-
-        const allParticipants = await fetchAll<{
-          conversation_id: string;
-          user_id: string;
-        }>(
-          `SELECT conversation_id, user_id FROM participants
-             WHERE conversation_id = ANY($1::uuid[])`,
-          [convIds],
-        );
-        const allUserIds = [...new Set(allParticipants.map(p => p.user_id))];
-        const allProfiles = allUserIds.length
-          ? await fetchAll<{ id: string; username: string; avatar: string }>(
-              `SELECT id, username, avatar FROM profiles WHERE id = ANY($1::uuid[])`,
-              [allUserIds],
-            )
-          : [];
-        const profileMap = new Map(allProfiles.map(p => [p.id, p]));
-
-        const participantMap = new Map<string, { id: string; username: string; avatar: string }[]>();
-        for (const p of allParticipants) {
-          if (!participantMap.has(p.conversation_id)) {
-            participantMap.set(p.conversation_id, []);
+        const participantMap = new Map<string, any[]>();
+        for (const row of partRows) {
+          if (!participantMap.has(row.conversation_id)) {
+            participantMap.set(row.conversation_id, []);
           }
-          const prof = profileMap.get(p.user_id);
-          participantMap.get(p.conversation_id)!.push({
-            id: p.user_id,
-            username: prof?.username || '',
-            avatar: prof?.avatar || '',
+          participantMap.get(row.conversation_id)!.push({
+            id: row.user_id,
+            username: row.username,
+            avatar: row.avatar,
+            online: onlineUsers.has(row.user_id),
           });
-        }
-
-        
-        const unreadRows = await fetchAll<{ conversation_id: string; unread: string }>(
-          `SELECT m.conversation_id,
-                  COUNT(*) FILTER (
-                    WHERE m.sender_id <> $1
-                      AND (p.last_read_at IS NULL OR m.created_at > p.last_read_at)
-                  )::text AS unread
-             FROM messages m
-             JOIN participants p
-               ON p.conversation_id = m.conversation_id AND p.user_id = $1
-            WHERE m.conversation_id = ANY($2::uuid[])
-            GROUP BY m.conversation_id`,
-          [userId, convIds],
-        );
-        const unreadMap = new Map<string, number>();
-        for (const row of unreadRows) {
-          unreadMap.set(row.conversation_id, parseInt(row.unread || '0', 10));
         }
 
         const conversations: any[] = [];
         for (const row of convRows) {
           const members = participantMap.get(row.id) || [];
-          const otherParticipants = members.filter(m => m.id !== userId);
+          const otherParticipants = members.filter((m: any) => m.id !== userId);
           if (row.is_group) {
             conversations.push({
               id: row.id,
@@ -496,17 +463,20 @@ export function setupSocket(io: SocketServer): void {
               members,
               lastMessage: row.last_message || '',
               lastTime: row.last_message_at || '',
-              unread: unreadMap.get(row.id) || 0,
+              unread: row.unread,
             });
           } else {
-            const contact = otherParticipants[0] || { id: '', username: '', avatar: '' };
+            const contact = otherParticipants[0] ? {
+              ...otherParticipants[0],
+              online: onlineUsers.has(otherParticipants[0].id),
+            } : { id: '', username: '', avatar: '', online: false };
             conversations.push({
               id: row.id,
               isGroup: false,
               contact,
               lastMessage: row.last_message || '',
               lastTime: row.last_message_at || '',
-              unread: unreadMap.get(row.id) || 0,
+              unread: row.unread,
             });
           }
         }
@@ -1080,13 +1050,15 @@ export function setupSocket(io: SocketServer): void {
       } catch (err: any) {
         console.error('[call:group-offer] error:', err?.message || err);
       }
-    });
-
-    socket.on('disconnect', () => {
+    });      socket.on('disconnect', () => {
       const sockets = onlineUsers.get(userId);
+      let wentOffline = false;
       if (sockets) {
         sockets.delete(socket.id);
-        if (sockets.size === 0) onlineUsers.delete(userId);
+        if (sockets.size === 0) {
+          onlineUsers.delete(userId);
+          wentOffline = true;
+        }
       }
       
       for (const key of [...pendingCallTimers.keys()]) {
@@ -1102,6 +1074,9 @@ export function setupSocket(io: SocketServer): void {
       userActiveConversations.delete(userId);
       userHeartbeats.delete(userId);
       io.emit('online-users', Array.from(onlineUsers.keys()));
+      if (wentOffline) {
+        io.emit('user:offline', { userId });
+      }
     });
   });
 }

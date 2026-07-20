@@ -648,26 +648,6 @@ export default function Dashboard() {
 
   
   useEffect(() => {
-    const token = localStorage.getItem('echoza-token');
-    if (!token) return;
-
-    let cancelled = false;
-    fetch(apiUrl('/api/conversations'), {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (cancelled) return;
-        setConversations(dedupeConversations(data));
-        setConversationsLoaded(true);
-      })
-      .catch(() => {});
-
-    return () => { cancelled = true; };
-  }, []);
-
-  
-  useEffect(() => {
     if (!socket) return;
 
     setConversationsLoaded(true);
