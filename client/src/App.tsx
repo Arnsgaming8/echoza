@@ -37,13 +37,25 @@ function AppContent() {
   const { isAuthenticated, authLoading } = useAuth();
   const [ready, setReady] = useState(false);
   const [showLoader, setShowLoader] = useState(true);
+  const [appReady, setAppReady] = useState(false);
 
   useEffect(() => {
-    if (!authLoading) {
-      const timer = setTimeout(() => setReady(true), 1000);
-      return () => clearTimeout(timer);
+    const handler = () => setAppReady(true);
+    window.addEventListener('echoza:app-ready', handler, { once: true });
+    return () => window.removeEventListener('echoza:app-ready', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!authLoading && (appReady || !isAuthenticated)) {
+      setReady(true);
     }
-  }, [authLoading]);
+  }, [authLoading, appReady, isAuthenticated]);
+
+  const fallbackMs = isAuthenticated ? 10000 : 1000;
+  useEffect(() => {
+    const fallback = setTimeout(() => setReady(true), fallbackMs);
+    return () => clearTimeout(fallback);
+  }, [fallbackMs]);
 
   useEffect(() => {
     if (ready) {

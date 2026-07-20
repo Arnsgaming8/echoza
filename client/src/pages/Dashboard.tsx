@@ -311,6 +311,7 @@ export default function Dashboard() {
   });
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
+  const appReadyDispatchedRef = useRef(false);
 
   const forceScrollNext = useRef(false);
   const userRef = useRef(user);
@@ -669,6 +670,10 @@ export default function Dashboard() {
         return;
       }
       setConversations(dedupeConversations(data));
+      if (!appReadyDispatchedRef.current) {
+        appReadyDispatchedRef.current = true;
+        window.dispatchEvent(new CustomEvent('echoza:app-ready'));
+      }
     });
 
     socket.on('conversation:update', ({ conversationId }: { conversationId: string }) => {
