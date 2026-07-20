@@ -312,7 +312,6 @@ export default function Dashboard() {
   const [deleteMode, setDeleteMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(new Set());
   const appReadyDispatchedRef = useRef(false);
-  const pendingConversationIdsRef = useRef<Set<string>>(new Set());
 
   const forceScrollNext = useRef(false);
   const userRef = useRef(user);
@@ -670,20 +669,9 @@ export default function Dashboard() {
         console.error('[Dashboard] conversations:list payload not array, ignoring', data);
         return;
       }
-      const pending = pendingConversationIdsRef.current;
-      let merged = data;
-      if (pending.size > 0) {
-        const dataIds = new Set((data as any[]).map((c: any) => c.id));
-        const missing: any[] = [];
-        for (const pendingId of pending) {
-          if (!dataIds.has(pendingId)) {
-            const existing = conversationsRef.current.find(c => c.id === pendingId);
-            if (existing) missing.push(existing);
-          }
-        }
-        pending.clear();
-        if (missing.length > 0) merged = [...(data as any[]), ...missing];
-      }
+      const dataIds = new Set((data as any[]).map((c: any) => c.id));
+      const missing = conversationsRef.current.filter(c => !dataIds.has(c.id));
+      const merged = missing.length > 0 ? [...(data as any[]), ...missing] : data;
       setConversations(dedupeConversations(merged));
       if (!appReadyDispatchedRef.current) {
         appReadyDispatchedRef.current = true;
@@ -1208,7 +1196,6 @@ export default function Dashboard() {
           lastTime: '',
           unread: 0,
         };
-        pendingConversationIdsRef.current.add(conversationId);
         setConversations(prev => {
           if (prev.some(c => c.id === conversationId)) return prev;
           return [conv, ...prev];
