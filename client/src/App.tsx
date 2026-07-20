@@ -9,7 +9,7 @@ import Dashboard from './pages/Dashboard';
 import Pair from './pages/Pair';
 import LoadingScreen from './components/LoadingScreen';
 import DbPausedOverlay from './components/DbPausedOverlay';
-import { ReactNode } from 'react';
+import { ReactNode, useState, useEffect } from 'react';
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -35,22 +35,41 @@ function PublicRoute({ children }: { children: ReactNode }) {
 
 function AppContent() {
   const { isAuthenticated, authLoading } = useAuth();
+  const [ready, setReady] = useState(false);
+  const [showLoader, setShowLoader] = useState(true);
 
-  if (authLoading) return <LoadingScreen />;
+  useEffect(() => {
+    if (!authLoading) {
+      const timer = setTimeout(() => setReady(true), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [authLoading]);
+
+  useEffect(() => {
+    if (ready) {
+      const timer = setTimeout(() => setShowLoader(false), 350);
+      return () => clearTimeout(timer);
+    }
+  }, [ready]);
 
   return (
-    <SocketProvider>
-      <DbPausedOverlay>
-        <Routes>
-        <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
-        <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
-        <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
-        <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-        <Route path="/pair" element={<Pair />} />
-        <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} replace />} />
-        </Routes>
-      </DbPausedOverlay>
-    </SocketProvider>
+    <>
+      {showLoader && <LoadingScreen visible={!ready} />}
+      {ready && (
+        <SocketProvider>
+          <DbPausedOverlay>
+            <Routes>
+            <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />
+            <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
+            <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
+            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/pair" element={<Pair />} />
+            <Route path="*" element={<Navigate to={isAuthenticated ? '/dashboard' : '/'} replace />} />
+            </Routes>
+          </DbPausedOverlay>
+        </SocketProvider>
+      )}
+    </>
   );
 }
 
