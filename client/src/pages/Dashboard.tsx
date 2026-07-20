@@ -1185,7 +1185,6 @@ export default function Dashboard() {
       conversationId, receiverUsername, receiverAvatar,
     }: { conversationId: string; receiverUsername?: string; receiverAvatar?: string }) => {
       if (conversationId) {
-        socket.emit('conversations:list');
         const conv: Conversation = {
           id: conversationId,
           isGroup: false,
@@ -1194,7 +1193,12 @@ export default function Dashboard() {
           lastTime: '',
           unread: 0,
         };
+        setConversations(prev => {
+          if (prev.some(c => c.id === conversationId)) return prev;
+          return [conv, ...prev];
+        });
         handleSelectChat(conversationId, conv);
+        socket.emit('conversations:list');
       }
     });
   };
