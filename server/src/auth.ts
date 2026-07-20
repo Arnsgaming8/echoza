@@ -38,15 +38,6 @@ const BCRYPT_COST = 10;
 
 
 
-const DEVICE_FINGERPRINT_KEEP_LAST = 2;
-
-
-
-
-
-
-
-
 const pwdChangedAtCache = new Map<string, { value: string | null; expiresAt: number }>();
 const PWD_CHANGED_AT_CACHE_TTL_MS = 5_000;
 
@@ -438,10 +429,6 @@ export async function recordDeviceFingerprint(
        ON CONFLICT (user_id, device_id)
        DO UPDATE SET last_used_at = NOW(), user_agent = EXCLUDED.user_agent`,
     [userId, deviceId, userAgent ?? null],
-  );
-  await fetchOne(
-    `SELECT public.prune_device_fingerprints($1, $2)`,
-    [userId, DEVICE_FINGERPRINT_KEEP_LAST],
   );
 }
 
