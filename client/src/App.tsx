@@ -40,7 +40,7 @@ function AppContent() {
 
   useEffect(() => {
     if (!authLoading) {
-      const timer = setTimeout(() => setReady(true), 2000);
+      const timer = setTimeout(() => setReady(true), 1000);
       return () => clearTimeout(timer);
     }
   }, [authLoading]);
