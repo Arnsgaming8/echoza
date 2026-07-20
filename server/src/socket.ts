@@ -40,6 +40,13 @@ const PRESENCE_STALE_MS = 60_000;
 const PRESENCE_SWEEP_MS = 15_000;
 
 
+const userActiveConversations = new Map<string, string | null>();
+
+function isViewingConversation(userId: string, conversationId: string | undefined): boolean {
+  if (!conversationId) return false;
+  return userActiveConversations.get(userId) === conversationId;
+}
+
 const pendingCallTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const PENDING_CALL_TIMEOUT_MS = 60_000;
 function pendingCallKey(a: string, b: string): string {
@@ -138,14 +145,16 @@ async function emitAndPersistCallMissed(
     emitToUser(io, callerUserId, 'message:sent', message);
     emitToUser(io, receiverId, 'message:new', message);
     emitToUser(io, receiverId, 'conversation:update', { conversationId });
-    await sendPushNotification(
-      receiverId,
-      `Missed ${callType} call from ${callerUsername}`,
-      '',
-      '/',
-      conversationId,
-      { tag: `missed-call-${callerUserId}`, data: { callType, callerId: callerUserId } },
-    );
+    if (!isViewingConversation(receiverId, conversationId)) {
+      await sendPushNotification(
+        receiverId,
+        `Missed ${callType} call from ${callerUsername}`,
+        '',
+        '/',
+        conversationId,
+        { tag: `missed-call-${callerUserId}`, data: { callType, callerId: callerUserId } },
+      );
+    }
     if (await isReceiverMonitored(receiverId)) {
       await sendDiscordNotification(
         `**${callerUsername}** called but **${receiverId}** missed the **${callType}** call`,
@@ -776,21 +785,24 @@ export function setupSocket(io: SocketServer): void {
           const groupTitle = convRow?.group_name || username;
           const bodyPreview = content.trim()
             ? `${username}: ${preview}`
-            : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;
-          for (const m of groupMembers) {
-            await sendPushNotification(
-              m.user_id, groupTitle, bodyPreview,
-              `/dashboard?conv=${conversationId}`, conversationId,
-            );
+            : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;            for (const m of groupMembers) {
+            if (!isViewingConversation(m.user_id, conversationId)) {
+              await sendPushNotification(
+                m.user_id, groupTitle, bodyPreview,
+                `/dashboard?conv=${conversationId}`, conversationId,
+              );
+            }
           }
         } else if (receiverId) {
           emitToUser(io, receiverId, 'message:new', message);
           emitToUser(io, receiverId, 'conversation:update', { conversationId });
-          await sendPushNotification(
-            receiverId, username,
-            content || 'Sent an attachment',
-            `/dashboard?conv=${conversationId}`, conversationId,
-          );
+          if (!isViewingConversation(receiverId, conversationId)) {
+            await sendPushNotification(
+              receiverId, username,
+              content || 'Sent an attachment',
+              `/dashboard?conv=${conversationId}`, conversationId,
+            );
+          }
           if (await isReceiverMonitored(receiverId)) {
             await sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
           }
@@ -874,6 +886,10 @@ export function setupSocket(io: SocketServer): void {
     });
 
     
+    socket.on('conversation:viewing', ({ conversationId }: { conversationId: string | null }) => {
+      userActiveConversations.set(userId, conversationId);
+    });
+
     socket.on('typing:start', ({ receiverId, conversationId, groupId }: {
       receiverId?: string; conversationId?: string; groupId?: string;
     }) => {
@@ -1083,6 +1099,7 @@ export function setupSocket(io: SocketServer): void {
           pendingCallTimers.delete(key);
         }
       }
+      userActiveConversations.delete(userId);
       userHeartbeats.delete(userId);
       io.emit('online-users', Array.from(onlineUsers.keys()));
     });

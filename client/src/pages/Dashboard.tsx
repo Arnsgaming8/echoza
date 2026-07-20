@@ -900,6 +900,7 @@ export default function Dashboard() {
     forceScrollNext.current = true;
 
     if (socket) {
+      socket.emit('conversation:viewing', { conversationId });
       socket.emit('messages:get', { conversationId });
     }
   };
