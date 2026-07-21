@@ -177,15 +177,15 @@ BEGIN
     RETURN NULL;
   END IF;
 
-  SELECT LEAST (user_id::text) || ':' || GREATEST (user_id::text)
-    INTO v_pair
-    FROM public.participants
-    WHERE conversation_id = v_conv
-    LIMIT 1;
+  IF (SELECT COUNT(*) FROM public.participants WHERE conversation_id = v_conv) = 2 THEN
+    SELECT MIN(user_id::text) || ':' || MAX(user_id::text)
+      INTO v_pair
+      FROM public.participants
+      WHERE conversation_id = v_conv;
+  ELSE
+    v_pair := NULL;
+  END IF;
 
-  -- LEAST/GREATEST over zero rows → NULL; the conv might already be deleted
-  -- by the time the trigger fires on a participant-delete. Either way we
-  -- can safely set NULL on direct_pair_key.
   UPDATE public.conversations c
     SET direct_pair_key = v_pair
     WHERE c.id = v_conv AND c.is_group = FALSE;
