@@ -123,8 +123,8 @@ export default function Signup() {
     
     
     const trimmed = val.trim();
-    if (trimmed && !/^[A-Za-z_]{3,20}$/.test(trimmed)) {
-      setUsernameError('Must be 3–20 letters');
+    if (trimmed && !/^.{3,20}$/.test(trimmed)) {
+      setUsernameError('Must be 3–20 characters');
     } else {
       setUsernameError('');
     }
@@ -200,7 +200,7 @@ export default function Signup() {
           {serverError && <ErrorMsg>{serverError}</ErrorMsg>}
           <Input
             label="Username"
-            placeholder="Enter username (3–20 letters)"
+            placeholder="Enter username (3–20 characters)"
             value={username}
             onChange={validateUsername}
             error={usernameError}

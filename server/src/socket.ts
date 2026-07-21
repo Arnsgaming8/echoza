@@ -947,8 +947,8 @@ export function setupSocket(io: SocketServer): void {
       username: newUsername, avatar,
     }: { username: string; avatar?: string }) => {
       try {
-        if (!newUsername || !/^[A-Za-z_]{3,20}$/.test(newUsername)) {
-          socket.emit('profile:updateResult', { error: 'Username must be 3-20 letters' });
+        if (!newUsername || !/^.{3,20}$/.test(newUsername)) {
+          socket.emit('profile:updateResult', { error: 'Username must be 3-20 characters' });
           return;
         }
         const collision = await fetchOne<{ id: string }>(
