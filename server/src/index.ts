@@ -359,7 +359,58 @@ async function runTest(relayOnly=false){
       res.sendFile(join(clientDist, 'sw.js'));
     });
     app.use(express.static(clientDist, { maxAge: '1y', immutable: true, index: false }));
-    app.get('*', (_req, res) => {
+    app.get('*', (req, res) => {
+      const host = req.headers.host || '';
+      if (host.includes('onrender.com')) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Echoza — Moved</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:linear-gradient(135deg,#0F1A2F 0%,#1a2a4a 100%);
+    min-height:100vh;display:flex;align-items:center;justify-content:center;color:#fff;padding:20px}
+  .card{background:rgba(255,255,255,0.06);backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,0.1);border-radius:20px;
+    padding:48px 40px;max-width:480px;width:100%;text-align:center}
+  .logo{width:64px;height:64px;margin:0 auto 24px;display:block}
+  h1{font-size:24px;font-weight:700;margin-bottom:12px}
+  p{color:rgba(255,255,255,0.65);line-height:1.6;margin-bottom:28px;font-size:15px}
+  .btn{display:inline-flex;align-items:center;gap:8px;
+    background:#3A7BFF;color:#fff;text-decoration:none;
+    padding:14px 32px;border-radius:12px;font-size:16px;font-weight:600;
+    transition:all .2s ease;border:none;cursor:pointer}
+  .btn:hover{background:#2a5fd8;transform:translateY(-2px);box-shadow:0 8px 24px rgba(58,123,255,0.3)}
+  .btn:active{transform:translateY(0)}
+  .note{margin-top:20px;font-size:13px;color:rgba(255,255,255,0.4)}
+</style>
+</head>
+<body>
+<div class="card">
+  <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="#3A7BFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+  <h1>Echoza has moved</h1>
+  <p>Echoza is an independent site and has been migrated to a new home. All accounts and conversations are safe.</p>
+  <a class="btn" href="https://echozachat.com">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+      <polyline points="15 3 21 3 21 9"/>
+      <line x1="10" y1="14" x2="21" y2="3"/>
+    </svg>
+    Visit echozachat.com
+  </a>
+  <p class="note">This page will redirect automatically in 10 seconds.</p>
+</div>
+<script>setTimeout(()=>{window.location.href='https://echozachat.com'},10000)</script>
+</body>
+</html>`);
+        return;
+      }
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
