@@ -466,15 +466,27 @@ export default function Dashboard() {
             return true;
           }
           const errBody = await r.text().catch(() => '');
-          console.error('Push subscribe POST failed:', r.status, errBody);
+          console.warn('Push subscribe POST failed:', r.status, errBody);
           return false;
         };
 
         let subscribed = await doSubscribe(freshToken);
         if (!subscribed && !cancelled) {
-          const retryToken = localStorage.getItem('echoza-token');
-          if (retryToken && retryToken !== freshToken) {
-            await doSubscribe(retryToken);
+          const storedRefresh = localStorage.getItem('echoza-refresh-token');
+          if (storedRefresh) {
+            try {
+              const refreshRes = await fetch(apiUrl('/api/auth/refresh'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: storedRefresh }),
+              });
+              if (refreshRes.ok) {
+                const refreshData = await refreshRes.json();
+                localStorage.setItem('echoza-token', refreshData.token);
+                localStorage.setItem('echoza-refresh-token', refreshData.refresh_token);
+                await doSubscribe(refreshData.token);
+              }
+            } catch {}
           }
         }
       } catch (err) {
