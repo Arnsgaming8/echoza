@@ -176,7 +176,11 @@ export default function Signup() {
         localStorage.setItem('echoza-accountCreatedAt', new Date().toISOString());
         localStorage.removeItem('echoza-inactivityBannerDismissed');
       } catch {}
-      navigate('/dashboard');
+      if ((window.navigator as any).standalone) {
+        window.location.href = '/dashboard';
+      } else {
+        navigate('/dashboard');
+      }
     } catch {
       setServerError('Connection error. Please try again.');
     } finally {

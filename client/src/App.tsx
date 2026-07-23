@@ -34,7 +34,7 @@ function PublicRoute({ children }: { children: ReactNode }) {
 }
 
 function AppContent() {
-  const { isAuthenticated, authLoading } = useAuth();
+  const { isAuthenticated, authLoading, authGeneration } = useAuth();
   const [ready, setReady] = useState(false);
   const [showLoader, setShowLoader] = useState(true);
   const [appReady, setAppReady] = useState(false);
@@ -68,7 +68,7 @@ function AppContent() {
     <>
       {showLoader && <LoadingScreen visible={!ready} />}
       {!authLoading && (
-        <SocketProvider>
+        <SocketProvider key={authGeneration}>
           <DbPausedOverlay>
             <Routes>
             <Route path="/" element={<PublicRoute><Landing /></PublicRoute>} />

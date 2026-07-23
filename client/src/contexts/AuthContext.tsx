@@ -16,6 +16,7 @@ interface AuthContextType {
   updateUser: (updates: Partial<User>) => void;
   isAuthenticated: boolean;
   authLoading: boolean;
+  authGeneration: number;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -26,6 +27,7 @@ const AuthContext = createContext<AuthContextType>({
   updateUser: () => {},
   isAuthenticated: false,
   authLoading: true,
+  authGeneration: 0,
 });
 
 const REFRESH_TOKEN_KEY = 'echoza-refresh-token';
@@ -127,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(initialDecoded?.user ?? null);
   const [token, setToken] = useState<string | null>(initialStoredToken);
   const [authLoading, setAuthLoading] = useState(false);
+  const [authGeneration, setAuthGeneration] = useState(0);
   const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -248,6 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(newToken);
     setUser(newUser);
     setAuthLoading(false);
+    setAuthGeneration(g => g + 1);
     localStorage.setItem('echoza-token', newToken);
     localStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
   };
@@ -293,6 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setAuthLoading(false);
+    setAuthGeneration(g => g + 1);
     localStorage.removeItem('echoza-token');
     localStorage.removeItem(REFRESH_TOKEN_KEY);
     try { localStorage.removeItem('echoza-message-outbox'); } catch { /* ignore */ }
@@ -304,7 +309,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, token, login, logout, updateUser, isAuthenticated: !!user, authLoading }}
+      value={{ user, token, login, logout, updateUser, isAuthenticated: !!user, authLoading, authGeneration }}
     >
       {children}
     </AuthContext.Provider>

@@ -286,7 +286,11 @@ export default function Login() {
       }
 
       login(data.token, data.refresh_token, data.user);
-      navigate(postLoginRedirect);
+      if ((window.navigator as any).standalone) {
+        window.location.href = postLoginRedirect;
+      } else {
+        navigate(postLoginRedirect);
+      }
     } catch {
       setServerError('Connection error. Please try again.');
     } finally {
@@ -356,7 +360,11 @@ export default function Login() {
           onSuccess={(token, refreshToken, user) => {
             login(token, refreshToken, user);
             setForgotOpen(false);
-            navigate(postLoginRedirect);
+            if ((window.navigator as any).standalone) {
+              window.location.href = postLoginRedirect;
+            } else {
+              navigate(postLoginRedirect);
+            }
           }}
         />
       )}
