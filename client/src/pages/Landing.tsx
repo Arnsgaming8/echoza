@@ -100,12 +100,14 @@ const ButtonGroup = styled.div`
 
 const Footer = styled.footer`
   margin-top: 48px;
-  font-size: 11px;
-  color: ${({ theme }) => theme.colors.secondary.warmGray};
-  opacity: 0.6;
+  font-size: 16px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  letter-spacing: 0.3px;
 
   @media (max-width: 768px) {
     text-align: center;
+    font-size: 14px;
   }
 `;
 

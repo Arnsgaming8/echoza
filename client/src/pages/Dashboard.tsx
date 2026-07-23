@@ -200,10 +200,12 @@ const Footer = styled.footer`
   left: 0;
   right: 0;
   text-align: center;
-  padding: 4px 8px;
-  font-size: 10px;
-  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.text.secondary};
   background: ${({ theme }) => theme.colors.bg.main};
+  letter-spacing: 0.3px;
   z-index: 5;
 `;
 
