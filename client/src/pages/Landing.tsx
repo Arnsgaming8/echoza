@@ -98,6 +98,17 @@ const ButtonGroup = styled.div`
   }
 `;
 
+const Footer = styled.footer`
+  margin-top: 48px;
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  opacity: 0.6;
+
+  @media (max-width: 768px) {
+    text-align: center;
+  }
+`;
+
 const Illustration = styled.div`
   flex: 1;
   display: flex;
@@ -159,6 +170,7 @@ export default function Landing() {
               Log In
             </Button>
           </ButtonGroup>
+          <Footer>© 2026 Arnav Jugessur · All Rights Reserved Echoza</Footer>
         </TextSection>
         <Illustration>
           <BubbleGrid>
