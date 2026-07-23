@@ -246,18 +246,6 @@ const InstallHint = styled.div`
   line-height: 1.4;
 `;
 
-function formatRelativeTime(dateStr: string): string {
-  if (!dateStr) return '';
-  const ms = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
-}
 
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { user } = useAuth();
@@ -339,35 +327,20 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     setNotifBusy(true);
     try {
       const token = localStorage.getItem('echoza-token');
-      const [subRes, testRes] = await Promise.all([
-        fetch(apiUrl('/api/push/subscriptions'), {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(apiUrl('/api/push/test'), {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-      ]);
-      const subsData = await subRes.json();
-      const testData = await testRes.json();
-      if (!testRes.ok) {
-        setNotifMsg({ kind: 'err', text: testData.error || `Server error ${testRes.status}` });
+      const r = await fetch(apiUrl('/api/push/test'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setNotifMsg({ kind: 'err', text: data.error || `Server error ${r.status}` });
         return;
       }
-      if (testData.success === false && testData.reason === 'no_subscriptions') {
+      if (data.success === false && data.reason === 'no_subscriptions') {
         setNotifMsg({ kind: 'err', text: 'No push subscription yet. Tap \u201cEnable notifications\u201d first, then try again.' });
         return;
       }
-      const devices = (subsData.subscriptions || []).map((s: any) =>
-        `${formatRelativeTime(s.created_at)}`
-      );
-      const deviceLines = devices.map((t: string, i: number) =>
-        `\u{1F4F1} Device ${i + 1}: registered ${t}`
-      ).join('\n');
-      setNotifMsg({
-        kind: 'ok',
-        text: `Test push sent to ${testData.subscriptionCount ?? '?'} device(s):\n${deviceLines}\nYou should see an Echoza notification shortly.`,
-      });
+      setNotifMsg({ kind: 'ok', text: 'Test push sent!' });
     } catch (err: any) {
       setNotifMsg({ kind: 'err', text: `Network error: ${err?.message || String(err)}` });
     } finally {
