@@ -1,17 +1,26 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Socket } from 'socket.io-client';
 import { isIOS } from './iosCapability';
+import { apiUrl } from './api';
 
-const ICE_CONFIG: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    {
-      urls: ['turn:129.146.134.55:3478', 'turn:129.146.134.55:3478?transport=tcp'],
-      username: 'echoza',
-      credential: 'echoza123',
-    },
-  ],
-};
+let cachedIceConfig: { config: RTCConfiguration; ts: number } | null = null;
+const ICE_CACHE_TTL = 5 * 60 * 1000;
+
+async function getIceConfig(): Promise<RTCConfiguration> {
+  if (cachedIceConfig && Date.now() - cachedIceConfig.ts < ICE_CACHE_TTL) {
+    return cachedIceConfig.config;
+  }
+  try {
+    const res = await fetch(apiUrl('/api/ice-config'), { signal: AbortSignal.timeout(5000) });
+    const data = await res.json();
+    if (data?.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+      const config: RTCConfiguration = { iceServers: data.iceServers };
+      cachedIceConfig = { config, ts: Date.now() };
+      return config;
+    }
+  } catch {}
+  return { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+}
 
 interface UseCallOptions {
   socket: Socket | null;
@@ -266,7 +275,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
     const run = async () => {
       if (cancelled) return;
 
-      const pc = new RTCPeerConnection(ICE_CONFIG);
+      const iceConfig = await getIceConfig();
+      const pc = new RTCPeerConnection(iceConfig);
       pcRef.current = pc;
       let cleanupStream: MediaStream | null = null;
 
