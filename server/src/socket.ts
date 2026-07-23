@@ -9,7 +9,7 @@
 
 import { Server as SocketServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './auth.js';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { sendPushNotification } from './routes/push.routes.js';
 import { sendDiscordNotification } from './discord.js';
 import { fetchOne, fetchAll } from './db.js';
@@ -107,7 +107,8 @@ async function emitAndPersistCallMissed(
     }
 
     const bucket = Math.floor(Date.now() / 60_000);
-    const safeId = `callmissed:${[callerUserId, receiverId].sort().join('_')}:${bucket}`;
+    const dedupKey = `callmissed:${[callerUserId, receiverId].sort().join('_')}:${bucket}`;
+    const safeId = uuidv5(dedupKey, '6ba7b810-9dad-11d1-80b4-00c04fd430c8');
     const createdAt = new Date().toISOString();
     const icon = callType === 'video' ? '📹' : '📞';
     const content = `${icon} Missed ${callType} call`;
