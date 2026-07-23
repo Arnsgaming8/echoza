@@ -142,6 +142,7 @@ const SuccessMsg = styled.div`
   border-radius: ${({ theme }) => theme.radius.sm};
   font-size: ${({ theme }) => theme.font.size.sm};
   text-align: center;
+  white-space: pre-line;
   margin-bottom: ${({ theme }) => theme.spacing.md};
 `;
 
@@ -245,6 +246,19 @@ const InstallHint = styled.div`
   line-height: 1.4;
 `;
 
+function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return '';
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { user } = useAuth();
   const [step, setStep] = useState<'initial' | 'confirm'>('initial');
@@ -254,9 +268,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
 
-  
-  
-  
   const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(() => {
     if (typeof Notification === 'undefined') return 'unsupported';
     return Notification.permission;
@@ -291,14 +302,13 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
   const iOS = isIOS();
   const standalone = isIOSStandalone();
-  const iosCapable = canIOSReceivePush(); // iOS + standalone + PushManager support
 
   const enableNotifications = async () => {
     setNotifMsg(null);
     setNotifBusy(true);
     try {
       if (iOS && !standalone) {
-        setNotifMsg({ kind: 'err', text: 'Install Echoza to your home screen first (use Safari’s Share menu → Add to Home Screen), then re-open the installed app.' });
+        setNotifMsg({ kind: 'err', text: 'Install Echoza to your home screen first (use Safari\u2019s Share menu \u2192 Add to Home Screen), then re-open the installed app.' });
         return;
       }
       if (typeof Notification === 'undefined') {
@@ -308,20 +318,12 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       const perm = await Notification.requestPermission();
       setPermission(perm);
       if (perm === 'granted') {
-        
-        
-        
-        
         window.dispatchEvent(new Event('echoza:enable-push'));
-        
-        
-        
-        
         await new Promise(resolve => setTimeout(resolve, 600));
         await refreshNotifState();
-        setNotifMsg({ kind: 'ok', text: 'Notifications enabled. Use “Send test push” to confirm.' });
+        setNotifMsg({ kind: 'ok', text: 'Notifications enabled. Use \u201cSend test push\u201d to confirm.' });
       } else if (perm === 'denied') {
-        setNotifMsg({ kind: 'err', text: 'Permission was denied. To re-enable, open Safari Settings → Safari → Notifications for this website.' });
+        setNotifMsg({ kind: 'err', text: 'Permission was denied. To re-enable, open Safari Settings \u2192 Safari \u2192 Notifications for this website.' });
       } else {
         setNotifMsg({ kind: 'err', text: 'No response from the permission prompt.' });
       }
@@ -337,20 +339,35 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     setNotifBusy(true);
     try {
       const token = localStorage.getItem('echoza-token');
-      const r = await fetch(apiUrl('/api/push/test'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+      const [subRes, testRes] = await Promise.all([
+        fetch(apiUrl('/api/push/subscriptions'), {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(apiUrl('/api/push/test'), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      const subsData = await subRes.json();
+      const testData = await testRes.json();
+      if (!testRes.ok) {
+        setNotifMsg({ kind: 'err', text: testData.error || `Server error ${testRes.status}` });
+        return;
+      }
+      if (testData.success === false && testData.reason === 'no_subscriptions') {
+        setNotifMsg({ kind: 'err', text: 'No push subscription yet. Tap \u201cEnable notifications\u201d first, then try again.' });
+        return;
+      }
+      const devices = (subsData.subscriptions || []).map((s: any) =>
+        `${formatRelativeTime(s.created_at)}`
+      );
+      const deviceLines = devices.map((t: string, i: number) =>
+        `\u{1F4F1} Device ${i + 1}: registered ${t}`
+      ).join('\n');
+      setNotifMsg({
+        kind: 'ok',
+        text: `Test push sent to ${testData.subscriptionCount ?? '?'} device(s):\n${deviceLines}\nYou should see an Echoza notification shortly.`,
       });
-      const data = await r.json();
-      if (!r.ok) {
-        setNotifMsg({ kind: 'err', text: data.error || `Server error ${r.status}` });
-        return;
-      }
-      if (data.success === false && data.reason === 'no_subscriptions') {
-        setNotifMsg({ kind: 'err', text: 'No push subscription yet. Tap “Enable notifications” first, then try again.' });
-        return;
-      }
-      setNotifMsg({ kind: 'ok', text: `Test push sent to ${data.subscriptionCount ?? '?'} device(s). You should see an Echoza notification shortly.` });
     } catch (err: any) {
       setNotifMsg({ kind: 'err', text: `Network error: ${err?.message || String(err)}` });
     } finally {
@@ -364,9 +381,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     : 'off';
 
   const handleDelete = async () => {
-    
-    
-    
     const cleanPassword = password.trim();
     if (!cleanPassword || !confirmed) return;
     setDeleting(true);
