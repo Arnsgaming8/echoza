@@ -1456,7 +1456,7 @@ export default function Dashboard() {
       <PwaGuide />
       <InstallBanner />
       {!showAudioCall && !showVideoCall && !incomingCall && (
-        <Footer>© All Rights Reserved Echoza</Footer>
+        <Footer>© 2026 Arnav Jugessur · All Rights Reserved Echoza</Footer>
       )}
     </Wrapper>
   );
