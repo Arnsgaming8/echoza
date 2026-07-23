@@ -52,20 +52,12 @@ const Header = styled.div`
   text-align: center;
 `;
 
-const Logo = styled.div`
+const Logo = styled.img`
   width: 56px;
   height: 56px;
-  border-radius: 16px;
-  background: ${({ theme }) => theme.colors.primary.echoBlue};
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   margin: 0 auto 16px;
-  font-size: 24px;
-  font-weight: 800;
-  color: white;
-  letter-spacing: -1px;
-  box-shadow: 0 4px 16px rgba(58, 123, 255, 0.3);
+  filter: drop-shadow(0 4px 16px rgba(58, 123, 255, 0.3));
 `;
 
 const Title = styled.h2`
@@ -450,7 +442,7 @@ export default function PermissionOnboarding() {
         ) : (
           <>
             <Header>
-              <Logo>E</Logo>
+              <Logo src="/vite.svg" alt="Echoza" />
               <Title>Enable features</Title>
               <Subtitle>
                 Grant permissions to get the most out of Echoza — messages, calls, and notifications.

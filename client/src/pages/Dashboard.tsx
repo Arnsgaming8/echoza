@@ -101,11 +101,10 @@ const LoadingOverlay = styled.div`
   z-index: 9999;
 `;
 
-const LoadingLogo = styled.h1`
-  font-size: 28px;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.primary.echoBlue};
-  letter-spacing: -0.5px;
+const LoadingLogo = styled.img`
+  width: 48px;
+  height: 48px;
+  animation: ${spin} 1s linear infinite;
 `;
 
 const LoadingSpinner = styled.div`
@@ -1293,7 +1292,7 @@ export default function Dashboard() {
     <Wrapper>
       {!conversationsLoaded && (
         <LoadingOverlay>
-          <LoadingLogo>Echoza</LoadingLogo>
+          <LoadingLogo src="/vite.svg" alt="Echoza" />
           <LoadingSpinner />
           <LoadingText>Loading conversations...</LoadingText>
         </LoadingOverlay>

@@ -16,11 +16,9 @@ const Overlay = styled.div`
   text-align: center;
 `;
 
-const Logo = styled.h1`
-  font-size: 28px;
-  font-weight: 700;
-  color: ${({ theme }) => theme.colors.primary.echoBlue};
-  letter-spacing: -0.5px;
+const Logo = styled.img`
+  width: 52px;
+  height: 52px;
 `;
 
 const Message = styled.p`
@@ -87,7 +85,7 @@ export default function DbPausedOverlay({ children }: { children: React.ReactNod
   if (paused) {
     return (
       <Overlay>
-        <Logo>Echoza</Logo>
+        <Logo src="/vite.svg" alt="Echoza" />
         <Message>
           Database is paused.
           <br />
