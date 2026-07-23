@@ -745,13 +745,16 @@ export default function Dashboard() {
     
     
     socket.on('connect', () => {
+      if (activeChatRef.current) {
+        socket.emit('conversation:viewing', { conversationId: activeChatRef.current });
+      }
       try {
         const pending = loadOutbox();
         for (const entry of pending) {
           const { id, createdAt, ...rest } = entry;
           socket.emit('message:send', { ...rest, clientId: id });
         }
-      } catch { /* outbox corrupted — just skip */ }
+      } catch {}
     });
 
     socket.on('message:new', (message: any) => {
