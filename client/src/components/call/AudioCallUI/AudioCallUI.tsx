@@ -324,10 +324,6 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
   }, [resumePlayback]);
 
   useEffect(() => {
-    resumePlayback();
-  }, [resumePlayback]);
-
-  useEffect(() => {
     if (audioRef.current && remoteStream) {
       audioRef.current.srcObject = remoteStream;
       audioRef.current.play().catch(() => {});
@@ -368,7 +364,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
   const ended = callStatus === 'missed' || callStatus === 'declined' || callStatus === 'failed';
 
   return (
-    <Overlay>
+    <Overlay onClick={() => resumePlayback()} onTouchStart={() => resumePlayback()}>
       <audio ref={audioRef} autoPlay playsInline />
       {!ended && (
         <AvatarRing $connected={connected}>

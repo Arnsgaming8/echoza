@@ -432,10 +432,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
     resumePlayback();
   }, [resumePlayback]);
 
-  useEffect(() => {
-    resumePlayback();
-  }, [resumePlayback]);
-
   const hideControlsTimeout = useCallback(() => {
     if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
     if (connected) {
@@ -537,7 +533,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
   const ended = callStatus === 'missed' || callStatus === 'declined' || callStatus === 'failed';
 
   return (
-    <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); }}>
+    <Overlay onClick={() => { setControlsVisible(true); hideControlsTimeout(); resumePlayback(); }} onTouchStart={() => resumePlayback()}>
       {callStatus === 'ringing' && (
         <CallingOverlay>
           <CameraOffAvatar style={{ marginBottom: 8 }}>

@@ -345,10 +345,11 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         if (!remoteStreamRef.current) remoteStreamRef.current = new MediaStream();
         remoteStreamRef.current.addTrack(e.track);
         setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
-        if (playbackCtxRef.current && analyserRef.current && e.track.kind === 'audio') {
+        if (playbackCtxRef.current && e.track.kind === 'audio') {
           try {
             const src = playbackCtxRef.current.createMediaStreamSource(new MediaStream([e.track]));
-            src.connect(analyserRef.current);
+            if (analyserRef.current) src.connect(analyserRef.current);
+            if (playbackGainRef.current) src.connect(playbackGainRef.current);
           } catch {}
         }
         setConnected(true);
