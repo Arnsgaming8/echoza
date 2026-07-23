@@ -813,6 +813,7 @@ export function setupSocket(io: SocketServer): void {
         );
         if (msg && msg.sender_id !== userId) {
           emitToUser(io, msg.sender_id, 'message:read-status', { messageId, conversationId, readByUserId: userId });
+          emitToUser(io, msg.sender_id, 'conversation:update', { conversationId });
         }
       } catch (err: any) {
         console.warn('[message:read] error:', err?.message || err);

@@ -261,7 +261,7 @@ export async function sendPushNotification(
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
         payload,
-        { headers: { Urgency: 'high', ...(extra?.tag ? { Topic: extra.tag } : {}) } },
+        { headers: { Urgency: 'high' }, TTL: 0 },
       );
       results.push({ endpoint: sub.endpoint, ok: true });
     } catch (err: any) {
