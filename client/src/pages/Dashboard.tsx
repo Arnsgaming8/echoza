@@ -1332,8 +1332,6 @@ export default function Dashboard() {
           onAudioCall={handleAudioCall}
           onVideoCall={handleVideoCall}
           onToggleSidebar={() => setShowSidebar(s => !s)}
-          deleteMode={deleteMode}
-          onToggleDeleteMode={toggleDeleteMode}
           onSettings={() => setShowSettings(true)}
         />
         <ChatArea>

@@ -103,22 +103,25 @@ const InputWrapper = styled.div`
   padding: 4px 4px 4px 4px;
 `;
 
-const AttachBtn = styled.button`
+const AttachBtn = styled.button<{ $active?: boolean }>`
   width: 36px;
   height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: transparent;
-  color: ${({ theme }) => theme.colors.secondary.warmGray};
+  background: ${({ $active, theme }) =>
+    $active ? theme.colors.primary.echoBlue : 'transparent'};
+  color: ${({ $active, theme }) =>
+    $active ? 'white' : theme.colors.secondary.warmGray};
   font-size: 18px;
   transition: all ${({ theme }) => theme.transition};
   flex-shrink: 0;
 
   &:hover {
-    background: ${({ theme }) => theme.colors.bg.hover};
-    color: ${({ theme }) => theme.colors.text.primary};
+    background: ${({ $active, theme }) =>
+      $active ? theme.colors.primary.echoBlue : theme.colors.bg.hover};
+    color: ${({ $active, theme }) => ($active ? 'white' : theme.colors.text.primary)};
   }
 `;
 
@@ -330,6 +333,9 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
               </DeleteBarBtn>
             </DeleteBar>
           )}
+          <AttachBtn onClick={onToggleDeleteMode} title={deleteMode ? 'Cancel delete' : 'Delete messages'} $active={deleteMode}>
+            <FiTrash2 />
+          </AttachBtn>
           <label htmlFor="attach-file-input" style={{ display: 'flex', cursor: 'pointer' }}>
             <AttachBtn as="span" title="Attach file">
               <FiPaperclip />

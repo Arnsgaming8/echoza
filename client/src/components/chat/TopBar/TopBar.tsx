@@ -1,6 +1,6 @@
 import styled from 'styled-components';
 import { Avatar, StatusDot } from '../../common';
-import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu, FiTrash2 } from 'react-icons/fi';
+import { FiSettings, FiSun, FiMoon, FiPhone, FiVideo, FiUsers, FiMenu } from 'react-icons/fi';
 import { useTheme } from '../../../contexts/ThemeContext';
 import { useSocket } from '../../../contexts/SocketContext';
 
@@ -24,8 +24,6 @@ interface TopBarProps {
   onAudioCall: () => void;
   onVideoCall: () => void;
   onToggleSidebar?: () => void;
-  deleteMode?: boolean;
-  onToggleDeleteMode?: () => void;
   onSettings?: () => void;
 }
 
@@ -38,17 +36,24 @@ const Wrapper = styled.header`
   padding: 0 ${({ theme }) => theme.spacing.lg};
   border-bottom: 1px solid ${({ theme }) => theme.colors.border};
   background: ${({ theme }) => theme.colors.bg.sidebar};
+  overflow: hidden;
 
   @media (max-width: 768px) {
-    padding: 0 ${({ theme }) => theme.spacing.sm};
+    padding: 0 ${({ theme }) => theme.spacing.xs};
   }
 `;
 
 const Left = styled.div`
   display: flex;
   align-items: center;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
+
+  @media (min-width: 769px) {
+    gap: ${({ theme }) => theme.spacing.md};
+  }
 `;
 
 const Hamburger = styled.button`
@@ -88,13 +93,20 @@ const Logo = styled.span`
 const ContactInfo = styled.div`
   display: flex;
   align-items: center;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.spacing.sm};
   padding-left: ${({ theme }) => theme.spacing.md};
   border-left: 1px solid ${({ theme }) => theme.colors.border};
+  min-width: 0;
+  overflow: hidden;
 
   @media (max-width: 768px) {
     border-left: none;
     padding-left: 0;
+    gap: 6px;
+  }
+
+  @media (min-width: 769px) {
+    gap: ${({ theme }) => theme.spacing.md};
   }
 `;
 
@@ -115,6 +127,19 @@ const ContactName = styled.span`
   font-size: ${({ theme }) => theme.font.size.md};
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 140px;
+
+  @media (min-width: 769px) {
+    max-width: 200px;
+  }
+
+  @media (min-width: 1024px) {
+    max-width: 300px;
+  }
 `;
 
 const StatusLabel = styled.span`
@@ -130,10 +155,15 @@ const MemberCount = styled.span`
 const Right = styled.div`
   display: flex;
   align-items: center;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: 4px;
+  flex-shrink: 0;
+
+  @media (min-width: 769px) {
+    gap: ${({ theme }) => theme.spacing.sm};
+  }
 `;
 
-const IconBtn = styled.button<{ $active?: boolean }>`
+const IconBtn = styled.button<{ $active?: boolean; $hideOnMobile?: boolean }>`
   width: 36px;
   height: 36px;
   display: flex;
@@ -146,6 +176,7 @@ const IconBtn = styled.button<{ $active?: boolean }>`
     $active ? 'white' : 'inherit'};
   font-size: 18px;
   transition: all ${({ theme }) => theme.transition};
+  flex-shrink: 0;
 
   &:hover {
     background: ${({ $active, theme }) =>
@@ -153,9 +184,16 @@ const IconBtn = styled.button<{ $active?: boolean }>`
     color: ${({ $active }) =>
       $active ? 'white' : 'inherit'};
   }
+
+  @media (max-width: 768px) {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+    display: ${({ $hideOnMobile }) => ($hideOnMobile ? 'none' : 'flex')};
+  }
 `;
 
-export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, deleteMode, onToggleDeleteMode, onSettings }: TopBarProps) {
+export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggleSidebar, onSettings }: TopBarProps) {
   const { isDark, toggleTheme } = useTheme();
   const { onlineUsers } = useSocket();
   const contactOnline = conversation?.contact ? onlineUsers.includes(conversation.contact.id) : false;
@@ -183,7 +221,7 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
                 online={contactOnline}
               />
             )}
-            <div>
+            <div style={{ minWidth: 0, overflow: 'hidden' }}>
               <ContactName>
                 {conversation.isGroup ? conversation.groupName : conversation.contact?.username}
               </ContactName>
@@ -210,12 +248,7 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
             </IconBtn>
           </>
         )}
-        {conversation && (
-          <IconBtn onClick={onToggleDeleteMode} title={deleteMode ? 'Cancel' : 'Delete messages'} $active={deleteMode}>
-            <FiTrash2 />
-          </IconBtn>
-        )}
-        <IconBtn onClick={toggleTheme} title="Toggle theme">
+        <IconBtn onClick={toggleTheme} title="Toggle theme" $hideOnMobile>
           {isDark ? <FiSun /> : <FiMoon />}
         </IconBtn>
         <IconBtn onClick={onSettings} title="Settings">
