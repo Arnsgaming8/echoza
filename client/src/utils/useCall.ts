@@ -331,18 +331,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         }
       };
 
-      let localCandCount = 0;
       const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
         if (e.candidate && socket) {
           const c = e.candidate;
-          const type = c.type || c.candidate?.split(' ')[7] || 'unknown';
-          localCandCount++;
           socket.emit('call:ice-candidate', {
             receiverId: contact.id,
             candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
           });
-        } else {
-          console.log('[useCall] local candidates gathered total=' + localCandCount);
         }
       };
 
@@ -449,10 +444,8 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
-          console.log('[useCall] received answer from ' + from + ', setting remote description, sdp length=' + (sdp ? sdp.length : 0));
           pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
             .then(() => {
-              console.log('[useCall] remote description set, flushing ' + pendingIceCandidatesRef.current.length + ' pending candidates');
               flushPendingIceCandidatesRef.current?.();
             })
             .catch((err: any) => console.warn('[useCall] setRemoteDescription error:', err?.message || err));
@@ -460,20 +453,16 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         };
         socket.on('call:answer', onAnswer);
 
-        let remoteCandCount = 0;
         const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
           if (from !== contact.id) return;
-          remoteCandCount++;
           const pcNow = pcRef.current;
           if (!pcNow) return;
           const c = new RTCIceCandidate(candidate);
           if (!pcNow.remoteDescription && !pcNow.currentRemoteDescription) {
             pendingIceCandidatesRef.current.push(c);
-            console.log('[useCall] queued remote candidate #' + remoteCandCount + ' pending=' + pendingIceCandidatesRef.current.length);
             return;
           }
           pcNow.addIceCandidate(c).catch(() => {});
-          console.log('[useCall] added remote candidate #' + remoteCandCount);
         };
         socket.on('call:ice-candidate', onIce);
 
@@ -525,20 +514,16 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         failCall(err);
       });
 
-      let remoteCandCount = 0;
       const onIce = ({ from, candidate }: { from: string; candidate: any }) => {
         if (from !== contact.id) return;
-        remoteCandCount++;
         const pcNow = pcRef.current;
         if (!pcNow) return;
         const c = new RTCIceCandidate(candidate);
         if (!pcNow.remoteDescription && !pcNow.currentRemoteDescription) {
           pendingIceCandidatesRef.current.push(c);
-          console.log('[useCall] (incoming) queued remote candidate #' + remoteCandCount + ' pending=' + pendingIceCandidatesRef.current.length);
           return;
         }
         pcNow.addIceCandidate(c).catch(() => {});
-        console.log('[useCall] (incoming) added remote candidate #' + remoteCandCount);
       };
       socket.on('call:ice-candidate', onIce);
 
