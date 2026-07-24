@@ -362,13 +362,7 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
           stopRingtone();
         }
         if (pc.iceConnectionState === 'failed') {
-          try { pc.restartIce(); } catch {}
-          setTimeout(() => {
-            const cur = pcRef.current;
-            if (cur && cur.iceConnectionState === 'failed') {
-              failCall(new Error('Network path could not be established'));
-            }
-          }, 6000);
+          failCall(new Error('Network path could not be established'));
         }
       };
 

@@ -18,9 +18,9 @@ import {
 import { env, logEnvSanity } from './env.js';
 import { pingDb, fetchOne, fetchAll } from './db.js';
 import { sendDiscordNotification } from './discord.js';
-import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, touchPresence } from './socket.js';
+import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, setIoRef, touchPresence, emitToUserByUserId } from './socket.js';
 import { startPairSessionSweeper } from './socket.pair.js';
-import { startAccountDeletionSweeper } from './account-deletion.js';
+import { startAccountDeletionSweeper, setNotifyDeletedAccount } from './account-deletion.js';
 import { initVapid } from './vapid.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
@@ -422,6 +422,8 @@ async function runTest(relayOnly=false){
   setupSocket(io);
   startPresenceSweeper(io);
   startPairSessionSweeper();
+  setIoRef(io);
+  setNotifyDeletedAccount(emitToUserByUserId);
   startAccountDeletionSweeper();
 
   httpServer.listen(env.PORT, () => {

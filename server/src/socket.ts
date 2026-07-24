@@ -1095,6 +1095,17 @@ export function startPresenceSweeper(io: SocketServer): NodeJS.Timeout {
   return _serverPresenceSweep.handle;
 }
 
+let ioRef: SocketServer | null = null;
+
+export function setIoRef(io: SocketServer): void {
+  ioRef = io;
+}
+
+export function emitToUserByUserId(userId: string, event: string, data: any): void {
+  if (!ioRef) return;
+  emitToUser(ioRef, userId, event, data);
+}
+
 export function isUserConnected(userId: string): boolean {
   return onlineUsers.has(userId);
 }

@@ -4,6 +4,12 @@ export const ACCOUNT_INACTIVITY_DAYS = 14;
 
 export const ACCOUNT_DELETION_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
+let emitFn: ((userId: string, event: string, data: any) => void) | null = null;
+
+export function setNotifyDeletedAccount( fn: (userId: string, event: string, data: any) => void ): void {
+  emitFn = fn;
+}
+
 export async function touchLastSignIn(userId: string): Promise<void> {
   try {
     await fetchAll(
@@ -39,6 +45,30 @@ export async function runAccountDeletionSweep(): Promise<AccountDeletionResult> 
       const candidateIds = cand.rows.map(r => r.id);
       if (candidateIds.length === 0) return;
 
+      const affectedRows = await client.query<{
+        conversation_id: string;
+        remaining_user_id: string | null;
+      }>(
+        `SELECT p.conversation_id,
+                (SELECT p2.user_id FROM participants p2
+                  WHERE p2.conversation_id = p.conversation_id
+                    AND NOT (p2.user_id = ANY($1::uuid[]))
+                  LIMIT 1) AS remaining_user_id
+           FROM participants p
+           JOIN conversations c ON c.id = p.conversation_id AND c.is_group = FALSE
+          WHERE p.user_id = ANY($1::uuid[])`,
+        [candidateIds],
+      );
+
+      const notifyMap = new Map<string, string[]>();
+      for (const row of affectedRows.rows) {
+        if (row.remaining_user_id) {
+          const arr = notifyMap.get(row.remaining_user_id) || [];
+          arr.push(row.conversation_id);
+          notifyMap.set(row.remaining_user_id, arr);
+        }
+      }
+
       const convR = await client.query(
         `DELETE FROM conversations
           WHERE NOT EXISTS (
@@ -55,6 +85,14 @@ export async function runAccountDeletionSweep(): Promise<AccountDeletionResult> 
         [candidateIds],
       );
       deleted = profR.rowCount ?? 0;
+
+      if (emitFn && notifyMap.size > 0) {
+        for (const [remainingUserId, convIds] of notifyMap) {
+          for (const convId of convIds) {
+            emitFn(remainingUserId, 'conversation:deleted', { conversationId: convId });
+          }
+        }
+      }
     });
   } catch (err: any) {
     console.error('[account-deletion] sweep failed:', err?.message || err);
