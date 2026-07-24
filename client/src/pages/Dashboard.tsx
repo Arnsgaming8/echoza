@@ -466,7 +466,7 @@ export default function Dashboard() {
             return true;
           }
           const errBody = await r.text().catch(() => '');
-          console.warn('Push subscribe POST failed:', r.status, errBody);
+          if (r.status !== 401) console.warn('Push subscribe POST failed:', r.status, errBody);
           return false;
         };
 
