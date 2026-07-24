@@ -334,10 +334,17 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       const handleIceCandidate = (e: RTCPeerConnectionIceEvent) => {
         if (e.candidate && socket) {
           const c = e.candidate;
+          const type = c.type || c.candidate?.split(' ')[7] || 'unknown';
           socket.emit('call:ice-candidate', {
             receiverId: contact.id,
             candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
           });
+        }
+      };
+
+      pc.onicecandidateerror = (e: any) => {
+        if (e && e.errorCode) {
+          console.warn('[useCall] ICE candidate error: code=' + e.errorCode + ' text=' + (e.errorText || '') + ' url=' + (e.url || 'none'));
         }
       };
 
@@ -438,8 +445,13 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
 
         const onAnswer = ({ from, sdp }: { from: string; sdp: string }) => {
           if (from !== contact.id) return;
+          console.log('[useCall] received answer from ' + from + ', setting remote description, sdp length=' + (sdp ? sdp.length : 0));
           pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }))
-            .then(() => flushPendingIceCandidatesRef.current?.());
+            .then(() => {
+              console.log('[useCall] remote description set, flushing ' + pendingIceCandidatesRef.current.length + ' pending candidates');
+              flushPendingIceCandidatesRef.current?.();
+            })
+            .catch((err: any) => console.warn('[useCall] setRemoteDescription error:', err?.message || err));
           socket.off('call:answer', onAnswer);
         };
         socket.on('call:answer', onAnswer);
