@@ -391,15 +391,18 @@ async function runTest(relayOnly=false){
 </head>
 <body>
 <div class="card">
-  <svg class="logo" viewBox="0 0 100 100" fill="none" preserveAspectRatio="xMidYMid meet">
+  <svg class="logo" viewBox="0 0 100 90" fill="none" preserveAspectRatio="xMidYMid meet">
     <defs>
+      <style>@import url('https://api.fontshare.com/css?f[]=sharpie@400&amp;display=swap');</style>
       <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#3A7BFF"/>
         <stop offset="100%" stop-color="#4FF3C2"/>
       </linearGradient>
     </defs>
-    <circle cx="50" cy="50" r="45" fill="url(#lg)"/>
-    <text x="50" y="58" font-family="'Inter', sans-serif" font-size="30" font-weight="800" fill="white" text-anchor="middle">E</text>
+    <rect x="4" y="8" width="56" height="42" rx="5" fill="url(#lg)" stroke="white" stroke-width="3"/>
+    <polygon points="62,15 88,24 88,34 62,43" fill="url(#lg)" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="14,50 6,64 22,50" fill="url(#lg)" stroke="white" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="32" y="29" font-family="'Sharpie', Georgia, serif" font-size="22" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
   </svg>
   <h1>Echoza has moved</h1>
   <p>Echoza is an independent site and has been migrated to a new home. All accounts and conversations are safe.</p>
