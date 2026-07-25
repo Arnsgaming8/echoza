@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 72">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#3A7BFF"/>
@@ -8,8 +8,8 @@
       @import url('https://api.fontshare.com/css?f[]=sharpie@400&amp;display=swap');
     </style>
   </defs>
-  <rect x="4" y="6" width="58" height="42" rx="5" fill="url(#g)" stroke="white" stroke-width="3"/>
-  <polygon points="66,14 100,30 66,46" fill="url(#g)" stroke="white" stroke-width="3" stroke-linejoin="round"/>
-  <polygon points="18,48 8,62 26,48" fill="url(#g)" stroke="white" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-  <text x="33" y="27" font-family="Sharpie, cursive" font-size="22" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
+  <rect x="4" y="6" width="52" height="40" rx="4" fill="url(#g)" stroke="white" stroke-width="3"/>
+  <polygon points="56,12 84,20 84,32 56,40" fill="url(#g)" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+  <polygon points="14,46 6,60 22,46" fill="url(#g)" stroke="white" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <text x="30" y="26" font-family="Sharpie, cursive" font-size="22" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
 </svg>

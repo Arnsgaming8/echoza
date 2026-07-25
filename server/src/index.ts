@@ -391,17 +391,17 @@ async function runTest(relayOnly=false){
 </head>
 <body>
 <div class="card">
-  <svg class="logo" viewBox="0 0 120 80" fill="none" preserveAspectRatio="xMidYMid meet">
+  <svg class="logo" viewBox="0 0 100 72" fill="none" preserveAspectRatio="xMidYMid meet">
     <defs>
       <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
         <stop offset="0%" stop-color="#3A7BFF"/>
         <stop offset="100%" stop-color="#4FF3C2"/>
       </linearGradient>
     </defs>
-    <rect x="4" y="6" width="58" height="42" rx="5" fill="url(#lg)" stroke="white" stroke-width="3"/>
-    <polygon points="66,14 100,30 66,46" fill="url(#lg)" stroke="white" stroke-width="3" stroke-linejoin="round"/>
-    <polygon points="18,48 8,62 26,48" fill="url(#lg)" stroke="white" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-    <text x="33" y="27" font-family="'Sharpie', Georgia, serif" font-size="22" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
+    <rect x="4" y="6" width="52" height="40" rx="4" fill="url(#lg)" stroke="white" stroke-width="3"/>
+    <polygon points="56,12 84,20 84,32 56,40" fill="url(#lg)" stroke="white" stroke-width="3" stroke-linejoin="round"/>
+    <polygon points="14,46 6,60 22,46" fill="url(#lg)" stroke="white" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="30" y="26" font-family="'Sharpie', Georgia, serif" font-size="22" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
   </svg>
   <h1>Echoza has moved</h1>
   <p>Echoza is an independent site and has been migrated to a new home. All accounts and conversations are safe.</p>
