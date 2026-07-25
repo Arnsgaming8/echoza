@@ -79,15 +79,27 @@ const Hamburger = styled.button`
   }
 `;
 
+const LogoWrapper = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  @media (max-width: 768px) {
+    display: none;
+  }
+`;
+
+const LogoImg = styled.img`
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+`;
+
 const Logo = styled.span`
   font-size: ${({ theme }) => theme.font.size.lg};
   font-weight: ${({ theme }) => theme.font.weight.bold};
   color: ${({ theme }) => theme.colors.primary.echoBlue};
   letter-spacing: -0.5px;
-
-  @media (max-width: 768px) {
-    display: none;
-  }
 `;
 
 const ContactInfo = styled.div`
@@ -206,7 +218,10 @@ export default function TopBar({ conversation, onAudioCall, onVideoCall, onToggl
         <Hamburger onClick={onToggleSidebar} title="Toggle sidebar">
           <FiMenu />
         </Hamburger>
-        <Logo>Echoza</Logo>
+        <LogoWrapper>
+          <LogoImg src="/vite.svg" alt="Echoza" />
+          <Logo>Echoza</Logo>
+        </LogoWrapper>
         {conversation && (
           <ContactInfo>
             {conversation.isGroup ? (
