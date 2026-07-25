@@ -377,7 +377,7 @@ async function runTest(relayOnly=false){
   .card{background:rgba(255,255,255,0.06);backdrop-filter:blur(16px);
     border:1px solid rgba(255,255,255,0.1);border-radius:20px;
     padding:48px 40px;max-width:480px;width:100%;text-align:center}
-  .logo{width:64px;height:64px;margin:0 auto 24px;display:block}
+  .logo{width:80px;height:64px;margin:0 auto 24px;display:block}
   h1{font-size:24px;font-weight:700;margin-bottom:12px}
   p{color:rgba(255,255,255,0.65);line-height:1.6;margin-bottom:28px;font-size:15px}
   .btn{display:inline-flex;align-items:center;gap:8px;
@@ -391,8 +391,18 @@ async function runTest(relayOnly=false){
 </head>
 <body>
 <div class="card">
-  <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="#3A7BFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  <svg class="logo" viewBox="0 0 100 80" fill="none" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#3A7BFF"/>
+        <stop offset="100%" stop-color="#4FF3C2"/>
+      </linearGradient>
+    </defs>
+    <rect x="6" y="4" width="56" height="52" rx="6" fill="url(#lg)"/>
+    <polygon points="62,16 94,40 62,64" fill="url(#lg)"/>
+    <polygon points="18,52 8,68 28,52" fill="url(#lg)"/>
+    <path d="M 14 4 H 56 Q 62 4, 62 10 V 16 L 94 40 L 62 64 V 52 H 28 L 8 68 L 18 52 H 14 Q 6 52, 6 46 V 10 Q 6 4, 14 4 Z" stroke="white" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <text x="34" y="34" font-family="Georgia, 'Palatino Linotype', serif" font-size="30" font-style="italic" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="central">E</text>
   </svg>
   <h1>Echoza has moved</h1>
   <p>Echoza is an independent site and has been migrated to a new home. All accounts and conversations are safe.</p>
