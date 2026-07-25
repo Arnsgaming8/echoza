@@ -9,6 +9,9 @@ export default defineConfig({
       targets: ['iOS >= 12'],
     }),
   ],
+  build: {
+    target: 'es2015',
+  },
   server: {
     port: 5173,
     proxy: {
