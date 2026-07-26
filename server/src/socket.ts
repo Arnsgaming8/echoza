@@ -146,7 +146,7 @@ async function emitAndPersistCallMissed(
     emitToUser(io, callerUserId, 'message:sent', message);
     emitToUser(io, receiverId, 'message:new', message);
     emitToUser(io, receiverId, 'conversation:update', { conversationId });
-    if (!isViewingConversation(receiverId, conversationId)) {
+    if (!onlineUsers.has(receiverId)) {
       await sendPushNotification(
         receiverId,
         `Missed ${callType} call from ${callerUsername}`,
@@ -758,7 +758,7 @@ export function setupSocket(io: SocketServer): void {
           const bodyPreview = content.trim()
             ? `${username}: ${preview}`
             : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;            for (const m of groupMembers) {
-            if (!isViewingConversation(m.user_id, conversationId)) {
+            if (!onlineUsers.has(m.user_id)) {
               await sendPushNotification(
                 m.user_id, groupTitle, bodyPreview,
                 `/dashboard?conv=${conversationId}`, conversationId,
@@ -768,7 +768,7 @@ export function setupSocket(io: SocketServer): void {
         } else if (receiverId) {
           emitToUser(io, receiverId, 'message:new', message);
           emitToUser(io, receiverId, 'conversation:update', { conversationId });
-          if (!isViewingConversation(receiverId, conversationId)) {
+          if (!onlineUsers.has(receiverId)) {
             await sendPushNotification(
               receiverId, username,
               content || 'Sent an attachment',
@@ -1002,11 +1002,13 @@ export function setupSocket(io: SocketServer): void {
         from: userId, username, avatar: userData?.avatar || '',
         type: callType, sdp,
       });
-      await sendPushNotification(
-        receiverId, `${username} is calling`, `${callType} call`,
-        '/', undefined,
-        { tag: `call-${userId}`, data: { callType, callerId: userId, callerUsername: username } },
-      );
+      if (!onlineUsers.has(receiverId)) {
+        await sendPushNotification(
+          receiverId, `${username} is calling`, `${callType} call`,
+          '/', undefined,
+          { tag: `call-${userId}`, data: { callType, callerId: userId, callerUsername: username } },
+        );
+      }
       clearPendingCall(userId, receiverId);
       const key = pendingCallKey(userId, receiverId);
       const t = setTimeout(() => {
