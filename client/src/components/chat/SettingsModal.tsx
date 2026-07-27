@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import styled, { keyframes } from 'styled-components';
 import { Avatar, Button, PasswordInput } from '../common';
-import { FiX, FiAlertTriangle, FiTrash2, FiBell, FiBellOff, FiSmartphone, FiMic, FiVolume2 } from 'react-icons/fi';
+import { FiX, FiAlertTriangle, FiTrash2, FiBell, FiBellOff, FiSmartphone } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiUrl } from '../../utils/api';
 import { isIOS, isIOSStandalone, canIOSReceivePush } from '../../utils/iosCapability';
@@ -246,41 +246,6 @@ const InstallHint = styled.div`
   line-height: 1.4;
 `;
 
-const AudioSelect = styled.select`
-  width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(255,255,255,0.08);
-  color: white;
-  font-size: 13px;
-  outline: none;
-  margin-bottom: 14px;
-  cursor: pointer;
-  &:focus { border-color: ${({ theme }) => theme.colors.primary.echoBlue}; }
-  option { background: #222; color: white; }
-`;
-
-const VolumeSlider = styled.input`
-  width: 100%;
-  height: 4px;
-  -webkit-appearance: none;
-  appearance: none;
-  border-radius: 2px;
-  background: rgba(255,255,255,0.2);
-  outline: none;
-  margin-bottom: 4px;
-  &::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    background: ${({ theme }) => theme.colors.primary.echoBlue};
-    cursor: pointer;
-  }
-`;
-
-
 export default function SettingsModal({ onClose }: SettingsModalProps) {
   const { user } = useAuth();
   const [step, setStep] = useState<'initial' | 'confirm'>('initial');
@@ -299,14 +264,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
   const [notifMsg, setNotifMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
   const [showPairing, setShowPairing] = useState(false);
-  const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([]);
-  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
-  const [selectedMic, setSelectedMic] = useState(() => localStorage.getItem('echoza-mic') || '');
-  const [selectedSpeaker, setSelectedSpeaker] = useState(() => localStorage.getItem('echoza-speaker') || '');
-  const [audioVolume, setAudioVolume] = useState(() => {
-    const saved = localStorage.getItem('echoza-volume');
-    return saved ? parseFloat(saved) : 1;
-  });
+
 
   const refreshNotifState = async () => {
     if (typeof Notification === 'undefined') {
@@ -330,16 +288,7 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
   useEffect(() => { refreshNotifState(); }, []);
 
-  useEffect(() => {
-    navigator.mediaDevices.enumerateDevices().then(devices => {
-      setAudioInputs(devices.filter(d => d.kind === 'audioinput'));
-      setAudioOutputs(devices.filter(d => d.kind === 'audiooutput'));
-      const savedMic = localStorage.getItem('echoza-mic');
-      const savedSpeaker = localStorage.getItem('echoza-speaker');
-      if (savedMic && devices.some(d => d.deviceId === savedMic)) setSelectedMic(savedMic);
-      if (savedSpeaker && devices.some(d => d.deviceId === savedSpeaker)) setSelectedSpeaker(savedSpeaker);
-    }).catch(() => {});
-  }, []);
+
 
   const iOS = isIOS();
   const standalone = isIOSStandalone();
@@ -543,88 +492,6 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
                 {notifMsg.text}
               </SuccessMsg>
             )}
-          </Section>
-
-          <Section>
-            <SectionTitle>
-              <FiMic style={{ verticalAlign: 'middle', marginRight: 6 }} />
-              Audio Settings
-            </SectionTitle>
-            <SectionDesc>
-              Choose your default microphone, speaker, and call volume.
-            </SectionDesc>
-
-            <NotifRow>
-              <NotifIconBox>
-                <FiMic />
-              </NotifIconBox>
-              <NotifText>
-                <NotifTitle>Microphone</NotifTitle>
-                <NotifDesc>Default mic for calls</NotifDesc>
-              </NotifText>
-            </NotifRow>
-            <AudioSelect
-              value={selectedMic}
-              onChange={e => {
-                const v = e.target.value;
-                setSelectedMic(v);
-                localStorage.setItem('echoza-mic', v);
-              }}
-            >
-              {audioInputs.length === 0 && <option value="">No microphones found</option>}
-              {audioInputs.map(d => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `Mic ${d.deviceId.slice(0, 8)}`}
-                </option>
-              ))}
-            </AudioSelect>
-
-            <NotifRow>
-              <NotifIconBox>
-                <FiVolume2 />
-              </NotifIconBox>
-              <NotifText>
-                <NotifTitle>Speaker</NotifTitle>
-                <NotifDesc>Default speaker for calls</NotifDesc>
-              </NotifText>
-            </NotifRow>
-            <AudioSelect
-              value={selectedSpeaker}
-              onChange={e => {
-                const v = e.target.value;
-                setSelectedSpeaker(v);
-                localStorage.setItem('echoza-speaker', v);
-              }}
-            >
-              {audioOutputs.length === 0 && <option value="">Default speaker</option>}
-              {audioOutputs.map(d => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
-                </option>
-              ))}
-            </AudioSelect>
-
-            <NotifRow>
-              <NotifIconBox>
-                <FiVolume2 />
-              </NotifIconBox>
-              <NotifText>
-                <NotifTitle>Call Volume</NotifTitle>
-                <NotifDesc>{Math.round(audioVolume * 100)}%</NotifDesc>
-              </NotifText>
-            </NotifRow>
-            <VolumeSlider
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={audioVolume}
-              onChange={e => {
-                const v = parseFloat(e.target.value);
-                setAudioVolume(v);
-                localStorage.setItem('echoza-volume', String(v));
-              }}
-            />
           </Section>
 
           <Section>
