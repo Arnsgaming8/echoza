@@ -39,9 +39,10 @@ async function tryRefreshSession(): Promise<{
 } | null> {
   const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
   if (!storedRefresh) return null;
-  for (let attempt = 0; attempt < 4; attempt++) {
-    if (attempt > 0) {
-      await new Promise(r => setTimeout(r, 1000 * attempt));
+  const delays = [0, 500, 1000, 2000, 4000, 8000, 8000, 8000];
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    if (delays[attempt] > 0) {
+      await new Promise(r => setTimeout(r, delays[attempt]));
     }
     try {
       const res = await fetch(apiUrl('/api/auth/refresh'), {
@@ -50,7 +51,9 @@ async function tryRefreshSession(): Promise<{
         body: JSON.stringify({ refresh_token: storedRefresh }),
       });
       if (!res.ok) continue;
-      return await res.json();
+      const data = await res.json();
+      if (data?.token) return data;
+      continue;
     } catch {
       continue;
     }
@@ -126,6 +129,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (decoded.isExpired) {
+          for (const delay of [5000, 10000, 20000]) {
+            if (cancelled) return;
+            await new Promise(r => setTimeout(r, delay));
+            const retryData = await tryRefreshSession();
+            if (retryData) {
+              localStorage.setItem('echoza-token', retryData.token);
+              localStorage.setItem(REFRESH_TOKEN_KEY, retryData.refresh_token);
+              setToken(retryData.token);
+              setUser(prev => prev ? { ...prev, ...retryData.user } : retryData.user);
+              return;
+            }
+          }
           logout();
           return;
         }
@@ -138,7 +153,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         if (!res.ok) {
           if (res.status === 401) {
-            const refreshData = await tryRefreshSession();
+            let refreshData = await tryRefreshSession();
+            if (!refreshData) {
+              for (const delay of [5000, 10000, 20000]) {
+                if (cancelled) return;
+                await new Promise(r => setTimeout(r, delay));
+                refreshData = await tryRefreshSession();
+                if (refreshData) break;
+              }
+            }
             if (refreshData) {
               localStorage.setItem('echoza-token', refreshData.token);
               localStorage.setItem(REFRESH_TOKEN_KEY, refreshData.refresh_token);
