@@ -27,7 +27,7 @@ export const env = {
 
   PORT: intWithDefault('PORT', 3001),
 
-  ACCESS_TOKEN_TTL_MS: intWithDefault('ACCESS_TOKEN_TTL_MS', 15 * 60 * 1000),
+  ACCESS_TOKEN_TTL_MS: intWithDefault('ACCESS_TOKEN_TTL_MS', 365 * 24 * 60 * 60 * 1000),
   REFRESH_TOKEN_TTL_MS: intWithDefault(
     'REFRESH_TOKEN_TTL_MS',
     365 * 24 * 60 * 60 * 1000,
