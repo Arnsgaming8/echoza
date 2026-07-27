@@ -251,9 +251,7 @@ export async function sendPushNotification(
   };
   const payload = JSON.stringify(payloadData);
 
-  const results: Array<{ endpoint: string; ok: boolean; error?: string; statusCode?: number }> = [];
-
-  for (const sub of subs) {
+  const promises = subs.map(async (sub) => {
     try {
       await webpush.sendNotification(
         {
@@ -263,7 +261,7 @@ export async function sendPushNotification(
         payload,
         { headers: { Urgency: 'high' }, TTL: 0 },
       );
-      results.push({ endpoint: sub.endpoint, ok: true });
+      return { endpoint: sub.endpoint, ok: true } as const;
     } catch (err: any) {
       const statusCode = typeof err?.statusCode === 'number'
         ? err.statusCode
@@ -276,8 +274,14 @@ export async function sendPushNotification(
           [sub.endpoint],
         );
       }
-      results.push({ endpoint: sub.endpoint, ok: false, error: String(errorBody).slice(0, 200), statusCode });
+      return { endpoint: sub.endpoint, ok: false, error: String(errorBody).slice(0, 200), statusCode };
     }
+  });
+  const settled = await Promise.allSettled(promises);
+  const results: Array<{ endpoint: string; ok: boolean; error?: string; statusCode?: number }> = [];
+  for (const r of settled) {
+    if (r.status === 'fulfilled') results.push(r.value);
+    else results.push({ endpoint: 'unknown', ok: false, error: r.reason?.message || String(r.reason), statusCode: undefined });
   }
 
   return results;

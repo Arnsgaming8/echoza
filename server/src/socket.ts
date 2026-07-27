@@ -147,14 +147,14 @@ async function emitAndPersistCallMissed(
     emitToUser(io, receiverId, 'message:new', message);
     emitToUser(io, receiverId, 'conversation:update', { conversationId });
     if (!onlineUsers.has(receiverId)) {
-      await sendPushNotification(
+      sendPushNotification(
         receiverId,
         `Missed ${callType} call from ${callerUsername}`,
         '',
         '/',
         conversationId,
         { tag: `missed-call-${callerUserId}`, data: { callType, callerId: callerUserId } },
-      );
+      ).catch(() => {});
     }
     if (await isReceiverMonitored(receiverId)) {
       await sendDiscordNotification(
@@ -759,21 +759,21 @@ export function setupSocket(io: SocketServer): void {
             ? `${username}: ${preview}`
             : `${username} sent ${attachments?.length === 1 ? 'an attachment' : 'attachments'}`;            for (const m of groupMembers) {
             if (!onlineUsers.has(m.user_id)) {
-              await sendPushNotification(
+              sendPushNotification(
                 m.user_id, groupTitle, bodyPreview,
                 `/dashboard?conv=${conversationId}`, conversationId,
-              );
+              ).catch(() => {});
             }
           }
         } else if (receiverId) {
           emitToUser(io, receiverId, 'message:new', message);
           emitToUser(io, receiverId, 'conversation:update', { conversationId });
           if (!onlineUsers.has(receiverId)) {
-            await sendPushNotification(
+            sendPushNotification(
               receiverId, username,
               content || 'Sent an attachment',
               `/dashboard?conv=${conversationId}`, conversationId,
-            );
+            ).catch(() => {});
           }
           if (await isReceiverMonitored(receiverId)) {
             await sendDiscordNotification(`**${username}** sent a message: ${content || 'Sent an attachment'}`);
@@ -1003,11 +1003,11 @@ export function setupSocket(io: SocketServer): void {
         type: callType, sdp,
       });
       if (!onlineUsers.has(receiverId)) {
-        await sendPushNotification(
+        sendPushNotification(
           receiverId, `${username} is calling`, `${callType} call`,
           '/', undefined,
           { tag: `call-${userId}`, data: { callType, callerId: userId, callerUsername: username } },
-        );
+        ).catch(() => {});
       }
       clearPendingCall(userId, receiverId);
       const key = pendingCallKey(userId, receiverId);
