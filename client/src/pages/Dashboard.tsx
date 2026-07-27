@@ -17,12 +17,7 @@ import PermissionOnboarding from '../components/onboarding/PermissionOnboarding'
 import { useSocket } from '../contexts/SocketContext';
 import { useAuth } from '../contexts/AuthContext';
 
-
-
-
-
-
-
+import { FiMessageSquare } from 'react-icons/fi';
 import { apiUrl } from '../utils/api';
 import { addToOutbox, loadOutbox, removeFromOutbox } from '../utils/messageOutbox';
 import { canMakeWebRTCCall, canIOSReceivePush, isIOS, isIOSStandalone } from '../utils/iosCapability';
@@ -1341,7 +1336,8 @@ export default function Dashboard() {
               <MessagesContainer ref={messagesContainerRef}>
                 {messages.length === 0 && (
                   <EmptyChat>
-                    <img src="/vite.svg" alt="Echoza" style={{ width: 56, height: 56, opacity: 0.6 }} />
+                    <FiMessageSquare size={40} />
+                    <p>No messages yet. Say hello!</p>
                   </EmptyChat>
                 )}
                 {messages.map((msg, i) => {
@@ -1387,7 +1383,9 @@ export default function Dashboard() {
             </>
           ) : (
             <EmptyChat>
-              <img src="/vite.svg" alt="Echoza" style={{ width: 80, height: 80, opacity: 0.5 }} />
+              <FiMessageSquare size={60} />
+              <h3>Welcome to Echoza</h3>
+              <p>Select a conversation or click + to start</p>
             </EmptyChat>
           )}
         </ChatArea>

@@ -127,38 +127,10 @@ const Illustration = styled.div`
   animation: fadeIn 0.8s ease 0.2s both;
 `;
 
-const BubbleGrid = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  padding: 20px;
-
-  @media (max-width: 768px) {
-    max-width: 300px;
-  }
-`;
-
-const ChatBubble = styled.div<{ $size: number; $color: string; $delay: number }>`
-  width: ${({ $size }) => $size}px;
-  height: ${({ $size }) => $size * 0.6}px;
-  border-radius: ${({ theme }) => theme.radius.lg};
-  background: ${({ $color }) => $color};
-  opacity: 0.15;
-  animation: pulse 2s ease infinite;
-  animation-delay: ${({ $delay }) => $delay}s;
-`;
-
-const CallIcon = styled.div<{ $delay: number }>`
-  width: 50px;
-  height: 50px;
-  border-radius: 50%;
-  background: ${({ theme }) => theme.colors.secondary.mintGlow};
-  opacity: 0.2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: pulse 2s ease infinite;
-  animation-delay: ${({ $delay }) => $delay}s;
+const HeroLogo = styled.img`
+  width: min(220px, 55vw);
+  height: auto;
+  filter: drop-shadow(0 8px 32px rgba(58, 123, 255, 0.35));
 `;
 
 export default function Landing() {
@@ -184,14 +156,7 @@ export default function Landing() {
           <Footer>© 2026 Arnav Jugessur · All Rights Reserved Echoza</Footer>
         </TextSection>
         <Illustration>
-          <BubbleGrid>
-            <ChatBubble $size={120} $color="#3A7BFF" $delay={0} />
-            <ChatBubble $size={80} $color="#0F1A2F" $delay={0.3} />
-            <CallIcon $delay={0.6} />
-            <ChatBubble $size={100} $color="#4FF3C2" $delay={0.9} />
-            <ChatBubble $size={90} $color="#3A7BFF" $delay={1.2} />
-            <ChatBubble $size={60} $color="#A7A9B0" $delay={1.5} />
-          </BubbleGrid>
+          <HeroLogo src="/vite.svg" alt="Echoza" />
         </Illustration>
       </Content>
     </Wrapper>
