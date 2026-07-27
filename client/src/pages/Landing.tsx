@@ -122,6 +122,8 @@ const Illustration = styled.div`
 const HeroLogo = styled.img`
   width: min(220px, 55vw);
   height: auto;
+  display: block;
+  margin: 0 auto;
   filter: drop-shadow(0 8px 32px rgba(58, 123, 255, 0.35));
 `;
 
