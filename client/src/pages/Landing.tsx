@@ -50,6 +50,14 @@ const Content = styled.div`
   }
 `;
 
+const LogoImg = styled.img`
+  width: 52px;
+  height: 52px;
+  display: block;
+  margin: 0 auto 16px;
+  filter: drop-shadow(0 4px 16px rgba(58, 123, 255, 0.3));
+`;
+
 const TextSection = styled.div`
   flex: 1;
   animation: fadeIn 0.6s ease;
@@ -162,6 +170,7 @@ export default function Landing() {
       <BackgroundGlow2 />
       <Content>
         <TextSection>
+          <LogoImg src="/vite.svg" alt="Echoza" />
           <Title>Echoza</Title>
           <Subtitle>Text. Talk. Connect.</Subtitle>
           <ButtonGroup>

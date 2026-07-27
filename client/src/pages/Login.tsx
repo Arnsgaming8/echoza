@@ -34,6 +34,14 @@ const Card = styled.div`
   }
 `;
 
+const LogoImg = styled.img`
+  width: 48px;
+  height: 48px;
+  display: block;
+  margin: 0 auto 16px;
+  filter: drop-shadow(0 4px 16px rgba(58, 123, 255, 0.3));
+`;
+
 const Title = styled.h2`
   font-size: ${({ theme }) => theme.font.size.xxl};
   font-weight: ${({ theme }) => theme.font.weight.bold};
@@ -311,6 +319,7 @@ export default function Login() {
   return (
     <Wrapper>
       <Card>
+        <LogoImg src="/vite.svg" alt="Echoza" />
         <Title>Welcome Back</Title>
         <Subtitle>Enter Echoza and continue chatting</Subtitle>
         <Form onSubmit={handleSubmit}>
