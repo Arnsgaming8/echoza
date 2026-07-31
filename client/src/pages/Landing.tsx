@@ -215,22 +215,28 @@ const ScrollArrow = styled.div`
   align-items: center;
   gap: 6px;
   padding: 10px 20px;
-  background: linear-gradient(135deg, rgba(58, 123, 255, 0.12), rgba(58, 123, 255, 0.05));
-  border: 1px solid rgba(58, 123, 255, 0.2);
+  background: linear-gradient(135deg, ${({ theme }) => theme.colors.primary.echoBlue}1f, ${({ theme }) => theme.colors.primary.echoBlue}0a);
+  border: 1px solid ${({ theme }) => theme.colors.primary.echoBlue}33;
   border-radius: 24px;
-  color: #3A7BFF;
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
   cursor: pointer;
   z-index: 2;
   animation: scrollFloat 3s ease-in-out infinite, glowPulse 2s ease-in-out infinite;
   transition: background 0.2s, border-color 0.2s;
 
   &:hover {
-    background: linear-gradient(135deg, rgba(58, 123, 255, 0.2), rgba(58, 123, 255, 0.1));
-    border-color: rgba(58, 123, 255, 0.4);
+    background: linear-gradient(135deg, ${({ theme }) => theme.colors.primary.echoBlue}33, ${({ theme }) => theme.colors.primary.echoBlue}1a);
+    border-color: ${({ theme }) => theme.colors.primary.echoBlue}66;
   }
 
   svg {
     animation: arrowBounce 1.5s ease-in-out infinite;
+  }
+
+  @media (max-width: 480px) {
+    bottom: 20px;
+    padding: 8px 14px;
+    gap: 4px;
   }
 `;
 
@@ -239,6 +245,10 @@ const ScrollLabel = styled.span`
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
+
+  @media (max-width: 480px) {
+    font-size: 9px;
+  }
 `;
 
 export default function Landing() {
