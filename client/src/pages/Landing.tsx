@@ -1,4 +1,4 @@
-import styled from 'styled-components';
+import styled, { keyframes } from 'styled-components';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/common';
 
@@ -135,22 +135,21 @@ const HeroLogo = styled.img`
 `;
 
 const AboutSection = styled.section`
-  max-width: 1100px;
+  max-width: 700px;
   width: 100%;
-  margin-top: 80px;
-  padding-top: 60px;
+  margin: 80px auto 0;
+  padding: 60px 0 120px;
   border-top: 1px solid rgba(255,255,255,0.08);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 48px;
+  text-align: center;
+  gap: 32px;
   z-index: 1;
 
   @media (max-width: 768px) {
-    flex-direction: column;
-    text-align: center;
-    gap: 32px;
     margin-top: 60px;
-    padding-top: 40px;
+    padding-bottom: 80px;
   }
 `;
 
@@ -170,7 +169,7 @@ const AboutPhoto = styled.img`
 `;
 
 const AboutText = styled.div`
-  flex: 1;
+  max-width: 500px;
 `;
 
 const AboutHeading = styled.h2`
@@ -188,6 +187,28 @@ const AboutParagraph = styled.p`
   font-size: ${({ theme }) => theme.font.size.lg};
   color: ${({ theme }) => theme.colors.text.secondary};
   line-height: 1.6;
+`;
+
+const bounce = keyframes`
+  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-10px); }
+  60% { transform: translateY(-5px); }
+`;
+
+const ScrollArrow = styled.div`
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: ${({ theme }) => theme.colors.text.secondary};
+  opacity: 0.5;
+  animation: bounce 2s ease infinite;
+  cursor: pointer;
+  z-index: 2;
+
+  &:hover {
+    opacity: 0.8;
+  }
 `;
 
 export default function Landing() {
@@ -217,6 +238,11 @@ export default function Landing() {
             <HeroLogo src="/vite.svg" alt="Echoza" />
           </Illustration>
         </Content>
+        <ScrollArrow>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </ScrollArrow>
       </HeroSection>
 
       <AboutSection>
