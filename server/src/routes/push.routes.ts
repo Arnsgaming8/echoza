@@ -231,7 +231,6 @@ export async function sendPushNotification(
   conversationId?: string,
   extra?: { tag?: string; data?: Record<string, any> },
 ): Promise<Array<{ endpoint: string; ok: boolean; error?: string; statusCode?: number }>> {
-  console.log('[push] sending userId=', userId, 'title=', title, 'subCount lookup...');
   if (!getVapidKeys()) return [];
 
   const subs = await fetchAll<{ endpoint: string; p256dh: string; auth: string }>(

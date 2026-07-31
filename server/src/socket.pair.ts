@@ -189,10 +189,6 @@ async function handleCodeSubmit(
   if (code.length !== 6 || code !== s.code) {
     const remaining = Math.max(0, PAIR_MAX_ATTEMPTS - s.attempts);
     socket.emit('pair:code-error', { reason: 'invalid', remaining });
-    console.log(JSON.stringify({
-      t: 'pair', event: 'code-invalid', sessionId,
-      guestIp: s.guestIp, attemptsRemaining: remaining,
-    }));
     return;
   }
 
@@ -214,10 +210,6 @@ async function handleCodeSubmit(
       guestDeviceLabel: sanitizeDeviceLabel(guestSocket.pairGuestUa ?? null, guestSocket.pairGuestIp ?? null),
     });
   }
-  console.log(JSON.stringify({
-    t: 'pair', event: 'code-accepted', sessionId,
-    ownerUserId: s.ownerUserId, guestIp: s.guestIp,
-  }));
 }
 function handlePairStart(io: SocketServer, socket: AuthSocket): void {
   purgeExpiredPairSessions();
@@ -250,10 +242,6 @@ function handlePairStart(io: SocketServer, socket: AuthSocket): void {
     pairingUrl,
     expiresAt: session.expiresAt,
   });
-  console.log(JSON.stringify({
-    t: 'pair', event: 'start', sessionId,
-    ownerUserId: socket.userId || null, expiresAt: session.expiresAt,
-  }));
 }
 async function handlePairApprove(
   io: SocketServer,
@@ -286,10 +274,6 @@ async function handlePairApprove(
   if (!recipientSocket) {
     s.status = 'pending';
     socket.emit('pair:completed', { ok: false, sessionId, reason: 'recipient_gone' });
-    console.warn(JSON.stringify({
-      t: 'pair', event: 'approve-recipient-gone', sessionId,
-      approverUserId: userId, approverIsHost: isOwner,
-    }));
     return;
   }
 
@@ -335,10 +319,6 @@ async function handlePairApprove(
     }
 
     socket.emit('pair:completed', { ok: true, sessionId });
-    console.log(JSON.stringify({
-      t: 'pair', event: 'approved', sessionId,
-      approverUserId: userId, approverIsHost: isOwner,
-    }));
 
     setTimeout(() => {
       const recipientSocketId2 = isOwner ? s.guestSocketId : s.ownerSocketId;
@@ -372,7 +352,6 @@ function handlePairDeny(io: SocketServer, socket: AuthSocket, sessionId: string)
     counterpartySocket.emit('pair:result', { ok: false, reason: 'denied' });
   }
   socket.emit('pair:completed', { ok: false, sessionId, denied: true });
-  console.log(JSON.stringify({ t: 'pair', event: 'deny', sessionId, approverUserId: socket.userId, approverIsHost: isOwner }));
   setTimeout(() => pairSessions.delete(sessionId), 2_000);
 }
 
@@ -388,7 +367,6 @@ function handlePairCancel(io: SocketServer, socket: AuthSocket, sessionId: strin
   }
   pairSessions.delete(sessionId);
   socket.emit('pair:completed', { ok: false, sessionId, cancelled: true });
-  console.log(JSON.stringify({ t: 'pair', event: 'cancel', sessionId, ownerUserId: s.ownerUserId }));
 }
 
 export function registerPairHandlersForSocket(io: SocketServer, socket: AuthSocket): void {
@@ -420,8 +398,7 @@ export function registerPairHandlersForSocket(io: SocketServer, socket: AuthSock
 
 export function startPairSessionSweeper(): NodeJS.Timeout {
   return setInterval(() => {
-    const n = purgeExpiredPairSessions();
-    if (n > 0) console.log(`[pair] swept ${n} expired sessions`);
+    purgeExpiredPairSessions();
   }, PAIR_SWEEP_MS);
 }
 

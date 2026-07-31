@@ -454,15 +454,10 @@ export default function Dashboard() {
           });
           if (r.ok) {
             const data = await r.json().catch(() => null);
-            if (data && data.success === true) {
-              console.log('Push subscribed');
-            } else {
-              console.error('Push subscribe POST reported failure:', r.status, data);
-            }
             return true;
           }
           const errBody = await r.text().catch(() => '');
-          if (r.status !== 401) console.warn('Push subscribe POST failed:', r.status, errBody);
+
           return false;
         };
 
@@ -666,10 +661,6 @@ export default function Dashboard() {
     
     
     socket.emit('conversations:list');
-
-    socket.on('server:diag', (diag: any) => {
-      console.log('[SERVER DIAG]', diag);
-    });
 
     socket.on('conversations:list', (data: any) => {
       if (!Array.isArray(data)) {
