@@ -5,6 +5,7 @@ import { Button } from '../components/common';
 const Wrapper = styled.div`
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: ${({ theme }) => theme.spacing.xl};
@@ -127,6 +128,62 @@ const HeroLogo = styled.img`
   filter: drop-shadow(0 8px 32px rgba(58, 123, 255, 0.35));
 `;
 
+const AboutSection = styled.section`
+  max-width: 1100px;
+  width: 100%;
+  margin-top: 80px;
+  padding-top: 60px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  display: flex;
+  align-items: center;
+  gap: 48px;
+  z-index: 1;
+
+  @media (max-width: 768px) {
+    flex-direction: column;
+    text-align: center;
+    gap: 32px;
+    margin-top: 60px;
+    padding-top: 40px;
+  }
+`;
+
+const AboutPhoto = styled.img`
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 4px solid ${({ theme }) => theme.colors.primary.echoBlue};
+  box-shadow: 0 8px 32px rgba(58, 123, 255, 0.25);
+  flex-shrink: 0;
+
+  @media (max-width: 768px) {
+    width: 140px;
+    height: 140px;
+  }
+`;
+
+const AboutText = styled.div`
+  flex: 1;
+`;
+
+const AboutHeading = styled.h2`
+  font-size: ${({ theme }) => theme.font.size.xl};
+  font-weight: ${({ theme }) => theme.font.weight.bold};
+  color: ${({ theme }) => theme.colors.primary.deepNavy};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+
+  body.dark-mode & {
+    color: ${({ theme }) => theme.colors.text.white};
+  }
+`;
+
+const AboutParagraph = styled.p`
+  font-size: ${({ theme }) => theme.font.size.lg};
+  color: ${({ theme }) => theme.colors.text.secondary};
+  line-height: 1.6;
+`;
+
 export default function Landing() {
   const navigate = useNavigate();
 
@@ -152,6 +209,17 @@ export default function Landing() {
           <HeroLogo src="/vite.svg" alt="Echoza" />
         </Illustration>
       </Content>
+
+      <AboutSection>
+        <AboutPhoto src="/arnav.jpg" alt="Arnav Jugessur" />
+        <AboutText>
+          <AboutHeading>Hey! I'm Arnav 👋</AboutHeading>
+          <AboutParagraph>
+            I made Echoza so I could talk to my friends that don't have a phone,
+            but do have internet. So I took advantage of that and made this masterpiece!
+          </AboutParagraph>
+        </AboutText>
+      </AboutSection>
     </Wrapper>
   );
-}
+}
