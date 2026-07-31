@@ -190,10 +190,19 @@ const AboutParagraph = styled.p`
   line-height: 1.6;
 `;
 
-const bounce = keyframes`
-  0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-  40% { transform: translateY(-10px); }
-  60% { transform: translateY(-5px); }
+const scrollFloat = keyframes`
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-8px); }
+`;
+
+const glowPulse = keyframes`
+  0%, 100% { box-shadow: 0 0 20px rgba(58, 123, 255, 0.3), 0 0 40px rgba(58, 123, 255, 0.1); }
+  50% { box-shadow: 0 0 30px rgba(58, 123, 255, 0.5), 0 0 60px rgba(58, 123, 255, 0.2); }
+`;
+
+const arrowBounce = keyframes`
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(5px); }
 `;
 
 const ScrollArrow = styled.div`
@@ -201,15 +210,35 @@ const ScrollArrow = styled.div`
   bottom: 32px;
   left: 50%;
   transform: translateX(-50%);
-  color: ${({ theme }) => theme.colors.text.secondary};
-  opacity: 0.5;
-  animation: bounce 2s ease infinite;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, rgba(58, 123, 255, 0.12), rgba(58, 123, 255, 0.05));
+  border: 1px solid rgba(58, 123, 255, 0.2);
+  border-radius: 24px;
+  color: #3A7BFF;
   cursor: pointer;
   z-index: 2;
+  animation: scrollFloat 3s ease-in-out infinite, glowPulse 2s ease-in-out infinite;
+  transition: background 0.2s, border-color 0.2s;
 
   &:hover {
-    opacity: 0.8;
+    background: linear-gradient(135deg, rgba(58, 123, 255, 0.2), rgba(58, 123, 255, 0.1));
+    border-color: rgba(58, 123, 255, 0.4);
   }
+
+  svg {
+    animation: arrowBounce 1.5s ease-in-out infinite;
+  }
+`;
+
+const ScrollLabel = styled.span`
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
 `;
 
 export default function Landing() {
@@ -248,7 +277,8 @@ export default function Landing() {
         </Content>
         {showArrow && (
           <ScrollArrow>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <ScrollLabel>Scroll Down</ScrollLabel>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </ScrollArrow>
