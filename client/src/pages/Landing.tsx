@@ -45,7 +45,6 @@ const BackgroundGlow2 = styled.div`
 const Content = styled.div`
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 80px;
   max-width: 1100px;
   width: 100%;
@@ -60,12 +59,7 @@ const Content = styled.div`
 
 const TextSection = styled.div`
   flex: 1;
-  text-align: center;
   animation: fadeIn 0.6s ease;
-
-  @media (max-width: 768px) {
-    text-align: center;
-  }
 `;
 
 const Title = styled.h1`
@@ -105,7 +99,10 @@ const ButtonGroup = styled.div`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
   flex-wrap: wrap;
-  justify-content: center;
+
+  @media (max-width: 768px) {
+    justify-content: center;
+  }
 `;
 
 const Footer = styled.footer`
