@@ -3,13 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/common';
 
 const Wrapper = styled.div`
-  min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background: ${({ theme }) => theme.colors.bg.main};
+  position: relative;
+  overflow: hidden;
+`;
+
+const HeroSection = styled.div`
+  min-height: 100vh;
+  display: flex;
   align-items: center;
   justify-content: center;
   padding: ${({ theme }) => theme.spacing.xl};
-  background: ${({ theme }) => theme.colors.bg.main};
   position: relative;
   overflow: hidden;
 `;
@@ -39,6 +45,7 @@ const BackgroundGlow2 = styled.div`
 const Content = styled.div`
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 80px;
   max-width: 1100px;
   width: 100%;
@@ -53,7 +60,12 @@ const Content = styled.div`
 
 const TextSection = styled.div`
   flex: 1;
+  text-align: center;
   animation: fadeIn 0.6s ease;
+
+  @media (max-width: 768px) {
+    text-align: center;
+  }
 `;
 
 const Title = styled.h1`
@@ -93,10 +105,7 @@ const ButtonGroup = styled.div`
   display: flex;
   gap: ${({ theme }) => theme.spacing.md};
   flex-wrap: wrap;
-
-  @media (max-width: 768px) {
-    justify-content: center;
-  }
+  justify-content: center;
 `;
 
 const Footer = styled.footer`
@@ -189,26 +198,29 @@ export default function Landing() {
 
   return (
     <Wrapper>
-      <BackgroundGlow />
-      <BackgroundGlow2 />
-      <Content>
-        <TextSection>
-          <Title>Echoza</Title>
-          <Subtitle>Text. Talk. Connect.</Subtitle>
-          <ButtonGroup>
-            <Button size="lg" onClick={() => navigate('/signup')}>
-              Sign Up
-            </Button>
-            <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
-              Log In
-            </Button>
-          </ButtonGroup>
-          <Footer>© 2026 Arnav Jugessur · All Rights Reserved Echoza</Footer>
-        </TextSection>
-        <Illustration>
-          <HeroLogo src="/vite.svg" alt="Echoza" />
-        </Illustration>
-      </Content>
+
+      <HeroSection>
+        <BackgroundGlow />
+        <BackgroundGlow2 />
+        <Content>
+          <TextSection>
+            <Title>Echoza</Title>
+            <Subtitle>Text. Talk. Connect.</Subtitle>
+            <ButtonGroup>
+              <Button size="lg" onClick={() => navigate('/signup')}>
+                Sign Up
+              </Button>
+              <Button variant="secondary" size="lg" onClick={() => navigate('/login')}>
+                Log In
+              </Button>
+            </ButtonGroup>
+            <Footer>© 2026 Arnav Jugessur · All Rights Reserved Echoza</Footer>
+          </TextSection>
+          <Illustration>
+            <HeroLogo src="/vite.svg" alt="Echoza" />
+          </Illustration>
+        </Content>
+      </HeroSection>
 
       <AboutSection>
         <AboutPhoto src="/arnav.jpg" alt="Arnav Jugessur" />
