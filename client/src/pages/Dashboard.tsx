@@ -1085,14 +1085,15 @@ export default function Dashboard() {
         payload.receiverId = activeConv.contact.id;
       }
 
-      addToOutbox({
-        id: clientId,
-        content,
-        receiverId: payload.receiverId,
-        groupId: payload.groupId,
-        attachments: processedAttachments,
-        createdAt: new Date().toISOString(),
-      });
+      if (!processedAttachments) {
+        addToOutbox({
+          id: clientId,
+          content,
+          receiverId: payload.receiverId,
+          groupId: payload.groupId,
+          createdAt: new Date().toISOString(),
+        });
+      }
 
       
       

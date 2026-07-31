@@ -19,6 +19,19 @@ interface ChatInputProps {
   onDeleteSelected?: () => void;
 }
 
+const MAX_FILE_SIZES: Record<string, number> = {
+  video: 25 * 1024 * 1024,
+  image: 5 * 1024 * 1024,
+  audio: 5 * 1024 * 1024,
+  file: 5 * 1024 * 1024,
+};
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const Wrapper = styled.div`
   display: flex;
   flex-direction: column;
@@ -250,7 +263,10 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const newAttachments: Attachment[] = files.map(file => {
+    const rejected: string[] = [];
+    const newAttachments: Attachment[] = [];
+
+    for (const file of files) {
       const name = file.name.toLowerCase();
       const extMatch = name.match(/\.(\w+)$/);
       const ext = extMatch ? extMatch[1] : '';
@@ -258,9 +274,19 @@ export default function ChatInput({ onSend, onTypingStart, onTypingStop, disable
       const isVideo = file.type.startsWith('video/') || ['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext);
       const isAudio = file.type.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'aac', 'm4a'].includes(ext);
       const type = isImage ? 'image' as const : isVideo ? 'video' as const : isAudio ? 'audio' as const : 'file' as const;
+      const maxSize = MAX_FILE_SIZES[type];
+      if (maxSize && file.size > maxSize) {
+        rejected.push(`${file.name} (${formatFileSize(file.size)} — max ${formatFileSize(maxSize)})`);
+        continue;
+      }
       const preview = type === 'image' ? URL.createObjectURL(file) : undefined;
-      return { file, preview, type };
-    });
+      newAttachments.push({ file, preview, type });
+    }
+
+    if (rejected.length > 0) {
+      alert(`File too large:\n${rejected.join('\n')}`);
+    }
+
     setAttachments(prev => [...prev, ...newAttachments]);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };

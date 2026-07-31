@@ -42,6 +42,7 @@ async function main() {
   const httpServer = createServer(app);
   const io = new SocketServer(httpServer, {
     cors: { origin: '*', methods: ['GET', 'POST'] },
+    maxHttpBufferSize: 50 * 1024 * 1024,
   });
 
   app.use(cors());
