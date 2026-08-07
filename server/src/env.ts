@@ -43,6 +43,8 @@ export const env = {
   TURN_TLS_URL: optionalString('TURN_TLS_URL'),
 
   MONITORED_USERNAME: optionalString('MONITORED_USERNAME'),
+
+  ADMIN_SECRET: optionalString('ADMIN_SECRET'),
 };
 
 export function logEnvSanity(): void {

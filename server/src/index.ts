@@ -21,10 +21,13 @@ import { sendDiscordNotification } from './discord.js';
 import { setupSocket, startPresenceSweeper, emitToUserViaRegistry, setIoRef, touchPresence, emitToUserByUserId } from './socket.js';
 import { startPairSessionSweeper } from './socket.pair.js';
 import { startAccountDeletionSweeper, setNotifyDeletedAccount } from './account-deletion.js';
+import { startInactivityNotifySweeper } from './inactivity-notify.js';
+import { bootstrapSchema } from './bootstrap.js';
 import { initVapid } from './vapid.js';
 import authRoutes from './routes/auth.routes.js';
 import userRoutes from './routes/user.routes.js';
 import pushRoutes from './routes/push.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -35,6 +38,8 @@ async function main() {
   
   await pingDb();
   console.log('[db] ping OK — Neon connection pool ready.');
+
+  await bootstrapSchema();
 
   await initVapid();
 
@@ -51,6 +56,7 @@ async function main() {
   app.use('/api/auth', authRoutes);
   app.use('/api/users', userRoutes);
   app.use('/api/push', pushRoutes);
+  app.use('/api/admin', adminRoutes);
 
   
   app.get('/api/health', (_req, res) => {
@@ -424,6 +430,7 @@ async function runTest(relayOnly=false){
   setIoRef(io);
   setNotifyDeletedAccount(emitToUserByUserId);
   startAccountDeletionSweeper();
+  startInactivityNotifySweeper();
 
   httpServer.listen(env.PORT, () => {
     console.log(`Echoza server running on port ${env.PORT}`);

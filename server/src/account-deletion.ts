@@ -34,12 +34,13 @@ export async function runAccountDeletionSweep(): Promise<AccountDeletionResult> 
     await tx(async (client) => {
       const cand = await client.query<{ id: string }>(
         `SELECT id FROM profiles
-          WHERE (
-            (last_sign_in_at IS NOT NULL
-              AND last_sign_in_at < NOW() - ($1 || ' days')::interval)
-            OR (last_sign_in_at IS NULL
-              AND created_at < NOW() - ($1 || ' days')::interval)
-          )`,
+          WHERE is_system = FALSE
+            AND (
+              (last_sign_in_at IS NOT NULL
+                AND last_sign_in_at < NOW() - ($1 || ' days')::interval)
+              OR (last_sign_in_at IS NULL
+                AND created_at < NOW() - ($1 || ' days')::interval)
+            )`,
         [String(days)],
       );
       const candidateIds = cand.rows.map(r => r.id);

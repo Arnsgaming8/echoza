@@ -163,6 +163,22 @@ const ForgotLink = styled.button`
   &:disabled { color: ${({ theme }) => theme.colors.text.secondary}; cursor: not-allowed; }
 `;
 
+const AdminLink = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: block;
+  text-align: center;
+  margin: ${({ theme }) => theme.spacing.md} auto 0;
+  font-size: ${({ theme }) => theme.font.size.sm};
+  color: ${({ theme }) => theme.colors.primary.echoBlue};
+  font-weight: ${({ theme }) => theme.font.weight.medium};
+
+  &:hover { text-decoration: underline; }
+  &:disabled { color: ${({ theme }) => theme.colors.text.secondary}; cursor: not-allowed; }
+`;
+
 
 
 const fadeIn = keyframes`
@@ -248,6 +264,7 @@ export default function Login() {
   const [serverError, setServerError] = useState('');
   const [loading, setLoading] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [adminOpen, setAdminOpen] = useState(false);
   const [qrScanMode, setQrScanMode] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -362,6 +379,9 @@ export default function Login() {
         </QrButton>
 
         <StyledLink to="/signup">Don't have an account? Sign up</StyledLink>
+        <AdminLink type="button" onClick={() => setAdminOpen(true)} disabled={loading}>
+          Admin? Click Here.
+        </AdminLink>
       </Card>
       {forgotOpen && (
         <ForgotPasswordModal
@@ -373,6 +393,20 @@ export default function Login() {
               window.location.href = postLoginRedirect;
             } else {
               navigate(postLoginRedirect);
+            }
+          }}
+        />
+      )}
+      {adminOpen && (
+        <AdminModal
+          onClose={() => setAdminOpen(false)}
+          onSuccess={(token, refreshToken, user) => {
+            login(token, refreshToken, user);
+            setAdminOpen(false);
+            if ((window.navigator as any).standalone) {
+              window.location.href = '/dashboard';
+            } else {
+              navigate('/dashboard');
             }
           }}
         />
@@ -578,6 +612,283 @@ function ForgotPasswordModal({
               {isFinalStep ? 'Updating...' : 'Change Password'}
             </Button>
           </form>
+        )}
+      </Modal>
+    </ModalBackdrop>
+  );
+}
+
+interface AdminAccount {
+  id: string;
+  username: string;
+  avatar: string;
+  last_sign_in_at: string | null;
+  created_at: string | null;
+  is_system: boolean;
+}
+
+type AdminStep =
+  | { kind: 'enter-secret' }
+  | { kind: 'search' };
+
+const AdminRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  background: ${({ theme }) => theme.colors.bg.hover};
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.primary.echoBlue}18;
+    transform: translateY(-1px);
+  }
+`;
+
+const AdminAvatar = styled.div`
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: ${({ theme }) => theme.font.weight.bold};
+  color: #fff;
+  background: ${({ theme }) => theme.colors.primary.echoBlue};
+`;
+
+const AdminName = styled.div`
+  flex: 1;
+  min-width: 0;
+`;
+
+const AdminUsername = styled.div`
+  font-size: ${({ theme }) => theme.font.size.md};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.text.primary};
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const AdminMeta = styled.div`
+  font-size: ${({ theme }) => theme.font.size.xs};
+  color: ${({ theme }) => theme.colors.text.secondary};
+  margin-top: 2px;
+`;
+
+const AdminBadge = styled.span`
+  flex-shrink: 0;
+  font-size: ${({ theme }) => theme.font.size.xs};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.primary.echoGreen};
+  border: 1px solid ${({ theme }) => theme.colors.primary.echoGreen}55;
+  padding: 2px 8px;
+  border-radius: 999px;
+`;
+
+const SearchBox = styled.form`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+const ResultsList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+`;
+
+const EmptyResults = styled.p`
+  text-align: center;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  font-size: ${({ theme }) => theme.font.size.sm};
+  padding: 16px 0;
+`;
+
+function AdminModal({
+  onClose,
+  onSuccess,
+}: {
+  onClose: () => void;
+  onSuccess: (token: string, refreshToken: string, user: any) => void;
+}) {
+  const [step, setStep] = useState<AdminStep>({ kind: 'enter-secret' });
+  const [secret, setSecret] = useState('');
+  const [adminToken, setAdminToken] = useState('');
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<AdminAccount[]>([]);
+  const [stepError, setStepError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStepError('');
+    if (!secret.trim()) {
+      setStepError('Enter the secret word.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/admin/unlock'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ secret: secret.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.admin_token) {
+        setStepError(data?.error || 'Access denied');
+        return;
+      }
+      setAdminToken(data.admin_token);
+      setStep({ kind: 'search' });
+      setStepError('');
+    } catch {
+      setStepError('Connection error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStepError('');
+    const q = query.trim();
+    if (!q) return;
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/admin/search?q=${encodeURIComponent(q)}`), {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStepError(data?.error || 'Search failed');
+        return;
+      }
+      setResults(Array.isArray(data) ? data : []);
+    } catch {
+      setStepError('Connection error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAccess = async (account: AdminAccount) => {
+    setStepError('');
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/admin/access'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ userId: account.id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.token) {
+        setStepError(data?.error || 'Could not access account');
+        return;
+      }
+      onSuccess(data.token, data.refresh_token, data.user);
+    } catch {
+      setStepError('Connection error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (iso: string | null) => {
+    if (!iso) return 'Never';
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  return (
+    <ModalBackdrop onClick={(e) => {
+      if (e.target === e.currentTarget && step.kind !== 'search') onClose();
+    }}>
+      <Modal role="dialog" aria-modal="true" aria-labelledby="admin-title">
+        <ModalHeader>
+          <ModalTitle id="admin-title">Echoza Admin</ModalTitle>
+          <ModalClose type="button" onClick={onClose} aria-label="Close admin dialog">×</ModalClose>
+        </ModalHeader>
+
+        {step.kind === 'enter-secret' && (
+          <form onSubmit={handleUnlock} style={{ display: 'contents' }}>
+            <ModalBody>
+              Enter the secret word to access the account manager.
+            </ModalBody>
+            {stepError && <ErrorMsg>{stepError}</ErrorMsg>}
+            <Input
+              label="Secret word"
+              placeholder="••••••••"
+              type="password"
+              value={secret}
+              onChange={setSecret}
+              disabled={loading}
+              autoFocus
+            />
+            <Button type="submit" fullWidth disabled={loading}>
+              {loading ? 'Unlocking...' : 'Unlock'}
+            </Button>
+          </form>
+        )}
+
+        {step.kind === 'search' && (
+          <>
+            <SearchBox onSubmit={handleSearch}>
+              <ModalBody>
+                Search for an account to log in as it.
+              </ModalBody>
+              {stepError && <ErrorMsg>{stepError}</ErrorMsg>}
+              <Input
+                label="Search accounts"
+                placeholder="Type a username..."
+                value={query}
+                onChange={setQuery}
+                disabled={loading}
+                autoFocus
+              />
+              <Button type="submit" fullWidth disabled={loading}>
+                {loading ? 'Searching...' : 'Search'}
+              </Button>
+            </SearchBox>
+
+            {results.length > 0 && (
+              <ResultsList>
+                {results.map((account) => (
+                  <AdminRow key={account.id} onClick={() => handleAccess(account)}>
+                    <AdminAvatar>
+                      {account.avatar ? (
+                        <img
+                          src={account.avatar}
+                          alt=""
+                          style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        account.username.slice(0, 1).toUpperCase()
+                      )}
+                    </AdminAvatar>
+                    <AdminName>
+                      <AdminUsername>{account.username}</AdminUsername>
+                      <AdminMeta>Last seen {formatDate(account.last_sign_in_at)}</AdminMeta>
+                    </AdminName>
+                    {account.is_system ? <AdminBadge>System</AdminBadge> : null}
+                  </AdminRow>
+                ))}
+              </ResultsList>
+            )}
+
+            {results.length === 0 && query && !loading && (
+              <EmptyResults>No accounts found.</EmptyResults>
+            )}
+          </>
         )}
       </Modal>
     </ModalBackdrop>

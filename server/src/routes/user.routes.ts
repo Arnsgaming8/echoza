@@ -42,7 +42,8 @@ router.get('/search', async (req: Request, res: Response) => {
   const profiles = await fetchAll<{ id: string; username: string; avatar: string }>(
     `SELECT id, username, avatar
        FROM profiles
-       WHERE LOWER(username) LIKE LOWER($1)
+       WHERE is_system = FALSE
+         AND LOWER(username) LIKE LOWER($1)
        LIMIT 20`,
     [like],
   );
