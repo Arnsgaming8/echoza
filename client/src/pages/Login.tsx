@@ -723,6 +723,7 @@ function AdminModal({
   const [adminToken, setAdminToken] = useState('');
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<AdminAccount[]>([]);
+  const [searched, setSearched] = useState(false);
   const [stepError, setStepError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -761,6 +762,7 @@ function AdminModal({
     const q = query.trim();
     if (!q) return;
     setLoading(true);
+    setSearched(true);
     try {
       const res = await fetch(apiUrl(`/api/admin/search?q=${encodeURIComponent(q)}`), {
         headers: { Authorization: `Bearer ${adminToken}` },
@@ -768,11 +770,13 @@ function AdminModal({
       const data = await res.json();
       if (!res.ok) {
         setStepError(data?.error || 'Search failed');
+        setResults([]);
         return;
       }
       setResults(Array.isArray(data) ? data : []);
     } catch {
       setStepError('Connection error. Please try again.');
+      setResults([]);
     } finally {
       setLoading(false);
     }
@@ -851,7 +855,10 @@ function AdminModal({
                 label="Search accounts"
                 placeholder="Type a username..."
                 value={query}
-                onChange={setQuery}
+                onChange={(v) => {
+                  setQuery(v);
+                  setSearched(false);
+                }}
                 disabled={loading}
                 autoFocus
               />
@@ -885,8 +892,11 @@ function AdminModal({
               </ResultsList>
             )}
 
-            {results.length === 0 && query && !loading && (
-              <EmptyResults>No accounts found.</EmptyResults>
+            {searched && !stepError && results.length === 0 && query && !loading && (
+              <EmptyResults>
+                No accounts found for &ldquo;{query.trim()}&rdquo;. Try a partial
+                username, e.g. &ldquo;arn&rdquo;.
+              </EmptyResults>
             )}
           </>
         )}

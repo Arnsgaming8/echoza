@@ -381,8 +381,10 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
       }
 
       setDeleted(true);
+      localStorage.removeItem('echoza-token');
+      localStorage.removeItem('echoza-refresh-token');
       setTimeout(() => {
-        window.location.href = 'https://echoza-5ysd.onrender.com/signup';
+        window.location.href = '/signup';
       }, 1500);
     } catch (err: any) {
       setError(err.message || 'Something went wrong');
