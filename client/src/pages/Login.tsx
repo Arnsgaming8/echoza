@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import styled, { keyframes } from 'styled-components';
-import { FiCamera } from 'react-icons/fi';
-import { Button, Input, PasswordInput } from '../components/common';
+import { FiCamera, FiX } from 'react-icons/fi';
+import { Avatar, Button, Input, PasswordInput } from '../components/common';
 import { useAuth } from '../contexts/AuthContext';
 import { apiUrl } from '../utils/api';
 import { withDeviceHeaders } from '../utils/deviceId';
@@ -631,56 +631,116 @@ type AdminStep =
   | { kind: 'enter-secret' }
   | { kind: 'search' };
 
-const AdminRow = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px;
-  border-radius: ${({ theme }) => theme.radius.md};
-  background: ${({ theme }) => theme.colors.bg.hover};
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.15s ease;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.primary.echoBlue}18;
-    transform: translateY(-1px);
-  }
-`;
-
-const AdminAvatar = styled.div`
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  flex-shrink: 0;
+const AdminOverlay = styled.div`
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-weight: ${({ theme }) => theme.font.weight.bold};
-  color: #fff;
-  background: ${({ theme }) => theme.colors.primary.echoBlue};
+  z-index: 999;
+  animation: fadeIn 0.2s ease;
 `;
 
-const AdminName = styled.div`
+const AdminModalBox = styled.div`
+  width: 440px;
+  max-width: 92vw;
+  max-height: 80vh;
+  background: ${({ theme }) => theme.colors.bg.card};
+  border-radius: ${({ theme }) => theme.radius.lg};
+  box-shadow: ${({ theme }) => theme.shadow.lg};
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: fadeIn 0.3s ease;
+`;
+
+const AdminHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: ${({ theme }) => theme.spacing.lg};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const AdminTitle = styled.h3`
+  font-size: ${({ theme }) => theme.font.size.lg};
+  font-weight: ${({ theme }) => theme.font.weight.semibold};
+  color: ${({ theme }) => theme.colors.text.primary};
+`;
+
+const AdminCloseBtn = styled.button`
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: ${({ theme }) => theme.radius.sm};
+  background: transparent;
+  color: ${({ theme }) => theme.colors.text.secondary};
+  font-size: 18px;
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.hover};
+  }
+`;
+
+const AdminSearchSection = styled.div`
+  padding: ${({ theme }) => theme.spacing.md};
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+`;
+
+const AdminSearchInput = styled.input`
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: ${({ theme }) => theme.radius.md};
+  background: ${({ theme }) => theme.colors.bg.input};
+  color: ${({ theme }) => theme.colors.text.primary};
+  font-size: ${({ theme }) => theme.font.size.sm};
+
+  &::placeholder {
+    color: ${({ theme }) => theme.colors.secondary.warmGray};
+  }
+`;
+
+const AdminUserList = styled.div`
+  flex: 1;
+  overflow-y: auto;
+  padding: ${({ theme }) => theme.spacing.sm};
+`;
+
+const AdminUserItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.md};
+  border-radius: ${({ theme }) => theme.radius.md};
+  cursor: pointer;
+  transition: all ${({ theme }) => theme.transition};
+
+  &:hover {
+    background: ${({ theme }) => theme.colors.bg.hover};
+  }
+`;
+
+const AdminUserInfo = styled.div`
   flex: 1;
   min-width: 0;
 `;
 
-const AdminUsername = styled.div`
-  font-size: ${({ theme }) => theme.font.size.md};
+const AdminUserName = styled.span`
+  font-size: ${({ theme }) => theme.font.size.sm};
   font-weight: ${({ theme }) => theme.font.weight.semibold};
   color: ${({ theme }) => theme.colors.text.primary};
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 `;
 
-const AdminMeta = styled.div`
+const AdminUserStatus = styled.span`
   font-size: ${({ theme }) => theme.font.size.xs};
   color: ${({ theme }) => theme.colors.text.secondary};
-  margin-top: 2px;
+  margin-left: 8px;
 `;
 
-const AdminBadge = styled.span`
+const AdminSystemBadge = styled.span`
   flex-shrink: 0;
   font-size: ${({ theme }) => theme.font.size.xs};
   font-weight: ${({ theme }) => theme.font.weight.semibold};
@@ -690,25 +750,18 @@ const AdminBadge = styled.span`
   border-radius: 999px;
 `;
 
-const SearchBox = styled.form`
+const AdminUnlockSection = styled.div`
+  padding: ${({ theme }) => theme.spacing.lg};
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.md};
 `;
 
-const ResultsList = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 320px;
-  overflow-y: auto;
-`;
-
-const EmptyResults = styled.p`
+const AdminEmpty = styled.p`
   text-align: center;
   color: ${({ theme }) => theme.colors.text.secondary};
+  padding: ${({ theme }) => theme.spacing.xl};
   font-size: ${({ theme }) => theme.font.size.sm};
-  padding: 16px 0;
 `;
 
 function AdminModal({
@@ -721,11 +774,12 @@ function AdminModal({
   const [step, setStep] = useState<AdminStep>({ kind: 'enter-secret' });
   const [secret, setSecret] = useState('');
   const [adminToken, setAdminToken] = useState('');
-  const [query, setQuery] = useState('');
+  const [search, setSearch] = useState('');
   const [results, setResults] = useState<AdminAccount[]>([]);
-  const [searched, setSearched] = useState(false);
   const [stepError, setStepError] = useState('');
   const [loading, setLoading] = useState(false);
+  const searchSeqRef = useRef(0);
+  const [searchPending, setSearchPending] = useState(false);
 
   const handleUnlock = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -756,31 +810,45 @@ function AdminModal({
     }
   };
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setStepError('');
-    const q = query.trim();
-    if (!q) return;
-    setLoading(true);
-    setSearched(true);
-    try {
-      const res = await fetch(apiUrl(`/api/admin/search?q=${encodeURIComponent(q)}`), {
-        headers: { Authorization: `Bearer ${adminToken}` },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setStepError(data?.error || 'Search failed');
-        setResults([]);
-        return;
-      }
-      setResults(Array.isArray(data) ? data : []);
-    } catch {
-      setStepError('Connection error. Please try again.');
+  useEffect(() => {
+    if (step.kind !== 'search' || !adminToken) return;
+    const seq = ++searchSeqRef.current;
+    const q = search.trim();
+    if (!q) {
       setResults([]);
-    } finally {
       setLoading(false);
+      setSearchPending(false);
+      return;
     }
-  };
+    setSearchPending(true);
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      try {
+        const res = await fetch(apiUrl(`/api/admin/search?q=${encodeURIComponent(q)}`), {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        });
+        const data = await res.json();
+        if (seq !== searchSeqRef.current) return;
+        if (!res.ok) {
+          setStepError(data?.error || 'Search failed');
+          setResults([]);
+          return;
+        }
+        setResults(Array.isArray(data) ? data : []);
+        setStepError('');
+      } catch {
+        if (seq !== searchSeqRef.current) return;
+        setStepError('Connection error. Please try again.');
+        setResults([]);
+      } finally {
+        if (seq === searchSeqRef.current) {
+          setLoading(false);
+          setSearchPending(false);
+        }
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [step.kind, adminToken, search]);
 
   const handleAccess = async (account: AdminAccount) => {
     setStepError('');
@@ -814,93 +882,70 @@ function AdminModal({
   };
 
   return (
-    <ModalBackdrop onClick={(e) => {
-      if (e.target === e.currentTarget && step.kind !== 'search') onClose();
-    }}>
-      <Modal role="dialog" aria-modal="true" aria-labelledby="admin-title">
-        <ModalHeader>
-          <ModalTitle id="admin-title">Echoza Admin</ModalTitle>
-          <ModalClose type="button" onClick={onClose} aria-label="Close admin dialog">×</ModalClose>
-        </ModalHeader>
+    <AdminOverlay onClick={onClose}>
+      <AdminModalBox onClick={e => e.stopPropagation()}>
+        <AdminHeader>
+          <AdminTitle>Echoza Admin</AdminTitle>
+          <AdminCloseBtn onClick={onClose}>
+            <FiX />
+          </AdminCloseBtn>
+        </AdminHeader>
 
         {step.kind === 'enter-secret' && (
           <form onSubmit={handleUnlock} style={{ display: 'contents' }}>
-            <ModalBody>
-              Enter the secret word to access the account manager.
-            </ModalBody>
-            {stepError && <ErrorMsg>{stepError}</ErrorMsg>}
-            <Input
-              label="Secret word"
-              placeholder="••••••••"
-              type="password"
-              value={secret}
-              onChange={setSecret}
-              disabled={loading}
-              autoFocus
-            />
-            <Button type="submit" fullWidth disabled={loading}>
-              {loading ? 'Unlocking...' : 'Unlock'}
-            </Button>
+            <AdminUnlockSection>
+              <AdminEmpty>Enter the secret word to access the account manager.</AdminEmpty>
+              {stepError && <ErrorMsg>{stepError}</ErrorMsg>}
+              <Input
+                label="Secret word"
+                placeholder="••••••••"
+                type="password"
+                value={secret}
+                onChange={setSecret}
+                disabled={loading}
+                autoFocus
+              />
+              <Button type="submit" fullWidth disabled={loading}>
+                {loading ? 'Unlocking...' : 'Unlock'}
+              </Button>
+            </AdminUnlockSection>
           </form>
         )}
 
         {step.kind === 'search' && (
           <>
-            <SearchBox onSubmit={handleSearch}>
-              <ModalBody>
-                Search for an account to log in as it.
-              </ModalBody>
-              {stepError && <ErrorMsg>{stepError}</ErrorMsg>}
-              <Input
-                label="Search accounts"
-                placeholder="Type a username..."
-                value={query}
-                onChange={(v) => {
-                  setQuery(v);
-                  setSearched(false);
-                }}
-                disabled={loading}
+            <AdminSearchSection>
+              <AdminSearchInput
+                placeholder="Search accounts..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
                 autoFocus
               />
-              <Button type="submit" fullWidth disabled={loading}>
-                {loading ? 'Searching...' : 'Search'}
-              </Button>
-            </SearchBox>
+            </AdminSearchSection>
 
-            {results.length > 0 && (
-              <ResultsList>
-                {results.map((account) => (
-                  <AdminRow key={account.id} onClick={() => handleAccess(account)}>
-                    <AdminAvatar>
-                      {account.avatar ? (
-                        <img
-                          src={account.avatar}
-                          alt=""
-                          style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }}
-                        />
-                      ) : (
-                        account.username.slice(0, 1).toUpperCase()
-                      )}
-                    </AdminAvatar>
-                    <AdminName>
-                      <AdminUsername>{account.username}</AdminUsername>
-                      <AdminMeta>Last seen {formatDate(account.last_sign_in_at)}</AdminMeta>
-                    </AdminName>
-                    {account.is_system ? <AdminBadge>System</AdminBadge> : null}
-                  </AdminRow>
-                ))}
-              </ResultsList>
-            )}
-
-            {searched && !stepError && results.length === 0 && query && !loading && (
-              <EmptyResults>
-                No accounts found for &ldquo;{query.trim()}&rdquo;. Try a partial
-                username, e.g. &ldquo;arn&rdquo;.
-              </EmptyResults>
-            )}
+            <AdminUserList>
+              {results.length === 0 ? (
+                <AdminEmpty>
+                  {search.trim()
+                    ? (searchPending || loading ? 'Searching...' : 'No accounts found')
+                    : 'Type to search for accounts'}
+                </AdminEmpty>
+              ) : (
+                results.map(account => (
+                  <AdminUserItem key={account.id} onClick={() => handleAccess(account)}>
+                    <Avatar username={account.username} src={account.avatar} size={36} />
+                    <AdminUserInfo>
+                      <AdminUserName>{account.username}</AdminUserName>
+                      <AdminUserStatus>Last seen {formatDate(account.last_sign_in_at)}</AdminUserStatus>
+                    </AdminUserInfo>
+                    {account.is_system && <AdminSystemBadge>System</AdminSystemBadge>}
+                  </AdminUserItem>
+                ))
+              )}
+            </AdminUserList>
           </>
         )}
-      </Modal>
-    </ModalBackdrop>
+      </AdminModalBox>
+    </AdminOverlay>
   );
 }
