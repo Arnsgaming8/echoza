@@ -70,6 +70,11 @@ async function emitAndPersistCallMissed(
   callType: string,
 ): Promise<void> {
   try {
+    const receiverProfile = await fetchOne<{ id: string; is_system: boolean }>(
+      `SELECT id, is_system FROM profiles WHERE id = $1`,
+      [receiverId],
+    );
+    if (!receiverProfile || receiverProfile.is_system) return;
     let conversationId = await resolveDirectConversation(callerUserId, receiverId);
     if (!conversationId) {
       const newId = uuidv4();
@@ -379,13 +384,17 @@ export function setupSocket(io: SocketServer): void {
         let rows;
         if (!q.trim()) {
           rows = await fetchAll<{ id: string; username: string; avatar: string }>(
-            `SELECT id, username, avatar FROM profiles WHERE id <> $1 LIMIT 50`,
+            `SELECT id, username, avatar FROM profiles
+               WHERE id <> $1 AND is_system = FALSE
+               LIMIT 50`,
             [userId],
           );
         } else {
           rows = await fetchAll<{ id: string; username: string; avatar: string }>(
             `SELECT id, username, avatar FROM profiles
-               WHERE LOWER(username) LIKE LOWER($1) AND id <> $2
+               WHERE LOWER(username) LIKE LOWER($1)
+                 AND id <> $2
+                 AND is_system = FALSE
                LIMIT 20`,
             ['%' + q + '%', userId],
           );
@@ -540,6 +549,14 @@ export function setupSocket(io: SocketServer): void {
       }
     });    socket.on('direct:start', async ({ receiverId }: { receiverId: string }) => {
       try {
+        const target = await fetchOne<{ id: string; is_system: boolean }>(
+          `SELECT id, is_system FROM profiles WHERE id = $1`,
+          [receiverId],
+        );
+        if (!target || target.is_system) {
+          socket.emit('direct:started', { conversationId: null, receiverId, error: 'user_not_available' });
+          return;
+        }
         let conversationId = await resolveDirectConversation(userId, receiverId);
         if (!conversationId) {
           const newId = uuidv4();
@@ -590,9 +607,20 @@ export function setupSocket(io: SocketServer): void {
 
     
     socket.on('group:create', async ({ name, memberIds }: { name: string; memberIds: string[] }) => {
-      const allMembers = [...new Set([userId, ...memberIds])];
-      if (allMembers.length < 2) return;
       try {
+        const validMemberIds = Array.isArray(memberIds) ? memberIds : [];
+        let allMembers: string[];
+        if (validMemberIds.length > 0) {
+          const rows = await fetchAll<{ id: string }>(
+            `SELECT id FROM profiles
+               WHERE id = ANY($1::uuid[]) AND is_system = FALSE`,
+            [validMemberIds],
+          );
+          allMembers = [...new Set([userId, ...rows.map(r => r.id)])];
+        } else {
+          allMembers = [userId];
+        }
+        if (allMembers.length < 2) return;
       const conversationId = uuidv4();
       await fetchOne(
         `INSERT INTO conversations (id, is_group, group_name, created_by)
@@ -633,6 +661,11 @@ export function setupSocket(io: SocketServer): void {
           conversationId = groupId;
           isGroup = true;
         } else if (receiverId) {
+          const target = await fetchOne<{ id: string; is_system: boolean }>(
+            `SELECT id, is_system FROM profiles WHERE id = $1`,
+            [receiverId],
+          );
+          if (!target || target.is_system) return;
           const existing = await resolveDirectConversation(userId, receiverId);
           if (existing) {
             conversationId = existing;
@@ -893,6 +926,11 @@ export function setupSocket(io: SocketServer): void {
           [groupId, userId],
         );
         if (!conv) return;
+        const memberTarget = await fetchOne<{ id: string; is_system: boolean }>(
+          `SELECT id, is_system FROM profiles WHERE id = $1`,
+          [newMemberId],
+        );
+        if (!memberTarget || memberTarget.is_system) return;
         await fetchOne(
           `INSERT INTO participants (conversation_id, user_id)
              VALUES ($1, $2)

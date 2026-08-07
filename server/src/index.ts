@@ -91,7 +91,7 @@ async function main() {
   app.get('/api/debug-db', async (_req, res) => {
     try {
       const version = await fetchOne<{ server_version: string }>(`SHOW server_version`);
-      const profiles = await fetchAll(`SELECT id, username FROM profiles`);
+      const profiles = await fetchAll(`SELECT id, username FROM profiles WHERE is_system = FALSE`);
       const convCount = await fetchOne<{ c: string }>(`SELECT COUNT(*)::text AS c FROM conversations`);
       const indexList = await fetchAll(/* sql */ `
         SELECT schemaname, tablename, indexname
