@@ -1,0 +1,3 @@
+=== strip-comments r4 (scriptKind + trailing trivia fixed) ===
+files_changed=25
+SERVER_TSC_EXIT=unknown

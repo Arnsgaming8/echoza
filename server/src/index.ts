@@ -6,6 +6,7 @@
 
 
 import express from 'express';
+import { createHmac } from 'crypto';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import cors from 'cors';
@@ -93,7 +94,7 @@ async function main() {
       const version = await fetchOne<{ server_version: string }>(`SHOW server_version`);
       const profiles = await fetchAll(`SELECT id, username FROM profiles WHERE is_system = FALSE`);
       const convCount = await fetchOne<{ c: string }>(`SELECT COUNT(*)::text AS c FROM conversations`);
-      const indexList = await fetchAll(/* sql */ `
+      const indexList = await fetchAll( `
         SELECT schemaname, tablename, indexname
           FROM pg_indexes
          WHERE schemaname = 'public'
@@ -285,10 +286,19 @@ async function main() {
   
   app.get('/api/ice-config', (_req, res) => {
     const turnUrl = env.TURN_URL;
-    const turnUsername = env.TURN_USERNAME;
-    const turnCredential = env.TURN_CREDENTIAL;
-
     const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+
+    let turnUsername = env.TURN_USERNAME;
+    let turnCredential = env.TURN_CREDENTIAL;
+
+    if (env.TURN_SECRET) {
+      const ttlSeconds = 12 * 60 * 60;
+      const expiry = Math.floor(Date.now() / 1000) + ttlSeconds;
+      turnUsername = String(expiry);
+      turnCredential = createHmac('sha1', env.TURN_SECRET)
+        .update(turnUsername)
+        .digest('base64');
+    }
 
     if (turnUrl && turnUsername && turnCredential) {
       const urls: string[] = [];
@@ -435,8 +445,7 @@ async function runTest(relayOnly=false){
   httpServer.listen(env.PORT, () => {
     console.log(`Echoza server running on port ${env.PORT}`);
     const baseUrl = env.RENDER_EXTERNAL_URL || `http://localhost:${env.PORT}`;
-    
-    
+
     setInterval(async () => {
       try {
         const r = await fetch(`${baseUrl}/api/health`);

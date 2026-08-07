@@ -4,16 +4,6 @@ dist/
 *.db
 *.sqlite
 turn/*.log
-
-# Local environment / secrets. NEVER commit.
-# Belt-and-suspenders:
-#   (a) explicit anchored paths for the dirs we KNOW have env files
-#   (b) basename-anywhere patterns: `.env`
-#   (c) depth-agnostic globstar: `**/.env` (works on git >= 1.8.2)
-#   (d) slash-anchored basename patterns: `/*.env` matches one level deep,
-#       `**/*.env` matches any depth.
-# Some Windows/git combos have historically skipped (b) and (c) for nested
-# files, so (a) is what actually does the work; the rest are defensive.
 /server/.env
 /server/.env.*
 /client/.env

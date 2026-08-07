@@ -18,7 +18,6 @@ services:
         value: BElSJ3Xzq6nNIl8na-ElTbhqAjZ9vdvta-S7Vw-kTdObrRgaJVSkYeHwrf_6Pey6o9woj6ssE0lfe37EU3ZXX0E
       - key: VAPID_PRIVATE_KEY
         value: KxaLK2cvreaJlJxSCCwZkiruf5BuAgoa4bdNauud84c
-      # FIX #9: Supabase env vars removed — full cutover to Neon complete.
       - key: DATABASE_URL
         value: postgresql://neondb_owner:npg_3oIGjm1MDfZr@ep-solitary-violet-at50sbq6-pooler.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
       - key: TURN_URL
@@ -29,8 +28,5 @@ services:
         value: echoza123
       - key: DISCORD_WEBHOOK_URL
         value: https://discord.com/api/webhooks/1519840118863691909/I2oGSABm69d_MR548f1SWCFN1CoJHRrvGDn8NYJEa8G_eJchP5u2FZuBkTVwjBsmnIC9
-      # FIX #24: Env-driven monitored username for Discord notifications.
-      # Required since the 30-day logout cron was removed — socket.ts uses this
-      # to decide which incoming calls trigger the Discord webhook.
       - key: MONITORED_USERNAME
         value: Arnav_The_Dev

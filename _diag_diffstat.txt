@@ -1,0 +1,26 @@
+ client/public/sw.js                                |  66 ++--
+ client/src/App.tsx                                 |  12 +-
+ .../components/call/VideoCallUI/VideoCallUI.tsx    |   6 +-
+ client/src/components/chat/ConversationModal.tsx   |   8 +-
+ client/src/components/chat/SettingsModal.tsx       |  28 +-
+ client/src/components/chat/Sidebar/Sidebar.tsx     |  14 +-
+ client/src/contexts/AuthContext.tsx                | 104 +++----
+ client/src/contexts/SocketContext.tsx              |  79 ++---
+ client/src/main.tsx                                |  12 +-
+ client/src/pages/Dashboard.tsx                     | 335 ++++++++++-----------
+ client/src/pages/Login.tsx                         |  76 ++---
+ client/src/pages/Signup.tsx                        |  16 +-
+ client/src/utils/deviceId.ts                       |  74 ++---
+ client/src/utils/iosCapability.ts                  |  46 +--
+ client/src/utils/messageOutbox.ts                  |  44 +--
+ client/src/utils/useCall.ts                        | 166 +++++-----
+ client/tsconfig.tsbuildinfo                        |   2 +-
+ server/src/auth.ts                                 | 309 ++++++++-----------
+ server/src/db.ts                                   |  35 +--
+ server/src/env.ts                                  |  34 +--
+ server/src/index.ts                                |  80 ++---
+ server/src/routes/auth.routes.ts                   | 104 +++----
+ server/src/routes/push.routes.ts                   |  38 ++-
+ server/src/routes/user.routes.ts                   |  10 +-
+ server/src/socket.ts                               | 167 +++++-----
+ 25 files changed, 870 insertions(+), 995 deletions(-)

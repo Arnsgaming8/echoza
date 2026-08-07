@@ -253,7 +253,7 @@ export default function HostPairPanel({ onBack }: HostPairPanelProps) {
       }
     });
 
-    sock.on('pair:completed', () => { /* host emits pair:result, not pair:completed */ });
+    sock.on('pair:completed', () => {});
 
     sock.on('connect_error', (err) => {
       if (cancelledRef.current) return;

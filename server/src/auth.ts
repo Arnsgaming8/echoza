@@ -497,7 +497,7 @@ export async function startForgotPassword(
     [nonce, profile.id],
   );
 
-  void userAgent; // currently unused — kept for future device-management UI
+  void userAgent; 
 
   const challenge = jwt.sign(
     {

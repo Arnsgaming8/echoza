@@ -40,6 +40,7 @@ export const env = {
   TURN_URL: optionalString('TURN_URL'),
   TURN_USERNAME: optionalString('TURN_USERNAME'),
   TURN_CREDENTIAL: optionalString('TURN_CREDENTIAL'),
+  TURN_SECRET: optionalString('TURN_SECRET'),
   TURN_TLS_URL: optionalString('TURN_TLS_URL'),
 
   MONITORED_USERNAME: optionalString('MONITORED_USERNAME'),
@@ -59,6 +60,7 @@ export function logEnvSanity(): void {
     'TURN_URL',
     'TURN_USERNAME',
     'TURN_CREDENTIAL',
+    'TURN_SECRET',
     'TURN_TLS_URL',
   ] as const) {
     if (env[k]) set.push(k);

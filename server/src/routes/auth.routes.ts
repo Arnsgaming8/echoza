@@ -180,7 +180,7 @@ router.post('/delete-account', async (req: Request, res: Response) => {
     try {
       await revokeRefreshToken(token);
     } catch {
-      /* token was an access token, not refresh — nothing to revoke */
+      
     }
     res.json({ success: true });
   } catch (err: any) {

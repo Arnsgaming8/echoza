@@ -53,7 +53,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       
       
       
-      setSelfOnline(true); // optimistic; refined by online-users below
+      setSelfOnline(true); 
       setSocket(newSocket);
       newSocket.emit('presence:heartbeat', {
         hidden: typeof document !== 'undefined' && document.hidden,

@@ -4,7 +4,7 @@ import { fetchAll } from '../db.js';
 
 const router = Router();
 
-// ── /me (duplicate of /api/auth/me — kept for client backwards-compat) ──
+
 router.get('/me', async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -28,10 +28,10 @@ router.get('/me', async (req: Request, res: Response) => {
   res.status(404).json({ error: 'User not found' });
 });
 
-// ── /search ──────────────────────────────────────────────────────────────
-// Case-insensitive username search. Echoza usernames are 3-20 letters,
-// no spaces — but users type partial matches. LOWER() on both sides hits
-// the idx_profiles_username_lower index.
+
+
+
+
 router.get('/search', async (req: Request, res: Response) => {
   const { q } = req.query;
   if (!q || typeof q !== 'string') {

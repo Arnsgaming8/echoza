@@ -274,7 +274,7 @@ export default function Dashboard() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
-  const [conversationsLoaded, setConversationsLoaded] = useState(true); // Always show UI immediately
+  const [conversationsLoaded, setConversationsLoaded] = useState(true);
   const [activeChat, setActiveChat] = useState<string | null>(null);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);

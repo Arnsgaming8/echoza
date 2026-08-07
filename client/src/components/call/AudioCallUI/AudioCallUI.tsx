@@ -385,13 +385,7 @@ export default function AudioCallUI({ contact, onEnd, socket, user, direction, i
 
       {callStatus === 'ringing' ? (
         <>
-          {/* Ringing ACK arrives from the server within ~50ms. Switch the
-              caller wording so they know whether the receiver's Echoza tab
-              is reachable vs the call is going out as a push notification. */}
           <StatusText>
-            {/* server's call:ringing ACK arrives within ~50ms but null is
-                the pre-ACK state; telling the user 'Ringing…' before we
-                actually know that would be a lie. */}
             {receiverReachable === true
               ? `Ringing ${contact.username}…`
               : receiverReachable === false

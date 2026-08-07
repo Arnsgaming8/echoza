@@ -1,0 +1,6 @@
+PRE counts:        .ts=  .tsx=  .js=  .mjs=
+POST counts (any slashes remaining): .ts=496  .tsx=315  .js=39  .mjs=0
+SERVER_TSC_EXIT=1
+CLIENT_TSC_EXIT=0
+VITE_EXIT=1
+diff_stat_lines=2

@@ -14,7 +14,7 @@ if (storedVersion !== STORAGE_VERSION) {
   try {
     localStorage.removeItem('echoza-token');
     localStorage.removeItem('echoza-refresh-token');
-  } catch { /* ignore */ }
+  } catch {  }
   if ('serviceWorker' in navigator) {
     caches.keys().then(names => names.forEach(n => caches.delete(n)));
     navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));

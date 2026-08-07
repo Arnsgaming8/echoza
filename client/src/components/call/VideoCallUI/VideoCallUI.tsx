@@ -546,13 +546,7 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
               <CameraOffInitial>{contact.username[0].toUpperCase()}</CameraOffInitial>
             )}
           </CameraOffAvatar>
-          {/* Ringing ACK arrives from the server within ~50ms. Swap wording
-              so the caller UI distinguishes 'Ringing…' (receiver's Echoza
-              tab is reachable) from 'Notifying…' (only via push). */}
           <CallingText>
-            {/* server's call:ringing ACK arrives within ~50ms but null is
-                the pre-ACK state; telling the user 'Ringing…' before we
-                actually know that would be a lie. */}
             {receiverReachable === true
               ? `Ringing ${contact.username}…`
               : receiverReachable === false
@@ -626,9 +620,6 @@ export default function VideoCallUI({ contact, onEnd, socket, user, direction, i
         </>
       )}
 
-      {/* FIX #2: Guard on getVideoTracks().length > 0 — prevents empty
-          black tile when video-call falls back to audio-only after
-          setupLocalMedia(attempt=2) succeeds with no video track. */}
       {!ended && isCameraOn && localStream && localStream.getVideoTracks().length > 0 && (
         <LocalVideo
           ref={localVideoRef}
