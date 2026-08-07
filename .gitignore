@@ -23,3 +23,6 @@ turn/*.log
 /**/*.env.local
 
 supabase/.temp/
+
+ssh-key-2026-07-19.key
+ssh-key-2026-07-19.key.pub
