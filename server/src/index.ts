@@ -287,6 +287,7 @@ async function main() {
   app.get('/api/ice-config', (_req, res) => {
     const turnUrl = env.TURN_URL;
     const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+    res.setHeader('Cache-Control', 'no-store');
 
     let turnUsername = env.TURN_USERNAME;
     let turnCredential = env.TURN_CREDENTIAL;
