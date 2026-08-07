@@ -267,7 +267,8 @@ export async function sendPushNotification(
         : (typeof err?.status === 'number' ? err.status : undefined);
       const errorBody = err?.body || err?.message || String(err);
       console.error('[push] send failed endpoint=', sub.endpoint.slice(0, 60), 'statusCode=', statusCode, 'err=', String(errorBody).slice(0, 200));
-      if (statusCode === 404 || statusCode === 410) {
+      const bodyStr = String(errorBody);
+      if (statusCode === 404 || statusCode === 410 || (statusCode === 400 && /vapidpkhashmismatch/i.test(bodyStr))) {
         await fetchOne(
           `DELETE FROM push_subscriptions WHERE endpoint = $1`,
           [sub.endpoint],
