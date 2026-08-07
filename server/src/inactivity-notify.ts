@@ -20,7 +20,7 @@ export async function runInactivityNotifySweep(): Promise<number> {
         )
         AND (
           p.last_inactive_notified_at IS NULL
-          OR p.last_inactive_notified_at < COALESCE(p.last_sign_in_at, p.created_at)
+          OR p.last_inactive_notified_at < NOW() - ($1 || ' days')::interval
         )`,
     [String(days)],
   );
