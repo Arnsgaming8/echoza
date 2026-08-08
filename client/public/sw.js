@@ -1,4 +1,4 @@
-const CACHE = 'echoza-v1';
+const CACHE = 'echoza-v2';
 const STATIC_ASSETS = ['/vite.svg'];
 let HEARTBEAT_TOKEN = '';
 let HEARTBEAT_INTERVAL = null;
@@ -13,7 +13,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(clients.claim());
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
+    await clients.claim();
+  })());
 });
 
 let HEARTBEAT_TICK_COUNT = 0;

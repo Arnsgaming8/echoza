@@ -1064,6 +1064,10 @@ export function setupSocket(io: SocketServer): void {
       emitToUser(io, receiverId, 'call:answer', { from: userId, sdp });
     });
 
+    socket.on('call:renegotiate', ({ receiverId, sdp }: { receiverId: string; sdp: string }) => {
+      emitToUser(io, receiverId, 'call:renegotiate', { from: userId, sdp });
+    });
+
     socket.on('call:ice-candidate', ({ receiverId, candidate }: { receiverId: string; candidate: any }) => {
       emitToUser(io, receiverId, 'call:ice-candidate', { from: userId, candidate });
     });

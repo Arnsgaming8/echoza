@@ -10,15 +10,18 @@ async function getIceConfig(): Promise<RTCConfiguration> {
   if (cachedIceConfig && Date.now() - cachedIceConfig.ts < ICE_CACHE_TTL) {
     return cachedIceConfig.config;
   }
-  try {
-    const res = await fetch(apiUrl('/api/ice-config'), { signal: AbortSignal.timeout(5000) });
-    const data = await res.json();
-    if (data?.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-      const config: RTCConfiguration = { iceServers: data.iceServers };
-      cachedIceConfig = { config, ts: Date.now() };
-      return config;
-    }
-  } catch {}
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(apiUrl('/api/ice-config'), { signal: AbortSignal.timeout(5000) });
+      const data = await res.json();
+      if (data?.iceServers && Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        const config: RTCConfiguration = { iceServers: data.iceServers };
+        cachedIceConfig = { config, ts: Date.now() };
+        return config;
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 300));
+  }
   return { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
 }
 
@@ -362,13 +365,58 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
         setCallStatus('connected');
       };
 
+      let iceRestartCount = 0;
+      const MAX_ICE_RESTARTS = 2;
+      let disconnectedTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const attemptIceRestart = () => {
+        if (missedRef.current) return;
+        const pcNow = pcRef.current;
+        if (!pcNow || !pcNow.remoteDescription) return;
+        if (iceRestartCount >= MAX_ICE_RESTARTS) {
+          failCall(new Error('Network path could not be established'));
+          return;
+        }
+        iceRestartCount++;
+        try {
+          if (typeof pcNow.restartIce !== 'function') {
+            failCall(new Error('Network path could not be established'));
+            return;
+          }
+          pcNow.restartIce();
+          pcNow.createOffer().then(offer => pcNow.setLocalDescription(offer)).then(() => {
+            const live = pcRef.current;
+            if (!live?.localDescription?.sdp) return;
+            socket.emit('call:renegotiate', {
+              receiverId: contact.id,
+              sdp: live.localDescription.sdp,
+            });
+          }).catch(() => {});
+        } catch {}
+      };
+
       pc.onicecandidate = handleIceCandidate;
       pc.ontrack = handleTrack;      pc.oniceconnectionstatechange = () => {
-        if (pc.iceConnectionState === 'connected') {
+        const state = pc.iceConnectionState;
+        if (state === 'connected' || state === 'completed') {
           stopRingtone();
+          if (disconnectedTimer) { clearTimeout(disconnectedTimer); disconnectedTimer = null; }
+          return;
         }
-        if (pc.iceConnectionState === 'failed') {
-          failCall(new Error('Network path could not be established'));
+        if (state === 'disconnected') {
+          if (!disconnectedTimer) {
+            disconnectedTimer = setTimeout(() => {
+              disconnectedTimer = null;
+              if (pcRef.current?.iceConnectionState === 'disconnected' || pcRef.current?.iceConnectionState === 'failed') {
+                attemptIceRestart();
+              }
+            }, 4000);
+          }
+          return;
+        }
+        if (state === 'failed') {
+          if (disconnectedTimer) { clearTimeout(disconnectedTimer); disconnectedTimer = null; }
+          attemptIceRestart();
         }
       };
 
@@ -449,7 +497,6 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
               flushPendingIceCandidatesRef.current?.();
             })
             .catch((err: any) => console.warn('[useCall] setRemoteDescription error:', err?.message || err));
-          socket.off('call:answer', onAnswer);
         };
         socket.on('call:answer', onAnswer);
 
@@ -527,8 +574,27 @@ export function useCall({ socket, contact, user, direction, initialSdp, type, on
       };
       socket.on('call:ice-candidate', onIce);
 
+      const onRenegotiate = ({ from, sdp }: { from: string; sdp: string }) => {
+        if (from !== contact.id) return;
+        const pcNow = pcRef.current;
+        if (!pcNow) return;
+        pcNow.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }))
+          .then(() => {
+            flushPendingIceCandidatesRef.current?.();
+            return pcNow.createAnswer();
+          })
+          .then(answer => pcNow.setLocalDescription(answer))
+          .then(() => {
+            flushPendingIceCandidatesRef.current?.();
+            socket.emit('call:answer', { receiverId: contact.id, sdp: pcRef.current?.localDescription?.sdp || '' });
+          })
+          .catch(() => {});
+      };
+      socket.on('call:renegotiate', onRenegotiate);
+
       cleanupRef.current = () => {
         socket.off('call:ice-candidate', onIce);
+        socket.off('call:renegotiate', onRenegotiate);
       };
     };
 
